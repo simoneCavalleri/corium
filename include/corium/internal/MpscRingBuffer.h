@@ -61,9 +61,9 @@ public:
             }
         }
 
-        bool wasEmpty = (pos == _dequeuePos.load(std::memory_order_relaxed));
         cell->data = std::move(value);
         cell->sequence.store(pos + 1, std::memory_order_release);
+        bool wasEmpty = (pos == _dequeuePos.load(std::memory_order_acquire));
         return {true, wasEmpty};
     }
 
@@ -81,7 +81,7 @@ public:
         intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
 
         if (diff == 0) {
-            _dequeuePos.store(pos + 1, std::memory_order_relaxed);
+            _dequeuePos.store(pos + 1, std::memory_order_release);
             value = std::move(cell->data);
             cell->sequence.store(pos + _mask + 1, std::memory_order_release);
             return true;
