@@ -137,3 +137,20 @@ TEST(RuntimeTest, StateMachineTransitions) {
     runtime.shutdown();
     EXPECT_EQ(runtime.state(), Runtime::State::Terminated);
 }
+
+TEST(RuntimeTest, BuilderOrderIndependence) {
+    using GameEvents = std::variant<QuitEvent, TickEvent>;
+
+    using OrderA = RuntimeBuilder<>
+        ::WithCapacity<4096>
+        ::WithEvents<GameEvents>
+        ::Build;
+
+    using OrderB = RuntimeBuilder<>
+        ::WithEvents<GameEvents>
+        ::WithCapacity<4096>
+        ::Build;
+
+    static_assert(std::is_same_v<OrderA, OrderB>, "RuntimeBuilder must be order-independent!");
+    EXPECT_TRUE((std::is_same_v<OrderA, OrderB>));
+}
