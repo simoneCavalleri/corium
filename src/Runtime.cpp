@@ -124,6 +124,11 @@ bool Runtime::quitRequested() const
     return _quitRequested || _state == State::Terminated;
 }
 
+void Runtime::setOnEventsAvailable(std::function<void()> callback)
+{
+    _eventBus.setOnEventsAvailable(std::move(callback));
+}
+
 
 IEventSink& Runtime::eventSink()
 {

@@ -32,6 +32,7 @@ public:
     void shutdown();
     void requestQuit();
     bool quitRequested() const;
+    void setOnEventsAvailable(std::function<void()> callback);
 
     IEventSink& eventSink();
 

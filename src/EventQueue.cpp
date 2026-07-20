@@ -4,9 +4,25 @@
 
 namespace corium {
 
-void EventQueue::pushEvent(Event event) {
+void EventQueue::setOnEventsAvailable(std::function<void()> callback) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _events.push(std::move(event));
+    _onEventsAvailable = std::move(callback);
+}
+
+void EventQueue::pushEvent(Event event) {
+    std::function<void()> callbackToInvoke;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        bool wasEmpty = _events.empty();
+        _events.push(std::move(event));
+        if (wasEmpty && _onEventsAvailable) {
+            callbackToInvoke = _onEventsAvailable;
+        }
+    }
+
+    if (callbackToInvoke) {
+        callbackToInvoke();
+    }
 }
 
 std::optional<Event> EventQueue::tryPopEvent() {

@@ -16,6 +16,10 @@ public:
 
     void seal();
 
+    void setOnEventsAvailable(std::function<void()> callback) {
+        _eventQueue.setOnEventsAvailable(std::move(callback));
+    }
+
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
         _reactor.registerHandler<EventType>(std::forward<Handler>(handler));
