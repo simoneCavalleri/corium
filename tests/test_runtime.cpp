@@ -105,3 +105,22 @@ TEST(RuntimeTest, PolicyRuntimes) {
     EXPECT_TRUE(spinRuntime.quitRequested());
     spinRuntime.shutdown();
 }
+
+class ThrowingApp : public AppCore {
+protected:
+    void onInitialize() override {}
+    void onShutdown() override {
+        throw std::runtime_error("Simulated user exception in onShutdown()");
+    }
+};
+
+TEST(RuntimeTest, ExceptionSafeShutdown) {
+    Runtime runtime;
+    ThrowingApp app;
+
+    runtime.initialize(app);
+
+    // Calling shutdown() must not throw even if onShutdown() throws an exception
+    EXPECT_NO_THROW(runtime.shutdown());
+    EXPECT_TRUE(runtime.quitRequested());
+}

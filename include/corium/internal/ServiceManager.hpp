@@ -51,7 +51,11 @@ public:
             IBackgroundService* rawService = service.get();
 
             _threads.emplace_back([rawService](std::stop_token stopToken) {
-                rawService->run(stopToken);
+                try {
+                    rawService->run(stopToken);
+                } catch (...) {
+                    // Prevent uncaught worker thread exceptions from terminating the process
+                }
             });
         }
 
@@ -59,23 +63,31 @@ public:
     }
 
     /// @brief Request graceful stop of background service threads via stop_token.
-    void stop()
+    void stop() noexcept
     {
         if (_state != State::Started) {
             return;
         }
 
         for (auto& thread : _threads) {
-            thread.request_stop();
+            try {
+                thread.request_stop();
+            } catch (...) {
+                // Ignore errors during stop request
+            }
         }
 
         _state = State::Stopped;
     }
 
-    /// @brief Join background service jthreads.
-    void join()
+    /// @brief Join background service jthreads cleanly.
+    void join() noexcept
     {
-        _threads.clear();
+        try {
+            _threads.clear();
+        } catch (...) {
+            // Ignore errors during thread join
+        }
     }
 
 private:

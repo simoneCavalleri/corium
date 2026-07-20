@@ -165,18 +165,26 @@ public:
         return waitAndPump(std::chrono::hours(24 * 365));
     }
 
-    /// @brief Stop background services and shut down application cleanly.
-    void shutdown()
+    /// @brief Stop background services and shut down application cleanly (exception-safe, noexcept).
+    void shutdown() noexcept
     {
         if (_state.load(std::memory_order_acquire) == State::Terminated) {
             return;
         }
 
-        _serviceManager.stop();
-        _serviceManager.join();
+        try {
+            _serviceManager.stop();
+            _serviceManager.join();
+        } catch (...) {
+            // Guarantee service cleanup exceptions are swallowed during shutdown
+        }
 
         if (_application != nullptr) {
-            _application->shutdown();
+            try {
+                _application->shutdown();
+            } catch (...) {
+                // Guarantee user shutdown exceptions do not escape or prevent state cleanup
+            }
             _application = nullptr;
         }
 
