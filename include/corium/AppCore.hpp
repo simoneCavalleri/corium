@@ -12,8 +12,7 @@ namespace corium {
 template <
     typename EventVariant,
     typename QueuePolicy,
-    typename SignalPolicy,
-    typename DispatchPolicy
+    typename SignalPolicy
 >
 class BasicRuntime;
 
@@ -142,7 +141,7 @@ private:
         _context = context;
     }
 
-    template <typename EV, typename QP, typename SP, typename DP>
+    template <typename EV, typename QP, typename SP>
     friend class BasicRuntime;
 };
 

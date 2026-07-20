@@ -126,15 +126,11 @@ public:
     /// @brief Signal that events are available.
     void signal()
     {
-        std::function<void()> cb;
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _hasEvents = true;
-            cb = _callback;
-        }
+        std::lock_guard<std::mutex> lock(_mutex);
+        _hasEvents = true;
         _cv.notify_one();
-        if (cb) {
-            cb();
+        if (_callback) {
+            _callback();
         }
     }
 
@@ -166,26 +162,37 @@ public:
         _userCallback = std::move(callback);
     }
 
-    /// @brief Signal counter increase and notify waiting thread via std::atomic::notify_one().
+    /// @brief Signal that events are available via atomic flag and notify.
     void signal()
     {
-        _counter.fetch_add(1, std::memory_order_release);
-        _counter.notify_one();
+        _flag.store(true, std::memory_order_release);
+        _flag.notify_one();
         if (_userCallback) {
             _userCallback();
         }
     }
 
-    /// @brief Wait until counter value changes (C++20 std::atomic::wait).
+    /// @brief Wait until flag is set or timeout expires.
+    /// Uses polling with yield since std::atomic::wait() has no timeout overload in C++20.
     template <typename Rep, typename Period>
-    void wait_for(const std::chrono::duration<Rep, Period>&)
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
-        uint32_t current = _counter.load(std::memory_order_acquire);
-        _counter.wait(current);
+        if (_flag.load(std::memory_order_acquire)) {
+            _flag.store(false, std::memory_order_relaxed);
+            return;
+        }
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!_flag.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return;
+            }
+            std::this_thread::yield();
+        }
+        _flag.store(false, std::memory_order_relaxed);
     }
 
 private:
-    std::atomic<uint32_t> _counter{0};
+    std::atomic<bool> _flag{false};
     std::function<void()> _userCallback;
 };
 
@@ -279,38 +286,5 @@ private:
 };
 #endif
 
-// =============================================================================
-// 3. Dispatch Policies
-// =============================================================================
-
-/// @brief Dispatch Policy wrapping Static Reactor with direct array lookup and zero type erasure.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
-class StaticReactorPolicy {
-public:
-    using EventType = EventVariant;
-
-    /// @brief Register handler for concrete event type.
-    template <typename EventTypeSingle, typename Handler>
-    void registerHandler(Handler&& handler)
-    {
-        _reactor.template registerHandler<EventTypeSingle>(std::forward<Handler>(handler));
-    }
-
-    /// @brief Dispatch event via static array indexing and FastDelegate.
-    void dispatch(const EventVariant& event)
-    {
-        _reactor.dispatch(event);
-    }
-
-    /// @brief Seal reactor handlers.
-    void seal()
-    {
-        _reactor.seal();
-    }
-
-private:
-    ReactorT<EventVariant> _reactor;
-};
-
 } // namespace corium
+

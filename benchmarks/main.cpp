@@ -61,19 +61,24 @@ BENCHMARK(BM_MpscRingBufferPush)->Threads(1)->Threads(2)->Threads(4)->Threads(8)
 // =============================================================================
 
 static void BM_MpscRingBufferPop(benchmark::State& state) {
+    static constexpr size_t BatchSize = 1024;
     MpscRingBuffer<TickEvent, 65536> ringBuffer;
     TickEvent event{0.001};
 
     for (auto _ : state) {
         state.PauseTiming();
-        ringBuffer.tryPush(TickEvent{0.001});
+        for (size_t i = 0; i < BatchSize; ++i) {
+            ringBuffer.tryPush(TickEvent{0.001});
+        }
         state.ResumeTiming();
 
-        bool popped = ringBuffer.tryPop(event);
-        benchmark::DoNotOptimize(popped);
+        for (size_t i = 0; i < BatchSize; ++i) {
+            bool popped = ringBuffer.tryPop(event);
+            benchmark::DoNotOptimize(popped);
+        }
     }
 
-    state.SetItemsProcessed(state.iterations());
+    state.SetItemsProcessed(state.iterations() * BatchSize);
 }
 BENCHMARK(BM_MpscRingBufferPop);
 

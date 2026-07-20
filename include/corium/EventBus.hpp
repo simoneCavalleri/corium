@@ -11,7 +11,8 @@
 
 namespace corium {
 
-/// @brief Non-templated abstract base class for event bus routing and dispatching.
+/// @brief Abstract base class for event bus routing and dispatching.
+/// Provides the interface for processing events, sealing handlers, and registering handlers.
 /// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class EventBusBaseT : public IEventSinkT<EventVariant> {
@@ -38,7 +39,7 @@ public:
     /// @param handler Callback to invoke when event occurs.
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
-        _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+        reactor().template registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
     /// @brief Register an event handler with automatic event type deduction.
@@ -47,11 +48,12 @@ public:
     template <typename Handler>
     void registerHandler(Handler&& handler) {
         using EventType = callable_event_type_t<Handler>;
-        _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+        reactor().template registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
 protected:
-    ReactorT<EventVariant> _reactor;
+    /// @brief Access the reactor for handler registration and dispatching.
+    virtual ReactorT<EventVariant>& reactor() = 0;
 };
 
 /// @brief Default EventBusBase alias using DefaultEvents.
@@ -61,12 +63,10 @@ using EventBusBase = EventBusBaseT<DefaultEvents>;
 /// @tparam EventVariant The variant type list of supported events.
 /// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC, blocking queue, etc.).
 /// @tparam SignalPolicy Strategy for thread signaling (callback, futex atomic wait, polling, etc.).
-/// @tparam DispatchPolicy Strategy for event dispatching.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+    typename SignalPolicy = CallbackSignalPolicy
 >
 class BasicEventBus : public EventBusBaseT<EventVariant> {
 public:
@@ -85,7 +85,7 @@ public:
         if (!eventOpt) {
             return false;
         }
-        this->_reactor.dispatch(*eventOpt);
+        _reactor.dispatch(*eventOpt);
         return true;
     }
 
@@ -98,7 +98,7 @@ public:
     /// @brief Seal reactor handlers.
     void seal() override
     {
-        this->_reactor.seal();
+        _reactor.seal();
     }
 
     /// @brief Set callback for event availability when queue transitions to non-empty.
@@ -119,8 +119,16 @@ public:
         return _eventQueue.signalPolicy();
     }
 
+protected:
+    /// @brief Access reactor for base class handler registration.
+    ReactorT<EventVariant>& reactor() override
+    {
+        return _reactor;
+    }
+
 private:
     EventQueue<QueuePolicy, SignalPolicy> _eventQueue;
+    ReactorT<EventVariant> _reactor;
 };
 
 /// @brief Default EventBus alias using DefaultEvents.

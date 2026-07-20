@@ -22,12 +22,10 @@ namespace corium {
 /// @tparam EventVariant The variant type list of supported events.
 /// @tparam QueuePolicy Policy governing event queueing (Lock-free MPSC, Blocking queue, etc.).
 /// @tparam SignalPolicy Policy governing thread notification (Callback, C++20 Futex, Busy-spin polling, Linux EventFd).
-/// @tparam DispatchPolicy Policy governing event dispatching.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+    typename SignalPolicy = CallbackSignalPolicy
 >
 class BasicRuntime {
 public:
@@ -59,7 +57,7 @@ public:
     /// @param application Application instance to initialize.
     void initialize(AppCoreT<EventVariant>& application)
     {
-        if (_state != State::Created) {
+        if (_state.load(std::memory_order_relaxed) != State::Created) {
             throw std::logic_error("Runtime is already initialized or has been shut down.");
         }
 
@@ -84,7 +82,7 @@ public:
             _serviceManager.start();
             servicesStarted = true;
 
-            _state = State::Running;
+            _state.store(State::Running, std::memory_order_release);
 
             _application->initialize();
             appInitialized = true;
@@ -98,7 +96,7 @@ public:
                 _application->shutdown();
             }
             _application = nullptr;
-            _state = State::Terminated;
+            _state.store(State::Terminated, std::memory_order_release);
             throw;
         }
     }
@@ -113,7 +111,7 @@ public:
     /// @param maxEvents Maximum number of events to process in this call.
     void pump(std::size_t maxEvents)
     {
-        if (_state != State::Running) {
+        if (_state.load(std::memory_order_acquire) != State::Running) {
             throw std::logic_error("Runtime::pump() called when runtime is not running.");
         }
 
@@ -122,7 +120,7 @@ public:
         }
 
         std::size_t processed = 0;
-        while (_state == State::Running && !_quitRequested && processed < maxEvents) {
+        while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested && processed < maxEvents) {
             if (!_eventBus.processOne()) {
                 break;
             }
@@ -138,7 +136,7 @@ public:
     template <typename Rep, typename Period>
     std::size_t waitAndPump(const std::chrono::duration<Rep, Period>& timeout)
     {
-        if (_state != State::Running) {
+        if (_state.load(std::memory_order_acquire) != State::Running) {
             throw std::logic_error("Runtime::waitAndPump() called when runtime is not running.");
         }
 
@@ -151,7 +149,7 @@ public:
         }
 
         std::size_t processed = 0;
-        while (_state == State::Running && !_quitRequested) {
+        while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested) {
             if (!_eventBus.processOne()) {
                 break;
             }
@@ -170,7 +168,7 @@ public:
     /// @brief Stop background services and shut down application cleanly.
     void shutdown()
     {
-        if (_state == State::Terminated) {
+        if (_state.load(std::memory_order_acquire) == State::Terminated) {
             return;
         }
 
@@ -182,7 +180,7 @@ public:
             _application = nullptr;
         }
 
-        _state = State::Terminated;
+        _state.store(State::Terminated, std::memory_order_release);
     }
 
     /// @brief Request runtime quit.
@@ -194,7 +192,7 @@ public:
     /// @brief Check if runtime quit has been requested or if runtime terminated.
     [[nodiscard]] bool quitRequested() const
     {
-        return _quitRequested || _state == State::Terminated;
+        return _quitRequested || _state.load(std::memory_order_acquire) == State::Terminated;
     }
 
     /// @brief Set callback triggered when event queue transitions from empty to non-empty (0 -> 1).
@@ -256,7 +254,7 @@ private:
         }
     }
 
-    BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy> _eventBus;
+    BasicEventBus<EventVariant, QueuePolicy, SignalPolicy> _eventBus;
     ServiceContextT<EventVariant> _serviceContext;
 
     ServiceRegistryT<EventVariant> _serviceRegistry;
@@ -264,7 +262,7 @@ private:
 
     AppCoreT<EventVariant>* _application = nullptr;
     std::thread::id _dispatchThreadId;
-    State _state = State::Created;
+    std::atomic<State> _state{State::Created};
     std::atomic<bool> _quitRequested{false};
 };
 
@@ -272,17 +270,15 @@ private:
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+    typename SignalPolicy = CallbackSignalPolicy
 >
-using Runtime = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy>;
+using Runtime = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
 
 /// @brief Fluent compile-time builder for configuring BasicRuntime type aliases.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+    typename SignalPolicy = CallbackSignalPolicy
 >
 struct RuntimeBuilder {
     /// @brief Specify custom event variant list type.
@@ -290,8 +286,7 @@ struct RuntimeBuilder {
     using WithEvents = RuntimeBuilder<
         NewEventVariant,
         BoundedMpscQueuePolicy<NewEventVariant, 1024>,
-        SignalPolicy,
-        StaticReactorPolicy<NewEventVariant>
+        SignalPolicy
     >;
 
     /// @brief Specify custom queue capacity for bounded MPSC queue.
@@ -299,8 +294,7 @@ struct RuntimeBuilder {
     using WithCapacity = RuntimeBuilder<
         EventVariant,
         BoundedMpscQueuePolicy<EventVariant, Capacity>,
-        SignalPolicy,
-        DispatchPolicy
+        SignalPolicy
     >;
 
     /// @brief Specify custom QueuePolicy.
@@ -308,8 +302,7 @@ struct RuntimeBuilder {
     using WithQueuePolicy = RuntimeBuilder<
         EventVariant,
         NewQueuePolicy,
-        SignalPolicy,
-        DispatchPolicy
+        SignalPolicy
     >;
 
     /// @brief Specify custom SignalPolicy.
@@ -317,21 +310,11 @@ struct RuntimeBuilder {
     using WithSignalPolicy = RuntimeBuilder<
         EventVariant,
         QueuePolicy,
-        NewSignalPolicy,
-        DispatchPolicy
-    >;
-
-    /// @brief Specify custom DispatchPolicy.
-    template <typename NewDispatchPolicy>
-    using WithDispatchPolicy = RuntimeBuilder<
-        EventVariant,
-        QueuePolicy,
-        SignalPolicy,
-        NewDispatchPolicy
+        NewSignalPolicy
     >;
 
     /// @brief Complete builder configuration and return BasicRuntime type.
-    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy>;
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
 };
 
 } // namespace corium

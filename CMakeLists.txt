@@ -23,7 +23,7 @@ add_executable(sample_04_policies samples/04_policy_runtimes/main.cpp)
 target_link_libraries(sample_04_policies PRIVATE corium)
 
 # Optional Benchmark Suite Target
-option(CORIUM_BUILD_BENCHMARKS "Build Corium benchmark suite" ON)
+option(CORIUM_BUILD_BENCHMARKS "Build Corium benchmark suite" OFF)
 
 if(CORIUM_BUILD_BENCHMARKS)
     include(FetchContent)
