@@ -1,5 +1,6 @@
 #pragma once
 
+#include "corium/BackgroundService.h"
 #include "corium/IBackgroundService.h"
 #include "corium/ServiceContext.h"
 
@@ -25,7 +26,7 @@ public:
     {
         static_assert(
             std::is_base_of_v<IBackgroundService, ServiceType>,
-            "ServiceType must derive from IService"
+            "ServiceType must derive from IBackgroundService"
         );
 
         auto capturedArgs = std::make_tuple(std::forward<Args>(args)...);

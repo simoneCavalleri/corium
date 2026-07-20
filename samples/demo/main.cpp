@@ -26,19 +26,16 @@ using namespace corium;
 //    It must respect the stop_token to allow graceful shutdown.
 // =============================================================================
 
-class HeartbeatService : public IBackgroundService
+class HeartbeatService : public BackgroundService
 {
 public:
-    explicit HeartbeatService(ServiceContext& context)
-        : _eventSink(context.eventSink)
-    {
-    }
+    using BackgroundService::BackgroundService;
 
     void run(std::stop_token stopToken) override
     {
         while (!stopToken.stop_requested())
         {
-            _eventSink.post(TickEvent{_elapsed});
+            postEvent(TickEvent{_elapsed});
 
             _elapsed += _interval;
 
@@ -48,7 +45,6 @@ public:
     }
 
 private:
-    IEventSink& _eventSink;
     double _elapsed = 0.0;
     double _interval = 1.0;  // seconds
 };
