@@ -21,6 +21,3 @@ target_link_libraries(sample_03_events PRIVATE corium)
 
 add_executable(sample_04_policies samples/04_policy_runtimes/main.cpp)
 target_link_libraries(sample_04_policies PRIVATE corium)
-
-add_executable(corium_demo samples/demo/main.cpp)
-target_link_libraries(corium_demo PRIVATE corium)
