@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "corium/Events.hpp"
+#include "corium/internal/CallableTraits.hpp"
 #include "corium/internal/FastDelegate.hpp"
 #include "corium/internal/VariantIndex.hpp"
 
@@ -45,7 +46,7 @@ public:
     ReactorT(const ReactorT&) = delete;
     ReactorT& operator=(const ReactorT&) = delete;
 
-    /// @brief Register event handler for concrete event type.
+    /// @brief Register event handler for concrete event type with explicit type parameter.
     /// @tparam EventType Event type to handle.
     /// @tparam Handler Callable handler type.
     /// @param handler Callback to invoke when event is dispatched.
@@ -61,6 +62,15 @@ public:
 
         auto* concreteHandlers = static_cast<TypeHandlers<EventType>*>(_handlers[eventIndex].get());
         concreteHandlers->handlers.emplace_back(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register event handler with automatic event type deduction from handler parameter signature.
+    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
+    /// @param handler Callback to invoke when event is dispatched.
+    template <typename Handler>
+    void registerHandler(Handler&& handler) {
+        using EventType = callable_event_type_t<Handler>;
+        registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
     /// @brief Dispatch event via direct O(1) array lookup (zero lock acquisition once sealed).

@@ -7,6 +7,7 @@
 ## 🌟 Key Features
 
 - **Header-Only C++20 Library**: Simply include `#include <corium/corium.hpp>` and add `target_include_directories(app PRIVATE include)`. No static or shared library binaries required.
+- **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
 - **Zero-Allocation Hot Path**: Hot event dispatching operates with 0 dynamic heap allocations using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and **Small Buffer Optimization (SBO)** delegates.
 - **Policy-Based Runtime Design**: Modular compile-time policies for queueing, signaling, and dispatching:
   - `QueuePolicy`: Bounded Lock-Free MPSC, Traditional Blocking Queue.
@@ -21,7 +22,7 @@
 
 ## 🚀 Quick Start
 
-### 1. Minimal Example
+### Minimal Example
 
 ```cpp
 #include <corium/corium.hpp>
@@ -32,7 +33,8 @@ using namespace corium;
 class DemoApp : public AppCore {
 protected:
     void onRegisterHandlers() override {
-        events().registerHandler<TickEvent>([](const TickEvent& event) {
+        // Auto-deduces TickEvent from lambda argument signature
+        on([](const TickEvent& event) {
             std::cout << "Tick received! Elapsed: " << event.deltaTime << "s\n";
         });
     }

@@ -1,10 +1,10 @@
 // =============================================================================
-// Corium Sample 03 — Custom Event Variant List
+// Corium Sample 03 — Custom Event Variant List & Auto-Deduction
 //
 // This example demonstrates:
 //   1. Defining domain-specific event structs (PlayerSpawnEvent, ScoreEvent, etc.).
 //   2. Creating a custom compile-time event list std::variant<MyEvents...>.
-//   3. Subclassing AppCoreT<MyEvents> with custom event types.
+//   3. Subclassing AppCoreT<MyEvents> with auto-deduced event handlers via on(...).
 //   4. Instantiating a custom runtime using RuntimeBuilder<>::WithEvents<MyEvents>::Build.
 // =============================================================================
 
@@ -41,16 +41,16 @@ using GameEvents = std::variant<
     NetworkPacketEvent
 >;
 
-// 3. Subclass AppCoreT using GameEvents
+// 3. Subclass AppCoreT using GameEvents with auto-deduced on(...) handlers
 class GameApp : public AppCoreT<GameEvents> {
 protected:
     void onRegisterHandlers() override {
-        events().registerHandler<PlayerSpawnEvent>([](const PlayerSpawnEvent& e) {
+        on([](const PlayerSpawnEvent& e) {
             std::cout << "[GameApp] Player #" << e.playerId << " ('" << e.name 
                       << "') spawned at (" << e.posX << ", " << e.posY << ")\n";
         });
 
-        events().registerHandler<ScoreChangedEvent>([this](const ScoreChangedEvent& e) {
+        on([this](const ScoreChangedEvent& e) {
             std::cout << "[GameApp] Player #" << e.playerId << " score updated to " << e.newScore << "\n";
             _eventsProcessed++;
             if (_eventsProcessed >= 3) {
@@ -59,7 +59,7 @@ protected:
             }
         });
 
-        events().registerHandler<NetworkPacketEvent>([](const NetworkPacketEvent& e) {
+        on([](const NetworkPacketEvent& e) {
             std::cout << "[GameApp] Network Packet #" << e.packetId << " payload: '" << e.payload << "'\n";
         });
     }

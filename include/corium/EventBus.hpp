@@ -1,6 +1,7 @@
 #pragma once
 
 #include "corium/IEventSink.hpp"
+#include "corium/internal/CallableTraits.hpp"
 #include "corium/internal/EventQueue.hpp"
 #include "corium/internal/Reactor.hpp"
 #include "corium/policies/Policies.hpp"
@@ -28,12 +29,21 @@ public:
     /// @param callback Function to invoke on empty -> non-empty transition.
     virtual void setOnEventsAvailable(std::function<void()> callback) = 0;
 
-    /// @brief Register an event handler for a concrete event type.
+    /// @brief Register an event handler with explicit event type parameter.
     /// @tparam EventType Event type to handle.
     /// @tparam Handler Callable handler type.
     /// @param handler Callback to invoke when event occurs.
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
+        _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler with automatic event type deduction.
+    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
+    /// @param handler Callback to invoke when event occurs.
+    template <typename Handler>
+    void registerHandler(Handler&& handler) {
+        using EventType = callable_event_type_t<Handler>;
         _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
     }
 

@@ -16,7 +16,7 @@ using namespace corium;
 class PolicyDemoApp : public AppCore {
 protected:
     void onRegisterHandlers() override {
-        events().registerHandler<TickEvent>([this](const TickEvent& e) {
+        on([this](const TickEvent& e) {
             _count++;
             std::cout << "   Received Tick #" << _count << " (dt: " << e.deltaTime << "s)\n";
             if (_count >= 3) {

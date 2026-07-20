@@ -3,7 +3,7 @@
 //
 // This example demonstrates:
 //   1. Subclassing AppCore to define application logic.
-//   2. Registering typed event handlers in onRegisterHandlers().
+//   2. Registering auto-deduced lambda event handlers via on(...).
 //   3. Initializing Runtime and driving the event loop via pump().
 //   4. Gracefully stopping the event loop with requestQuit().
 // =============================================================================
@@ -16,7 +16,8 @@ using namespace corium;
 class BasicApp : public AppCore {
 protected:
     void onRegisterHandlers() override {
-        events().registerHandler<UpdateEvent>([this](const UpdateEvent& event) {
+        // Auto-deduces UpdateEvent from lambda argument signature
+        on([this](const UpdateEvent& event) {
             _frameCount++;
             std::cout << "[BasicApp] Update frame #" << _frameCount 
                       << " (dt: " << event.deltaTime << "s)\n";
@@ -27,7 +28,8 @@ protected:
             }
         });
 
-        events().registerHandler<QuitEvent>([](const QuitEvent&) {
+        // Auto-deduces QuitEvent from lambda argument signature
+        on([](const QuitEvent&) {
             std::cout << "[BasicApp] QuitEvent received.\n";
         });
     }

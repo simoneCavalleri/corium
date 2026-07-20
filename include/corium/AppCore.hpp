@@ -34,6 +34,24 @@ public:
 protected:
     AppCoreT() = default;
 
+    /// @brief Register event handler with automatic event type deduction from callable signature.
+    /// @tparam Handler Callable handler type (lambda or function pointer).
+    /// @param handler Callback to invoke when event occurs.
+    template <typename Handler>
+    void on(Handler&& handler)
+    {
+        _context.events().registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register event handler with automatic event type deduction (alias for on).
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event occurs.
+    template <typename Handler>
+    void handle(Handler&& handler)
+    {
+        _context.events().registerHandler(std::forward<Handler>(handler));
+    }
+
     /// @brief Access event bus reference.
     [[nodiscard]] EventBusBaseT<EventVariant>& events()
     {

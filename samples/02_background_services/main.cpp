@@ -4,8 +4,9 @@
 // This example demonstrates:
 //   1. Registering multiple BackgroundService instances in ServiceRegistry.
 //   2. Asynchronous thread producers writing concurrently to the Lock-Free MPSC queue.
-//   3. Edge-triggered event wakeups using condition_variable notification.
-//   4. Graceful thread shutdown via std::stop_token.
+//   3. Auto-deduced lambda event handlers via on(...).
+//   4. Edge-triggered event wakeups using condition_variable notification.
+//   5. Graceful thread shutdown via std::stop_token.
 // =============================================================================
 
 #include <corium/corium.hpp>
@@ -56,12 +57,12 @@ protected:
     }
 
     void onRegisterHandlers() override {
-        events().registerHandler<TickEvent>([this](const TickEvent& e) {
+        on([this](const TickEvent& e) {
             _tickCount++;
             std::cout << "[ServiceApp] Sensor Tick #" << _tickCount << " (time: " << e.deltaTime << "s)\n";
         });
 
-        events().registerHandler<MouseClickEvent>([this](const MouseClickEvent& e) {
+        on([this](const MouseClickEvent& e) {
             std::cout << "[ServiceApp] Simulated MouseClick at (" << e.x << ", " << e.y << ")\n";
             if (_tickCount >= 5) {
                 std::cout << "[ServiceApp] Processed 5 ticks, requesting quit...\n";
