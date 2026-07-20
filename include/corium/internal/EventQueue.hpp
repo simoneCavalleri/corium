@@ -50,10 +50,10 @@ public:
         return std::nullopt;
     }
 
-    /// @brief Set callback for event availability.
-    void setOnEventsAvailable(std::function<void()> callback)
+    /// @brief Set callback triggered when queue transitions from empty to non-empty.
+    void setOnQueueNonEmpty(std::function<void()> callback)
     {
-        _signalPolicy.setOnEventsAvailable(std::move(callback));
+        _signalPolicy.setOnQueueNonEmpty(std::move(callback));
     }
 
     /// @brief Access reference to signal policy.

@@ -92,7 +92,7 @@ int main() {
     bool hasEvents = false;
 
     // Set edge-triggered callback to wake consumer thread on 0->1 queue transition
-    runtime.setOnEventsAvailable([&]() {
+    runtime.onQueueNonEmpty([&]() {
         {
             std::lock_guard<std::mutex> lock(cvMutex);
             hasEvents = true;

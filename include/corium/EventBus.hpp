@@ -25,9 +25,9 @@ public:
     /// @brief Seal event handler registrations after initialization phase.
     virtual void seal() = 0;
 
-    /// @brief Set edge-triggered callback to notify consumer thread when events become available.
+    /// @brief Set callback triggered when queue transitions from empty to non-empty.
     /// @param callback Function to invoke on empty -> non-empty transition.
-    virtual void setOnEventsAvailable(std::function<void()> callback) = 0;
+    virtual void setOnQueueNonEmpty(std::function<void()> callback) = 0;
 
     /// @brief Register an event handler with explicit event type parameter.
     /// @tparam EventType Event type to handle.
@@ -92,10 +92,10 @@ public:
         this->_reactor.seal();
     }
 
-    /// @brief Set callback for event availability.
-    void setOnEventsAvailable(std::function<void()> callback) override
+    /// @brief Set callback for event availability when queue transitions to non-empty.
+    void setOnQueueNonEmpty(std::function<void()> callback) override
     {
-        _eventQueue.setOnEventsAvailable(std::move(callback));
+        _eventQueue.setOnQueueNonEmpty(std::move(callback));
     }
 
     /// @brief Access reference to signal policy.

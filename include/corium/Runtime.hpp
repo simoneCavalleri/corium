@@ -160,11 +160,25 @@ public:
         return _quitRequested || _state == State::Terminated;
     }
 
-    /// @brief Set callback for event availability.
+    /// @brief Set callback triggered when event queue transitions from empty to non-empty (0 -> 1).
     /// @param callback Function to invoke on 0->1 queue transition.
+    void setOnQueueNonEmpty(std::function<void()> callback)
+    {
+        _eventBus.setOnQueueNonEmpty(std::move(callback));
+    }
+
+    /// @brief Set callback triggered when event queue transitions from empty to non-empty (alias).
+    /// @param callback Function to invoke on 0->1 queue transition.
+    void onQueueNonEmpty(std::function<void()> callback)
+    {
+        setOnQueueNonEmpty(std::move(callback));
+    }
+
+    /// @brief Legacy callback setter for queue availability (deprecated).
+    [[deprecated("Use setOnQueueNonEmpty or onQueueNonEmpty instead.")]]
     void setOnEventsAvailable(std::function<void()> callback)
     {
-        _eventBus.setOnEventsAvailable(std::move(callback));
+        setOnQueueNonEmpty(std::move(callback));
     }
 
     /// @brief Access reference to signal policy.

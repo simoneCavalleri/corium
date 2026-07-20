@@ -109,11 +109,11 @@ private:
 // 2. Signal Policies
 // =============================================================================
 
-/// @brief Signal Policy invoking an edge-triggered callback on 0->1 transition.
+/// @brief Signal Policy invoking an edge-triggered callback on 0->1 transition when queue becomes non-empty.
 class CallbackSignalPolicy {
 public:
-    /// @brief Set user callback.
-    void setOnEventsAvailable(std::function<void()> callback)
+    /// @brief Set callback triggered when queue becomes non-empty.
+    void setOnQueueNonEmpty(std::function<void()> callback)
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _callback = std::move(callback);
@@ -140,8 +140,8 @@ private:
 /// @brief Signal Policy using C++20 std::atomic::wait() / notify_one() for zero-mutex futex signaling.
 class AtomicWaitSignalPolicy {
 public:
-    /// @brief Set optional user callback.
-    void setOnEventsAvailable(std::function<void()> callback)
+    /// @brief Set callback triggered when queue becomes non-empty.
+    void setOnQueueNonEmpty(std::function<void()> callback)
     {
         _userCallback = std::move(callback);
     }
@@ -171,7 +171,7 @@ private:
 /// @brief Signal Policy for busy-spin / polling event loops (sub-microsecond latency, zero signaling cost).
 class NoSignalPolicy {
 public:
-    void setOnEventsAvailable(std::function<void()>) {}
+    void setOnQueueNonEmpty(std::function<void()>) {}
     void signal() noexcept {}
 };
 
@@ -209,7 +209,7 @@ public:
         return *this;
     }
 
-    void setOnEventsAvailable(std::function<void()> callback)
+    void setOnQueueNonEmpty(std::function<void()> callback)
     {
         _userCallback = std::move(callback);
     }
