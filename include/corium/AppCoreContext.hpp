@@ -1,8 +1,8 @@
 #pragma once
 
 #include <functional>
-#include "corium/EventBus.h"
-#include "corium/IEventSink.h"
+#include "corium/EventBus.hpp"
+#include "corium/IEventSink.hpp"
 
 namespace corium {
 

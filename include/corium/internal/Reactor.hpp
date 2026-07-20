@@ -8,9 +8,9 @@
 #include <variant>
 #include <vector>
 
-#include "corium/Events.h"
-#include "corium/internal/FastDelegate.h"
-#include "corium/internal/VariantIndex.h"
+#include "corium/Events.hpp"
+#include "corium/internal/FastDelegate.hpp"
+#include "corium/internal/VariantIndex.hpp"
 
 namespace corium {
 

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "corium/BackgroundService.h"
-#include "corium/IBackgroundService.h"
-#include "corium/ServiceContext.h"
+#include "corium/BackgroundService.hpp"
+#include "corium/ServiceContext.hpp"
 
 #include <functional>
 #include <memory>

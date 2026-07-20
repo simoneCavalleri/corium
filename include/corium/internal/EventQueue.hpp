@@ -4,8 +4,8 @@
 #include <optional>
 #include <utility>
 
-#include "corium/Events.h"
-#include "corium/policies/Policies.h"
+#include "corium/Events.hpp"
+#include "corium/policies/Policies.hpp"
 
 namespace corium {
 

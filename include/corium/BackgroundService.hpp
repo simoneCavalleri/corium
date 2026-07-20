@@ -1,12 +1,18 @@
 #pragma once
 
-#include "corium/IBackgroundService.h"
-#include "corium/IEventSink.h"
-#include "corium/ServiceContext.h"
+#include "corium/IEventSink.hpp"
+#include "corium/ServiceContext.hpp"
 
+#include <stop_token>
 #include <utility>
 
 namespace corium {
+
+class IBackgroundService {
+public:
+    virtual ~IBackgroundService() = default;
+    virtual void run(std::stop_token stopToken) = 0;
+};
 
 class BackgroundService : public IBackgroundService {
 public:

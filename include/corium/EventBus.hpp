@@ -1,9 +1,9 @@
 #pragma once
 
-#include "corium/IEventSink.h"
-#include "corium/internal/EventQueue.h"
-#include "corium/internal/Reactor.h"
-#include "corium/policies/Policies.h"
+#include "corium/IEventSink.hpp"
+#include "corium/internal/EventQueue.hpp"
+#include "corium/internal/Reactor.hpp"
+#include "corium/policies/Policies.hpp"
 
 #include <functional>
 #include <utility>

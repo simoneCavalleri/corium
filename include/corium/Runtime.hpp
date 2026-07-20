@@ -7,14 +7,14 @@
 #include <stdexcept>
 #include <thread>
 
-#include "corium/AppCoreContext.h"
-#include "corium/AppCore.h"
-#include "corium/EventBus.h"
-#include "corium/ServiceContext.h"
-#include "corium/ServiceRegistry.h"
-#include "corium/internal/ServiceManager.h"
-#include "corium/internal/VariantIndex.h"
-#include "corium/policies/Policies.h"
+#include "corium/AppCoreContext.hpp"
+#include "corium/AppCore.hpp"
+#include "corium/EventBus.hpp"
+#include "corium/ServiceContext.hpp"
+#include "corium/ServiceRegistry.hpp"
+#include "corium/internal/ServiceManager.hpp"
+#include "corium/internal/VariantIndex.hpp"
+#include "corium/policies/Policies.hpp"
 
 namespace corium {
 

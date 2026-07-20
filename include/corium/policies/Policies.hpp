@@ -9,9 +9,9 @@
 #include <queue>
 #include <utility>
 
-#include "corium/Events.h"
-#include "corium/internal/MpscRingBuffer.h"
-#include "corium/internal/Reactor.h"
+#include "corium/Events.hpp"
+#include "corium/internal/MpscRingBuffer.hpp"
+#include "corium/internal/Reactor.hpp"
 
 #ifdef __linux__
 #include <sys/eventfd.h>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "corium/Events.h"
+#include "corium/Events.hpp"
 
 namespace corium {
 

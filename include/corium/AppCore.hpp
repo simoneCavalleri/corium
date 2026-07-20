@@ -1,9 +1,9 @@
 #pragma once
 
-#include "corium/AppCoreContext.h"
-#include "corium/ServiceRegistry.h"
-#include "corium/EventBus.h"
-#include "corium/IEventSink.h"
+#include "corium/AppCoreContext.hpp"
+#include "corium/ServiceRegistry.hpp"
+#include "corium/EventBus.hpp"
+#include "corium/IEventSink.hpp"
 
 #include <cstddef>
 

@@ -8,9 +8,7 @@
 //   4. Graceful shutdown via requestQuit()
 // =============================================================================
 
-#include <corium/Runtime.h>
-#include <corium/AppCore.h>
-#include <corium/ServiceRegistry.h>
+#include <corium/corium.hpp>
 
 #include <chrono>
 #include <iostream>
