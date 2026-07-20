@@ -20,6 +20,10 @@ public:
     using ServiceFactory =
         std::function<std::unique_ptr<IBackgroundService>(ServiceContext&)>;
 
+    void addFactory(ServiceFactory factory)
+    {
+        _serviceFactories.push_back(std::move(factory));
+    }
 
     template <typename ServiceType, typename... Args>
     void addService(Args&&... args)
@@ -38,17 +42,39 @@ public:
                 return std::apply(
                     [&context](auto&&... unpackedArgs) -> std::unique_ptr<IBackgroundService>
                     {
-                        return std::make_unique<ServiceType>(
-                            context,
-                            std::forward<decltype(unpackedArgs)>(unpackedArgs)...
-                        );
+                        if constexpr (std::is_constructible_v<ServiceType, ServiceContext&, decltype(unpackedArgs)...>)
+                        {
+                            return std::make_unique<ServiceType>(
+                                context,
+                                std::forward<decltype(unpackedArgs)>(unpackedArgs)...
+                            );
+                        }
+                        else if constexpr (std::is_constructible_v<ServiceType, const ServiceContext&, decltype(unpackedArgs)...>)
+                        {
+                            return std::make_unique<ServiceType>(
+                                context,
+                                std::forward<decltype(unpackedArgs)>(unpackedArgs)...
+                            );
+                        }
+                        else if constexpr (std::is_constructible_v<ServiceType, decltype(unpackedArgs)...>)
+                        {
+                            return std::make_unique<ServiceType>(
+                                std::forward<decltype(unpackedArgs)>(unpackedArgs)...
+                            );
+                        }
+                        else
+                        {
+                            static_assert(
+                                std::is_constructible_v<ServiceType, ServiceContext&, decltype(unpackedArgs)...>,
+                                "ServiceType cannot be constructed with the provided arguments (with or without ServiceContext)."
+                            );
+                        }
                     },
                     std::move(capturedArgs)
                 );
             }
         );
     }
-
 
 private:
     friend class ServiceManager;
