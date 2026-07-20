@@ -2,23 +2,23 @@
 
 #include <functional>
 #include <mutex>
-#include <queue>
 #include <optional>
 
 #include "corium/Events.h"
+#include "corium/internal/MpscRingBuffer.h"
 
 namespace corium {
 
 class EventQueue {
 public:
-    void pushEvent(Event event);
+    bool pushEvent(Event event);
     std::optional<Event> tryPopEvent();
 
     void setOnEventsAvailable(std::function<void()> callback);
 
 private:
-    std::queue<Event> _events;
-    std::mutex _mutex;
+    MpscRingBuffer<Event, 1024> _ringBuffer;
+    std::mutex _callbackMutex;
     std::function<void()> _onEventsAvailable;
 };
 
