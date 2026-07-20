@@ -135,10 +135,25 @@ private:
 //
 // =============================================================================
 
+#include <condition_variable>
+#include <mutex>
+
 int main()
 {
     Runtime runtime;
     DemoApp app;
+
+    std::mutex loopMutex;
+    std::condition_variable loopCv;
+    bool hasEvents = false;
+
+    runtime.setOnEventsAvailable([&]() {
+        {
+            std::lock_guard<std::mutex> lock(loopMutex);
+            hasEvents = true;
+        }
+        loopCv.notify_one();
+    });
 
     try
     {
@@ -146,8 +161,15 @@ int main()
 
         while (!runtime.quitRequested())
         {
+            {
+                std::unique_lock<std::mutex> lock(loopMutex);
+                loopCv.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+                    return hasEvents || runtime.quitRequested();
+                });
+                hasEvents = false;
+            }
+
             runtime.pump();
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         runtime.shutdown();
