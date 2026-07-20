@@ -7,6 +7,7 @@ namespace corium {
 
 Runtime::Runtime()
     : _eventBus(),
+      _serviceContext{ .eventSink = _eventBus },
       _application(nullptr),
       _state(State::Created),
       _quitRequested(false)
@@ -34,10 +35,6 @@ void Runtime::initialize(AppCore& application)
     _application = &application;
     _dispatchThreadId = std::this_thread::get_id();
 
-    ServiceContext serviceContext{
-        .eventSink = _eventBus
-    };
-
     bool servicesStarted = false;
     bool appInitialized = false;
 
@@ -45,7 +42,7 @@ void Runtime::initialize(AppCore& application)
         _application->setContext(applicationContext());
         _application->configureServices(_serviceRegistry);
 
-        _serviceManager.build(_serviceRegistry, serviceContext);
+        _serviceManager.build(_serviceRegistry, _serviceContext);
 
         registerCoreHandlers();
 

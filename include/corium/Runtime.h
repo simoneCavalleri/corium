@@ -6,6 +6,8 @@
 #include "corium/internal/ServiceManager.h"
 #include "corium/ServiceRegistry.h"
 
+#include "corium/ServiceContext.h"
+
 namespace corium {
 
 class AppCore;
@@ -39,6 +41,7 @@ private:
     void registerCoreHandlers();
 
     EventBus _eventBus;
+    ServiceContext _serviceContext;
 
     ServiceRegistry _serviceRegistry;
     ServiceManager _serviceManager;
