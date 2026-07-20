@@ -3,6 +3,7 @@
 #include "corium/IEventSink.h"
 #include "corium/internal/EventQueue.h"
 #include "corium/internal/Reactor.h"
+#include "corium/policies/Policies.h"
 
 #include <functional>
 #include <utility>
@@ -29,7 +30,12 @@ protected:
 
 using EventBusBase = EventBusBaseT<DefaultEvents>;
 
-template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+>
 class BasicEventBus : public EventBusBaseT<EventVariant> {
 public:
     BasicEventBus() = default;
@@ -59,10 +65,20 @@ public:
         _eventQueue.setOnEventsAvailable(std::move(callback));
     }
 
+    SignalPolicy& signalPolicy() noexcept
+    {
+        return _eventQueue.signalPolicy();
+    }
+
+    const SignalPolicy& signalPolicy() const noexcept
+    {
+        return _eventQueue.signalPolicy();
+    }
+
 private:
-    EventQueue<EventVariant, Capacity> _eventQueue;
+    EventQueue<QueuePolicy, SignalPolicy> _eventQueue;
 };
 
-using EventBus = BasicEventBus<DefaultEvents, 1024>;
+using EventBus = BasicEventBus<DefaultEvents>;
 
 } // namespace corium

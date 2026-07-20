@@ -140,6 +140,16 @@ private:
 
 int main()
 {
+    // Corium Policy-Based Runtime Design via RuntimeBuilder:
+    // Standard default:
+    //   using MyRuntime = RuntimeBuilder<>::Build;
+    //
+    // Embedded / Real-time Polling with 4096 capacity:
+    //   using RealtimeRuntime = RuntimeBuilder<>::WithCapacity<4096>::WithSignalPolicy<NoSignalPolicy>::Build;
+    //
+    // C++20 Futex (std::atomic::wait):
+    //   using FutexRuntime = RuntimeBuilder<>::WithSignalPolicy<AtomicWaitSignalPolicy>::Build;
+
     Runtime runtime;
     DemoApp app;
 

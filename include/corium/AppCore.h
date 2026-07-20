@@ -9,7 +9,12 @@
 
 namespace corium {
 
-template <typename EventVariant, size_t Capacity>
+template <
+    typename EventVariant,
+    typename QueuePolicy,
+    typename SignalPolicy,
+    typename DispatchPolicy
+>
 class BasicRuntime;
 
 template <typename EventVariant = DefaultEvents>
@@ -106,7 +111,7 @@ private:
         _context = context;
     }
 
-    template <typename EV, size_t Cap>
+    template <typename EV, typename QP, typename SP, typename DP>
     friend class BasicRuntime;
 };
 

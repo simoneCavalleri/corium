@@ -14,10 +14,16 @@
 #include "corium/ServiceRegistry.h"
 #include "corium/internal/ServiceManager.h"
 #include "corium/internal/VariantIndex.h"
+#include "corium/policies/Policies.h"
 
 namespace corium {
 
-template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+>
 class BasicRuntime {
 public:
     enum class State {
@@ -145,6 +151,16 @@ public:
         _eventBus.setOnEventsAvailable(std::move(callback));
     }
 
+    SignalPolicy& signalPolicy() noexcept
+    {
+        return _eventBus.signalPolicy();
+    }
+
+    const SignalPolicy& signalPolicy() const noexcept
+    {
+        return _eventBus.signalPolicy();
+    }
+
     IEventSinkT<EventVariant>& eventSink()
     {
         return _eventBus;
@@ -169,7 +185,7 @@ private:
         }
     }
 
-    BasicEventBus<EventVariant, Capacity> _eventBus;
+    BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy> _eventBus;
     ServiceContext _serviceContext;
 
     ServiceRegistry _serviceRegistry;
@@ -181,7 +197,62 @@ private:
     std::atomic<bool> _quitRequested{false};
 };
 
-template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
-using Runtime = BasicRuntime<EventVariant, Capacity>;
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+>
+using Runtime = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy>;
+
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename DispatchPolicy = StaticReactorPolicy<EventVariant>
+>
+struct RuntimeBuilder {
+    template <typename NewEventVariant>
+    using WithEvents = RuntimeBuilder<
+        NewEventVariant,
+        BoundedMpscQueuePolicy<NewEventVariant, 1024>,
+        SignalPolicy,
+        StaticReactorPolicy<NewEventVariant>
+    >;
+
+    template <size_t Capacity>
+    using WithCapacity = RuntimeBuilder<
+        EventVariant,
+        BoundedMpscQueuePolicy<EventVariant, Capacity>,
+        SignalPolicy,
+        DispatchPolicy
+    >;
+
+    template <typename NewQueuePolicy>
+    using WithQueuePolicy = RuntimeBuilder<
+        EventVariant,
+        NewQueuePolicy,
+        SignalPolicy,
+        DispatchPolicy
+    >;
+
+    template <typename NewSignalPolicy>
+    using WithSignalPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        NewSignalPolicy,
+        DispatchPolicy
+    >;
+
+    template <typename NewDispatchPolicy>
+    using WithDispatchPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        NewDispatchPolicy
+    >;
+
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy>;
+};
 
 } // namespace corium
