@@ -50,6 +50,12 @@ public:
         return std::nullopt;
     }
 
+    /// @brief Check if event queue is empty.
+    [[nodiscard]] bool empty() const
+    {
+        return _queuePolicy.empty();
+    }
+
     /// @brief Set callback triggered when queue transitions from empty to non-empty.
     void setOnQueueNonEmpty(std::function<void()> callback)
     {

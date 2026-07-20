@@ -1,13 +1,14 @@
 // =============================================================================
 // Corium Sample 04 — Policy-Based Runtimes & Signaling Strategies
 //
-// This example demonstrates configuring Corium Runtimes for different target environment:
+// This example demonstrates configuring Corium Runtimes for different target environments:
 //   1. Real-Time / Game Engine: Busy-spin polling (NoSignalPolicy) for sub-microsecond latency.
 //   2. C++20 Futex: Zero-mutex signaling via std::atomic::wait() (AtomicWaitSignalPolicy).
 //   3. Power-Saving Desktop: Traditional Blocking Queue (BlockingQueuePolicy).
 // =============================================================================
 
 #include <corium/corium.hpp>
+#include <chrono>
 #include <iostream>
 
 using namespace corium;
@@ -72,7 +73,7 @@ void runFutexAtomicWaitDemo() {
     runtime.eventSink().post(TickEvent{0.03});
 
     while (!runtime.quitRequested()) {
-        runtime.pump();
+        runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
     runtime.shutdown();
@@ -95,7 +96,7 @@ void runBlockingQueueDemo() {
     runtime.eventSink().post(TickEvent{0.3});
 
     while (!runtime.quitRequested()) {
-        runtime.pump();
+        runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
     runtime.shutdown();

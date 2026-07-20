@@ -130,6 +130,43 @@ public:
         }
     }
 
+    /// @brief Wait for at least one event to become available (or until timeout), then pump all pending events.
+    /// @tparam Rep Duration representation type.
+    /// @tparam Period Duration period type.
+    /// @param timeout Maximum duration to wait before pumping.
+    /// @return Number of events processed.
+    template <typename Rep, typename Period>
+    std::size_t waitAndPump(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (_state != State::Running) {
+            throw std::logic_error("Runtime::waitAndPump() called when runtime is not running.");
+        }
+
+        if (std::this_thread::get_id() != _dispatchThreadId) {
+            throw std::logic_error("Runtime::waitAndPump() must be called from the dispatch thread (the thread that called initialize()).");
+        }
+
+        if (_eventBus.empty() && !_quitRequested) {
+            _eventBus.signalPolicy().wait_for(timeout);
+        }
+
+        std::size_t processed = 0;
+        while (_state == State::Running && !_quitRequested) {
+            if (!_eventBus.processOne()) {
+                break;
+            }
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Wait indefinitely until an event arrives, then pump pending events.
+    /// @return Number of events processed.
+    std::size_t waitAndPump()
+    {
+        return waitAndPump(std::chrono::hours(24 * 365));
+    }
+
     /// @brief Stop background services and shut down application cleanly.
     void shutdown()
     {

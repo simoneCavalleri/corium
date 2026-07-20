@@ -1,12 +1,15 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <thread>
 #include <utility>
 
 #include "corium/Events.hpp"
@@ -14,6 +17,7 @@
 #include "corium/internal/Reactor.hpp"
 
 #ifdef __linux__
+#include <poll.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 #endif
@@ -125,16 +129,32 @@ public:
         std::function<void()> cb;
         {
             std::lock_guard<std::mutex> lock(_mutex);
+            _hasEvents = true;
             cb = _callback;
         }
+        _cv.notify_one();
         if (cb) {
             cb();
         }
     }
 
+    /// @brief Wait for signal until timeout expires.
+    /// @tparam Rep Duration representation.
+    /// @tparam Period Duration period.
+    /// @param timeout Maximum duration to wait.
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _cv.wait_for(lock, timeout, [this]() { return _hasEvents; });
+        _hasEvents = false;
+    }
+
 private:
     std::function<void()> _callback;
     std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _hasEvents = false;
 };
 
 /// @brief Signal Policy using C++20 std::atomic::wait() / notify_one() for zero-mutex futex signaling.
@@ -157,7 +177,8 @@ public:
     }
 
     /// @brief Wait until counter value changes (C++20 std::atomic::wait).
-    void wait()
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>&)
     {
         uint32_t current = _counter.load(std::memory_order_acquire);
         _counter.wait(current);
@@ -173,6 +194,12 @@ class NoSignalPolicy {
 public:
     void setOnQueueNonEmpty(std::function<void()>) {}
     void signal() noexcept {}
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>&) noexcept
+    {
+        std::this_thread::yield();
+    }
 };
 
 #ifdef __linux__
@@ -221,6 +248,22 @@ public:
         [[maybe_unused]] auto res = ::write(_fd, &val, sizeof(val));
         if (_userCallback) {
             _userCallback();
+        }
+    }
+
+    /// @brief Wait for eventfd signal using Linux poll().
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (_fd < 0) return;
+        struct pollfd pfd;
+        pfd.fd = _fd;
+        pfd.events = POLLIN;
+        int timeoutMs = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
+        int res = ::poll(&pfd, 1, timeoutMs);
+        if (res > 0 && (pfd.revents & POLLIN)) {
+            uint64_t val = 0;
+            [[maybe_unused]] auto bytes = ::read(_fd, &val, sizeof(val));
         }
     }
 

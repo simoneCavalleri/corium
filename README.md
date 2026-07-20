@@ -8,6 +8,7 @@
 
 - **Header-Only C++20 Library**: Simply include `#include <corium/corium.hpp>` and add `target_include_directories(app PRIVATE include)`. No static or shared library binaries required.
 - **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
+- **Power-Saving `waitAndPump()`**: Block efficiently until events arrive or timeout expires without custom condition variable boilerplate.
 - **Zero-Allocation Hot Path**: Hot event dispatching operates with 0 dynamic heap allocations using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and **Small Buffer Optimization (SBO)** delegates.
 - **Policy-Based Runtime Design**: Modular compile-time policies for queueing, signaling, and dispatching:
   - `QueuePolicy`: Bounded Lock-Free MPSC, Traditional Blocking Queue.
@@ -26,6 +27,7 @@
 
 ```cpp
 #include <corium/corium.hpp>
+#include <chrono>
 #include <iostream>
 
 using namespace corium;
@@ -50,9 +52,9 @@ int main() {
 
     runtime.initialize(app);
     
-    // External event loop pump
+    // External event loop waiting for events and pumping efficiently
     while (!runtime.quitRequested()) {
-        runtime.pump();
+        runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
     runtime.shutdown();

@@ -5,16 +5,13 @@
 //   1. Registering multiple BackgroundService instances in ServiceRegistry.
 //   2. Asynchronous thread producers writing concurrently to the Lock-Free MPSC queue.
 //   3. Auto-deduced lambda event handlers via on(...).
-//   4. Edge-triggered event wakeups using condition_variable notification.
+//   4. Power-saving main event loop using runtime.waitAndPump(timeout).
 //   5. Graceful thread shutdown via std::stop_token.
 // =============================================================================
 
 #include <corium/corium.hpp>
 #include <chrono>
-#include <condition_variable>
 #include <iostream>
-#include <mutex>
-#include <thread>
 
 using namespace corium;
 
@@ -87,31 +84,11 @@ int main() {
     Runtime runtime;
     ServiceApp app;
 
-    std::mutex cvMutex;
-    std::condition_variable cv;
-    bool hasEvents = false;
-
-    // Set edge-triggered callback to wake consumer thread on 0->1 queue transition
-    runtime.onQueueNonEmpty([&]() {
-        {
-            std::lock_guard<std::mutex> lock(cvMutex);
-            hasEvents = true;
-        }
-        cv.notify_one();
-    });
-
     runtime.initialize(app);
 
+    // Clean, zero-boilerplate event loop using waitAndPump(timeout)
     while (!runtime.quitRequested()) {
-        {
-            std::unique_lock<std::mutex> lock(cvMutex);
-            cv.wait_for(lock, std::chrono::milliseconds(50), [&]() {
-                return hasEvents || runtime.quitRequested();
-            });
-            hasEvents = false;
-        }
-
-        runtime.pump();
+        runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
     runtime.shutdown();

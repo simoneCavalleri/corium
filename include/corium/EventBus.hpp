@@ -22,6 +22,9 @@ public:
     /// @return true if an event was popped and dispatched; false if queue was empty.
     virtual bool processOne() = 0;
 
+    /// @brief Check if event queue is empty.
+    [[nodiscard]] virtual bool empty() const = 0;
+
     /// @brief Seal event handler registrations after initialization phase.
     virtual void seal() = 0;
 
@@ -84,6 +87,12 @@ public:
         }
         this->_reactor.dispatch(*eventOpt);
         return true;
+    }
+
+    /// @brief Check if event queue is empty.
+    [[nodiscard]] bool empty() const override
+    {
+        return _eventQueue.empty();
     }
 
     /// @brief Seal reactor handlers.
