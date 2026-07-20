@@ -99,6 +99,21 @@ using CustomAppRuntime = RuntimeBuilder<>
 
 ---
 
+## 📊 Benchmarks
+
+Corium includes an automated benchmarking suite built with **Google Benchmark** to measure dispatch latency, MPSC ring buffer throughput, and signal policy efficiency:
+
+```bash
+# Configure and build benchmarks
+cmake -B build -DCORIUM_BUILD_BENCHMARKS=ON
+cmake --build build
+
+# Run benchmarks
+./build/corium_benchmarks
+```
+
+---
+
 ## 🛠️ Integration & CMake
 
 Corium is a header-only library target using CMake `INTERFACE`:
