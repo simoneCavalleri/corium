@@ -10,15 +10,28 @@
 
 namespace corium {
 
+/// @brief Non-templated abstract base class for event bus routing and dispatching.
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class EventBusBaseT : public IEventSinkT<EventVariant> {
 public:
     virtual ~EventBusBaseT() = default;
 
+    /// @brief Process a single pending event from the queue.
+    /// @return true if an event was popped and dispatched; false if queue was empty.
     virtual bool processOne() = 0;
+
+    /// @brief Seal event handler registrations after initialization phase.
     virtual void seal() = 0;
+
+    /// @brief Set edge-triggered callback to notify consumer thread when events become available.
+    /// @param callback Function to invoke on empty -> non-empty transition.
     virtual void setOnEventsAvailable(std::function<void()> callback) = 0;
 
+    /// @brief Register an event handler for a concrete event type.
+    /// @tparam EventType Event type to handle.
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event occurs.
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
         _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
@@ -28,8 +41,14 @@ protected:
     ReactorT<EventVariant> _reactor;
 };
 
+/// @brief Default EventBusBase alias using DefaultEvents.
 using EventBusBase = EventBusBaseT<DefaultEvents>;
 
+/// @brief Policy-configurable event bus implementation.
+/// @tparam EventVariant The variant type list of supported events.
+/// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC, blocking queue, etc.).
+/// @tparam SignalPolicy Strategy for thread signaling (callback, futex atomic wait, polling, etc.).
+/// @tparam DispatchPolicy Strategy for event dispatching.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
@@ -40,11 +59,13 @@ class BasicEventBus : public EventBusBaseT<EventVariant> {
 public:
     BasicEventBus() = default;
 
+    /// @brief Post an event into the queue.
     void post(EventVariant event) override
     {
         _eventQueue.pushEvent(std::move(event));
     }
 
+    /// @brief Process a single event from the queue.
     bool processOne() override
     {
         auto eventOpt = _eventQueue.tryPopEvent();
@@ -55,21 +76,25 @@ public:
         return true;
     }
 
+    /// @brief Seal reactor handlers.
     void seal() override
     {
         this->_reactor.seal();
     }
 
+    /// @brief Set callback for event availability.
     void setOnEventsAvailable(std::function<void()> callback) override
     {
         _eventQueue.setOnEventsAvailable(std::move(callback));
     }
 
+    /// @brief Access reference to signal policy.
     SignalPolicy& signalPolicy() noexcept
     {
         return _eventQueue.signalPolicy();
     }
 
+    /// @brief Access const reference to signal policy.
     const SignalPolicy& signalPolicy() const noexcept
     {
         return _eventQueue.signalPolicy();
@@ -79,6 +104,7 @@ private:
     EventQueue<QueuePolicy, SignalPolicy> _eventQueue;
 };
 
+/// @brief Default EventBus alias using DefaultEvents.
 using EventBus = BasicEventBus<DefaultEvents>;
 
 } // namespace corium

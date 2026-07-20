@@ -6,6 +6,8 @@
 
 namespace corium {
 
+/// @brief Context object passed to AppCore providing event bus access and quit requests.
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class AppCoreContextT {
 public:
@@ -16,16 +18,19 @@ public:
     {
     }
 
-    EventBusBaseT<EventVariant>& events() const
+    /// @brief Access reference to the event bus.
+    [[nodiscard]] EventBusBaseT<EventVariant>& events() const
     {
         return *_events;
     }
 
-    IEventSinkT<EventVariant>& eventSink() const
+    /// @brief Access reference to the event sink.
+    [[nodiscard]] IEventSinkT<EventVariant>& eventSink() const
     {
         return *_eventSink;
     }
 
+    /// @brief Request graceful application exit.
     void requestQuit() const
     {
         if (_quitCallback) {
@@ -44,6 +49,7 @@ private:
     std::function<void()> _quitCallback;
 };
 
+/// @brief Default AppCoreContext alias.
 using AppCoreContext = AppCoreContextT<DefaultEvents>;
 
 } // namespace corium

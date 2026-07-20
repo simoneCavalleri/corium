@@ -4,6 +4,7 @@
 
 namespace corium {
 
+/// @brief Event emitted for logical frame updates.
 struct UpdateEvent {
     double deltaTime;
 
@@ -11,6 +12,7 @@ struct UpdateEvent {
         : deltaTime(dt) {}
 };
 
+/// @brief Event emitted for rendering updates.
 struct RenderEvent {
     double deltaTime;
 
@@ -18,6 +20,7 @@ struct RenderEvent {
         : deltaTime(dt) {}
 };
 
+/// @brief Periodic heartbeat or timer tick event.
 struct TickEvent {
     double deltaTime;
 
@@ -25,6 +28,7 @@ struct TickEvent {
         : deltaTime(dt) {}
 };
 
+/// @brief Event emitted when application window is resized.
 struct WindowResizeEvent {
     int width;
     int height;
@@ -33,8 +37,10 @@ struct WindowResizeEvent {
         : width(newWidth), height(newHeight) {}
 };
 
+/// @brief Event emitted when window close button is pressed.
 struct WindowCloseEvent {};
 
+/// @brief Mouse click event.
 struct MouseClickEvent {
     int x;
     int y;
@@ -45,6 +51,7 @@ struct MouseClickEvent {
         : x(xPos), y(yPos), leftButton(left), rightButton(right) {}
 };
 
+/// @brief Mouse button press event.
 struct MousePressedEvent {
     int x;
     int y;
@@ -54,6 +61,7 @@ struct MousePressedEvent {
         : x(xPos), y(yPos), button(buttonCode) {}
 };
 
+/// @brief Mouse button release event.
 struct MouseReleasedEvent {
     int x;
     int y;
@@ -63,6 +71,7 @@ struct MouseReleasedEvent {
         : x(xPos), y(yPos), button(buttonCode) {}
 };
 
+/// @brief Mouse cursor move event.
 struct MouseMoveEvent {
     int x;
     int y;
@@ -71,6 +80,7 @@ struct MouseMoveEvent {
         : x(xPos), y(yPos) {}
 };
 
+/// @brief Mouse wheel scroll event.
 struct MouseScrollEvent {
     int delta;
 
@@ -78,6 +88,7 @@ struct MouseScrollEvent {
         : delta(scrollDelta) {}
 };
 
+/// @brief Keyboard key press event.
 struct KeyPressedEvent {
     int keyCode;
 
@@ -85,6 +96,7 @@ struct KeyPressedEvent {
         : keyCode(code) {}
 };
 
+/// @brief Keyboard key release event.
 struct KeyReleasedEvent {
     int keyCode;
 
@@ -92,8 +104,10 @@ struct KeyReleasedEvent {
         : keyCode(code) {}
 };
 
+/// @brief Application shutdown event.
 struct QuitEvent {};
 
+/// @brief Default variant list of standard Corium events.
 using DefaultEvents = std::variant<
     UpdateEvent,
     RenderEvent,
@@ -109,7 +123,7 @@ using DefaultEvents = std::variant<
     KeyReleasedEvent,
     QuitEvent>;
 
+/// @brief Alias for backwards compatibility with DefaultEvents.
 using Event = DefaultEvents;
 
 } // namespace corium
-

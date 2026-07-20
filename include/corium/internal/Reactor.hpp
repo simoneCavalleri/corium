@@ -14,6 +14,8 @@
 
 namespace corium {
 
+/// @brief Static Event Reactor providing O(1) direct array indexing and zero type erasure dispatching.
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class ReactorT {
     static constexpr size_t VariantSize = std::variant_size_v<EventVariant>;
@@ -43,6 +45,10 @@ public:
     ReactorT(const ReactorT&) = delete;
     ReactorT& operator=(const ReactorT&) = delete;
 
+    /// @brief Register event handler for concrete event type.
+    /// @tparam EventType Event type to handle.
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event is dispatched.
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -57,6 +63,8 @@ public:
         concreteHandlers->handlers.emplace_back(std::forward<Handler>(handler));
     }
 
+    /// @brief Dispatch event via direct O(1) array lookup (zero lock acquisition once sealed).
+    /// @param event Event instance to dispatch.
     void dispatch(const EventVariant& event)
     {
         size_t currentIndex = event.index();
@@ -84,6 +92,7 @@ public:
         }
     }
 
+    /// @brief Seal reactor handlers for lock-free dispatch during event loop execution.
     void seal()
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -96,6 +105,7 @@ private:
     bool _sealed = false;
 };
 
+/// @brief Default Reactor alias using DefaultEvents.
 using Reactor = ReactorT<DefaultEvents>;
 
 } // namespace corium

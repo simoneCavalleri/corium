@@ -9,6 +9,9 @@
 
 namespace corium {
 
+/// @brief Event queue composing QueuePolicy and SignalPolicy strategy types.
+/// @tparam QueuePolicy Queueing policy strategy.
+/// @tparam SignalPolicy Signaling policy strategy.
 template <
     typename QueuePolicy = BoundedMpscQueuePolicy<DefaultEvents, 1024>,
     typename SignalPolicy = CallbackSignalPolicy
@@ -19,6 +22,9 @@ public:
 
     EventQueue() = default;
 
+    /// @brief Push an event into the queue and trigger signal policy on 0->1 transition.
+    /// @param event Event instance to push.
+    /// @return true if event was pushed successfully; false if queue was full.
     bool pushEvent(EventVariant event)
     {
         auto res = _queuePolicy.tryPush(std::move(event));
@@ -33,6 +39,8 @@ public:
         return true;
     }
 
+    /// @brief Pop an event from the queue.
+    /// @return Optional containing popped event, or std::nullopt if empty.
     std::optional<EventVariant> tryPopEvent()
     {
         EventVariant event;
@@ -42,16 +50,19 @@ public:
         return std::nullopt;
     }
 
+    /// @brief Set callback for event availability.
     void setOnEventsAvailable(std::function<void()> callback)
     {
         _signalPolicy.setOnEventsAvailable(std::move(callback));
     }
 
+    /// @brief Access reference to signal policy.
     SignalPolicy& signalPolicy() noexcept
     {
         return _signalPolicy;
     }
 
+    /// @brief Access const reference to signal policy.
     const SignalPolicy& signalPolicy() const noexcept
     {
         return _signalPolicy;

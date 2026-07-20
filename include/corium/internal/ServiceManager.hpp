@@ -9,6 +9,7 @@
 
 namespace corium {
 
+/// @brief Manager for creating, starting, stopping, and joining background service jthreads.
 class ServiceManager {
 public:
     enum class State {
@@ -29,6 +30,7 @@ public:
     ServiceManager(const ServiceManager&) = delete;
     ServiceManager& operator=(const ServiceManager&) = delete;
 
+    /// @brief Build background services from registry factories.
     void build(ServiceRegistry& registry, ServiceContext& context)
     {
         for (auto& factory : registry._serviceFactories) {
@@ -37,6 +39,7 @@ public:
         _state = State::Built;
     }
 
+    /// @brief Start background service threads.
     void start()
     {
         if (_state == State::Started) {
@@ -54,6 +57,7 @@ public:
         _state = State::Started;
     }
 
+    /// @brief Request graceful stop of background service threads via stop_token.
     void stop()
     {
         if (_state != State::Started) {
@@ -67,6 +71,7 @@ public:
         _state = State::Stopped;
     }
 
+    /// @brief Join background service jthreads.
     void join()
     {
         _threads.clear();

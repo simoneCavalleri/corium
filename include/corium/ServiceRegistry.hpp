@@ -14,16 +14,23 @@ namespace corium {
 
 class ServiceManager;
 
+/// @brief Service registry for configuring background services before runtime initialization.
 class ServiceRegistry {
 public:
     using ServiceFactory =
         std::function<std::unique_ptr<IBackgroundService>(ServiceContext&)>;
 
+    /// @brief Add a custom service factory lambda.
+    /// @param factory Service factory lambda.
     void addFactory(ServiceFactory factory)
     {
         _serviceFactories.push_back(std::move(factory));
     }
 
+    /// @brief Register a background service type with constructor arguments.
+    /// @tparam ServiceType Type of the background service deriving from IBackgroundService.
+    /// @tparam Args Constructor argument types.
+    /// @param args Arguments passed to ServiceType constructor.
     template <typename ServiceType, typename... Args>
     void addService(Args&&... args)
     {

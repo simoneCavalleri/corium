@@ -24,6 +24,9 @@ namespace corium {
 // 1. Queue Policies
 // =============================================================================
 
+/// @brief Queue Policy for fixed-capacity, zero-allocation lock-free MPSC RingBuffer.
+/// @tparam EventVariant The variant type list of supported events.
+/// @tparam Capacity Ring buffer capacity (must be a power of 2).
 template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
 class BoundedMpscQueuePolicy {
 public:
@@ -34,17 +37,20 @@ public:
         bool wasEmpty;
     };
 
+    /// @brief Try to push an event into the lock-free queue (thread-safe, zero allocations).
     PushResult tryPush(EventVariant event)
     {
         auto res = _ringBuffer.tryPush(std::move(event));
         return {res.pushed, res.wasEmpty};
     }
 
+    /// @brief Try to pop an event from the lock-free queue (single consumer).
     bool tryPop(EventVariant& event)
     {
         return _ringBuffer.tryPop(event);
     }
 
+    /// @brief Check if queue is empty.
     [[nodiscard]] bool empty() const noexcept
     {
         return _ringBuffer.empty();
@@ -54,6 +60,8 @@ private:
     MpscRingBuffer<EventVariant, Capacity> _ringBuffer;
 };
 
+/// @brief Queue Policy for a traditional mutex-protected blocking queue (power saving).
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class BlockingQueuePolicy {
 public:
@@ -64,6 +72,7 @@ public:
         bool wasEmpty;
     };
 
+    /// @brief Try to push an event into the blocking queue.
     PushResult tryPush(EventVariant event)
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -72,6 +81,7 @@ public:
         return {true, wasEmpty};
     }
 
+    /// @brief Try to pop an event from the blocking queue.
     bool tryPop(EventVariant& event)
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -83,6 +93,7 @@ public:
         return true;
     }
 
+    /// @brief Check if queue is empty.
     [[nodiscard]] bool empty() const
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -98,14 +109,17 @@ private:
 // 2. Signal Policies
 // =============================================================================
 
+/// @brief Signal Policy invoking an edge-triggered callback on 0->1 transition.
 class CallbackSignalPolicy {
 public:
+    /// @brief Set user callback.
     void setOnEventsAvailable(std::function<void()> callback)
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _callback = std::move(callback);
     }
 
+    /// @brief Signal that events are available.
     void signal()
     {
         std::function<void()> cb;
@@ -123,13 +137,16 @@ private:
     std::mutex _mutex;
 };
 
+/// @brief Signal Policy using C++20 std::atomic::wait() / notify_one() for zero-mutex futex signaling.
 class AtomicWaitSignalPolicy {
 public:
+    /// @brief Set optional user callback.
     void setOnEventsAvailable(std::function<void()> callback)
     {
         _userCallback = std::move(callback);
     }
 
+    /// @brief Signal counter increase and notify waiting thread via std::atomic::notify_one().
     void signal()
     {
         _counter.fetch_add(1, std::memory_order_release);
@@ -139,6 +156,7 @@ public:
         }
     }
 
+    /// @brief Wait until counter value changes (C++20 std::atomic::wait).
     void wait()
     {
         uint32_t current = _counter.load(std::memory_order_acquire);
@@ -150,6 +168,7 @@ private:
     std::function<void()> _userCallback;
 };
 
+/// @brief Signal Policy for busy-spin / polling event loops (sub-microsecond latency, zero signaling cost).
 class NoSignalPolicy {
 public:
     void setOnEventsAvailable(std::function<void()>) {}
@@ -157,6 +176,7 @@ public:
 };
 
 #ifdef __linux__
+/// @brief Signal Policy using Linux eventfd for native epoll event loop integration.
 class EventFdSignalPolicy {
 public:
     EventFdSignalPolicy()
@@ -194,6 +214,7 @@ public:
         _userCallback = std::move(callback);
     }
 
+    /// @brief Signal by writing a 64-bit counter to the Linux eventfd descriptor.
     void signal()
     {
         uint64_t val = 1;
@@ -203,6 +224,7 @@ public:
         }
     }
 
+    /// @brief Access native Linux eventfd file descriptor for epoll integration.
     [[nodiscard]] int nativeHandle() const noexcept
     {
         return _fd;
@@ -218,22 +240,27 @@ private:
 // 3. Dispatch Policies
 // =============================================================================
 
+/// @brief Dispatch Policy wrapping Static Reactor with direct array lookup and zero type erasure.
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class StaticReactorPolicy {
 public:
     using EventType = EventVariant;
 
+    /// @brief Register handler for concrete event type.
     template <typename EventTypeSingle, typename Handler>
     void registerHandler(Handler&& handler)
     {
         _reactor.template registerHandler<EventTypeSingle>(std::forward<Handler>(handler));
     }
 
+    /// @brief Dispatch event via static array indexing and FastDelegate.
     void dispatch(const EventVariant& event)
     {
         _reactor.dispatch(event);
     }
 
+    /// @brief Seal reactor handlers.
     void seal()
     {
         _reactor.seal();

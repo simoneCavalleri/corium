@@ -17,6 +17,9 @@ template <
 >
 class BasicRuntime;
 
+/// @brief Abstract base class for applications managed by Corium Runtime.
+/// Subclass AppCore to register event handlers, configure services, and manage application lifecycle.
+/// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class AppCoreT {
 public:
@@ -31,16 +34,19 @@ public:
 protected:
     AppCoreT() = default;
 
-    EventBusBaseT<EventVariant>& events()
+    /// @brief Access event bus reference.
+    [[nodiscard]] EventBusBaseT<EventVariant>& events()
     {
         return _context.events();
     }
 
-    IEventSinkT<EventVariant>& eventSink()
+    /// @brief Access event sink reference.
+    [[nodiscard]] IEventSinkT<EventVariant>& eventSink()
     {
         return _context.eventSink();
     }
 
+    /// @brief Request graceful application shutdown.
     void requestQuit()
     {
         _context.requestQuit();
@@ -88,9 +94,17 @@ private:
     }
 
 private:
+    /// @brief Override to configure background services.
+    /// @param registry Service registry to register background services.
     virtual void onConfigureServices(ServiceRegistry& registry) {};
+
+    /// @brief Override to wire up event handlers using events().registerHandler<T>().
     virtual void onRegisterHandlers() {};
+
+    /// @brief Override to execute custom application initialization logic.
     virtual void onInitialize() = 0;
+
+    /// @brief Override to execute application cleanup logic on shutdown.
     virtual void onShutdown() {};
 
 private:
@@ -103,7 +117,6 @@ private:
     };
 
     AppCoreContextT<EventVariant> _context;
-
     State _state = State::Created;
 
     void setContext(AppCoreContextT<EventVariant> context)
@@ -115,6 +128,7 @@ private:
     friend class BasicRuntime;
 };
 
+/// @brief Default AppCore alias using DefaultEvents.
 using AppCore = AppCoreT<DefaultEvents>;
 
 } // namespace corium

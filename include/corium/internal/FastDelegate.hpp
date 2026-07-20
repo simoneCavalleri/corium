@@ -8,6 +8,9 @@
 
 namespace corium {
 
+/// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
+/// Eliminates std::function heap allocations and virtual table overhead for event handlers.
+/// @tparam EventType The concrete event type invoked by this delegate.
 template <typename EventType>
 class EventHandlerDelegate {
     static constexpr std::size_t InlineSize = 32;
@@ -19,6 +22,9 @@ class EventHandlerDelegate {
 public:
     EventHandlerDelegate() noexcept = default;
 
+    /// @brief Construct delegate wrapping a callable object (lambda, function pointer, or functor).
+    /// @tparam Handler Callable type.
+    /// @param handler Callable instance.
     template <
         typename Handler,
         typename Decayed = std::decay_t<Handler>,
@@ -102,6 +108,8 @@ public:
     EventHandlerDelegate(const EventHandlerDelegate&) = delete;
     EventHandlerDelegate& operator=(const EventHandlerDelegate&) = delete;
 
+    /// @brief Invoke wrapped handler directly with concrete event.
+    /// @param event Event instance to pass to handler.
     void invoke(const EventType& event) const
     {
         assert(_stub && "Invoking an empty EventHandlerDelegate");
@@ -113,11 +121,13 @@ public:
         _stub(_instance, event);
     }
 
+    /// @brief Check if delegate wraps a valid handler.
     explicit operator bool() const noexcept
     {
         return _stub != nullptr;
     }
 
+    /// @brief Reset delegate to empty state.
     void reset() noexcept
     {
         if (_destroy) {
