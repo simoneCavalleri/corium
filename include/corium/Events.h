@@ -94,7 +94,7 @@ struct KeyReleasedEvent {
 
 struct QuitEvent {};
 
-using Event = std::variant<
+using DefaultEvents = std::variant<
     UpdateEvent,
     RenderEvent,
     TickEvent,
@@ -108,6 +108,8 @@ using Event = std::variant<
     KeyPressedEvent,
     KeyReleasedEvent,
     QuitEvent>;
+
+using Event = DefaultEvents;
 
 } // namespace corium
 

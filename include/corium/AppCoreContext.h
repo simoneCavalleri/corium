@@ -6,21 +6,22 @@
 
 namespace corium {
 
-class AppCoreContext {
+template <typename EventVariant = DefaultEvents>
+class AppCoreContextT {
 public:
-    AppCoreContext() = default;
+    AppCoreContextT() = default;
 
-    AppCoreContext(EventBusBase& events, IEventSink& eventSink, std::function<void()> quitCallback)
+    AppCoreContextT(EventBusBaseT<EventVariant>& events, IEventSinkT<EventVariant>& eventSink, std::function<void()> quitCallback)
         : _events(&events), _eventSink(&eventSink), _quitCallback(quitCallback)
     {
     }
 
-    EventBusBase& events() const
+    EventBusBaseT<EventVariant>& events() const
     {
         return *_events;
     }
 
-    IEventSink& eventSink() const
+    IEventSinkT<EventVariant>& eventSink() const
     {
         return *_eventSink;
     }
@@ -38,9 +39,11 @@ public:
     }
 
 private:
-    EventBusBase* _events = nullptr;
-    IEventSink* _eventSink = nullptr;
+    EventBusBaseT<EventVariant>* _events = nullptr;
+    IEventSinkT<EventVariant>* _eventSink = nullptr;
     std::function<void()> _quitCallback;
 };
+
+using AppCoreContext = AppCoreContextT<DefaultEvents>;
 
 } // namespace corium

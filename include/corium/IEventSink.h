@@ -4,10 +4,13 @@
 
 namespace corium {
 
-class IEventSink {
+template <typename EventVariant = DefaultEvents>
+class IEventSinkT {
 public:
-    virtual ~IEventSink() = default;
-    virtual void post(Event event) = 0;
+    virtual ~IEventSinkT() = default;
+    virtual void post(EventVariant event) = 0;
 };
+
+using IEventSink = IEventSinkT<DefaultEvents>;
 
 } // namespace corium

@@ -9,9 +9,10 @@
 
 namespace corium {
 
-class EventBusBase : public IEventSink {
+template <typename EventVariant = DefaultEvents>
+class EventBusBaseT : public IEventSinkT<EventVariant> {
 public:
-    virtual ~EventBusBase() = default;
+    virtual ~EventBusBaseT() = default;
 
     virtual bool processOne() = 0;
     virtual void seal() = 0;
@@ -19,19 +20,21 @@ public:
 
     template <typename EventType, typename Handler>
     void registerHandler(Handler&& handler) {
-        _reactor.registerHandler<EventType>(std::forward<Handler>(handler));
+        _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
 protected:
-    Reactor _reactor;
+    ReactorT<EventVariant> _reactor;
 };
 
-template <size_t Capacity = 1024>
-class BasicEventBus : public EventBusBase {
+using EventBusBase = EventBusBaseT<DefaultEvents>;
+
+template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
+class BasicEventBus : public EventBusBaseT<EventVariant> {
 public:
     BasicEventBus() = default;
 
-    void post(Event event) override
+    void post(EventVariant event) override
     {
         _eventQueue.pushEvent(std::move(event));
     }
@@ -42,13 +45,13 @@ public:
         if (!eventOpt) {
             return false;
         }
-        _reactor.dispatch(*eventOpt);
+        this->_reactor.dispatch(*eventOpt);
         return true;
     }
 
     void seal() override
     {
-        _reactor.seal();
+        this->_reactor.seal();
     }
 
     void setOnEventsAvailable(std::function<void()> callback) override
@@ -57,9 +60,9 @@ public:
     }
 
 private:
-    EventQueue<Capacity> _eventQueue;
+    EventQueue<EventVariant, Capacity> _eventQueue;
 };
 
-using EventBus = BasicEventBus<1024>;
+using EventBus = BasicEventBus<DefaultEvents, 1024>;
 
 } // namespace corium

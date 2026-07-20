@@ -10,12 +10,12 @@
 
 namespace corium {
 
-template <size_t Capacity = 1024>
+template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
 class EventQueue {
 public:
     EventQueue() = default;
 
-    bool pushEvent(Event event)
+    bool pushEvent(EventVariant event)
     {
         auto res = _ringBuffer.tryPush(std::move(event));
         if (!res.pushed) {
@@ -37,9 +37,9 @@ public:
         return true;
     }
 
-    std::optional<Event> tryPopEvent()
+    std::optional<EventVariant> tryPopEvent()
     {
-        Event event;
+        EventVariant event;
         if (_ringBuffer.tryPop(event)) {
             return event;
         }
@@ -53,7 +53,7 @@ public:
     }
 
 private:
-    MpscRingBuffer<Event, Capacity> _ringBuffer;
+    MpscRingBuffer<EventVariant, Capacity> _ringBuffer;
     std::mutex _callbackMutex;
     std::function<void()> _onEventsAvailable;
 };

@@ -13,10 +13,11 @@
 #include "corium/ServiceContext.h"
 #include "corium/ServiceRegistry.h"
 #include "corium/internal/ServiceManager.h"
+#include "corium/internal/VariantIndex.h"
 
 namespace corium {
 
-template <size_t Capacity = 1024>
+template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
 class BasicRuntime {
 public:
     enum class State {
@@ -42,7 +43,7 @@ public:
     BasicRuntime(const BasicRuntime&) = delete;
     BasicRuntime& operator=(const BasicRuntime&) = delete;
 
-    void initialize(AppCore& application)
+    void initialize(AppCoreT<EventVariant>& application)
     {
         if (_state != State::Created) {
             throw std::logic_error("Runtime is already initialized or has been shut down.");
@@ -144,14 +145,14 @@ public:
         _eventBus.setOnEventsAvailable(std::move(callback));
     }
 
-    IEventSink& eventSink()
+    IEventSinkT<EventVariant>& eventSink()
     {
         return _eventBus;
     }
 
-    AppCoreContext applicationContext()
+    AppCoreContextT<EventVariant> applicationContext()
     {
-        return AppCoreContext{
+        return AppCoreContextT<EventVariant>{
             _eventBus,
             _eventBus,
             [this]() { requestQuit(); }
@@ -161,24 +162,26 @@ public:
 private:
     void registerCoreHandlers()
     {
-        _eventBus.template registerHandler<QuitEvent>([this](const QuitEvent&) {
-            _quitRequested = true;
-        });
+        if constexpr (has_variant_type_v<QuitEvent, EventVariant>) {
+            _eventBus.template registerHandler<QuitEvent>([this](const QuitEvent&) {
+                _quitRequested = true;
+            });
+        }
     }
 
-    BasicEventBus<Capacity> _eventBus;
+    BasicEventBus<EventVariant, Capacity> _eventBus;
     ServiceContext _serviceContext;
 
     ServiceRegistry _serviceRegistry;
     ServiceManager _serviceManager;
 
-    AppCore* _application = nullptr;
+    AppCoreT<EventVariant>* _application = nullptr;
     std::thread::id _dispatchThreadId;
     State _state = State::Created;
     std::atomic<bool> _quitRequested{false};
 };
 
-template <size_t Capacity = 1024>
-using Runtime = BasicRuntime<Capacity>;
+template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
+using Runtime = BasicRuntime<EventVariant, Capacity>;
 
 } // namespace corium

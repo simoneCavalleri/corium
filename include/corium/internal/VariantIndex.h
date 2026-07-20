@@ -24,10 +24,21 @@ struct variant_index<T, std::variant<Types...>> {
     static constexpr std::size_t value = get_variant_index_impl<T, Types...>();
     
     static_assert(value != static_cast<std::size_t>(-1), 
-                  "ERROR: The requested Event type is not part of the std::variant 'Event'!");
+                  "ERROR: The requested Event type is not part of the std::variant!");
 };
 
 template <typename T, typename Variant>
 inline constexpr std::size_t variant_index_v = variant_index<T, Variant>::value;
+
+template <typename T, typename Variant>
+struct has_variant_type;
+
+template <typename T, typename... Types>
+struct has_variant_type<T, std::variant<Types...>> {
+    static constexpr bool value = (std::is_same_v<T, Types> || ...);
+};
+
+template <typename T, typename Variant>
+inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
 
 } // namespace corium

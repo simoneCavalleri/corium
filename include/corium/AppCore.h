@@ -9,32 +9,78 @@
 
 namespace corium {
 
-template <size_t Capacity>
+template <typename EventVariant, size_t Capacity>
 class BasicRuntime;
 
-class AppCore {
+template <typename EventVariant = DefaultEvents>
+class AppCoreT {
 public:
-    virtual ~AppCore();
+    virtual ~AppCoreT() = default;
 
-    AppCore(const AppCore&) = delete;
-    AppCore& operator=(const AppCore&) = delete;
+    AppCoreT(const AppCoreT&) = delete;
+    AppCoreT& operator=(const AppCoreT&) = delete;
 
-    AppCore(AppCore&&) = delete;
-    AppCore& operator=(AppCore&&) = delete;
+    AppCoreT(AppCoreT&&) = delete;
+    AppCoreT& operator=(AppCoreT&&) = delete;
 
 protected:
-    AppCore() = default;
+    AppCoreT() = default;
 
-    EventBusBase& events();
-    IEventSink& eventSink();
+    EventBusBaseT<EventVariant>& events()
+    {
+        return _context.events();
+    }
 
-    void requestQuit();
+    IEventSinkT<EventVariant>& eventSink()
+    {
+        return _context.eventSink();
+    }
+
+    void requestQuit()
+    {
+        _context.requestQuit();
+    }
 
 private:
-    void configureServices(ServiceRegistry& registry);
-    void registerHandlers();
-    void initialize();
-    void shutdown();
+    void configureServices(ServiceRegistry& registry)
+    {
+        if (_state >= State::Configured) {
+            return;
+        }
+
+        onConfigureServices(registry);
+        _state = State::Configured;
+    }
+
+    void registerHandlers()
+    {
+        if (_state >= State::Ready) {
+            return;
+        }
+
+        onRegisterHandlers();
+        _state = State::Ready;
+    }
+
+    void initialize()
+    {
+        if (_state >= State::Running) {
+            return;
+        }
+
+        onInitialize();
+        _state = State::Running;
+    }
+
+    void shutdown()
+    {
+        if (_state == State::Shutdown) {
+            return;
+        }
+
+        onShutdown();
+        _state = State::Shutdown;
+    }
 
 private:
     virtual void onConfigureServices(ServiceRegistry& registry) {};
@@ -51,14 +97,19 @@ private:
         Shutdown
     };
 
-    AppCoreContext _context;
+    AppCoreContextT<EventVariant> _context;
 
     State _state = State::Created;
 
-    void setContext(AppCoreContext context);
+    void setContext(AppCoreContextT<EventVariant> context)
+    {
+        _context = context;
+    }
 
-    template <size_t Capacity>
+    template <typename EV, size_t Cap>
     friend class BasicRuntime;
 };
+
+using AppCore = AppCoreT<DefaultEvents>;
 
 } // namespace corium
