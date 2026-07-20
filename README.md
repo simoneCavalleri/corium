@@ -10,10 +10,9 @@
 - **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
 - **Power-Saving `waitAndPump()`**: Block efficiently until events arrive or timeout expires without custom condition variable boilerplate.
 - **Zero-Allocation Hot Path**: Hot event dispatching operates with 0 dynamic heap allocations using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and **Small Buffer Optimization (SBO)** delegates.
-- **Policy-Based Runtime Design**: Modular compile-time policies for queueing, signaling, and dispatching:
+- **Policy-Based Runtime Design**: Modular compile-time policies for queueing and signaling:
   - `QueuePolicy`: Bounded Lock-Free MPSC, Traditional Blocking Queue.
   - `SignalPolicy`: Edge-triggered Callback, Futex C++20 `std::atomic::wait()`, Busy-spin / Polling (sub-microsecond latency), Linux `eventfd` / `epoll`.
-  - `DispatchPolicy`: O(1) static array indexing with zero type erasure.
 - **Fluent Compile-Time `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types.
 - **Compile-Time Customizable `EventVariant`**: Use default event types out of the box or supply your own custom `std::variant<MyEvents...>` type list.
 - **Zero Type Erasure**: Replaces `std::function` and hash maps with `EventHandlerDelegate` (32-byte inline storage) and direct array indexing by `event.index()`.
@@ -95,6 +94,23 @@ using CustomAppRuntime = RuntimeBuilder<>
     ::WithEvents<MyEvents>
     ::WithSignalPolicy<AtomicWaitSignalPolicy>
     ::Build;
+```
+
+---
+
+## 🧪 Unit Testing
+
+Corium features a comprehensive unit test suite powered by **GoogleTest** and **CTest**:
+
+```bash
+# Configure and build unit tests
+cmake -B build -DCORIUM_BUILD_TESTS=ON
+cmake --build build
+
+# Run unit tests via CTest or test executable
+ctest --test-dir build --output-on-failure
+# or
+./build/corium_tests
 ```
 
 ---
