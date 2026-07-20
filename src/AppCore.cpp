@@ -9,7 +9,7 @@ void AppCore::setContext(AppCoreContext context)
 
 AppCore::~AppCore() = default;
 
-EventBus& AppCore::events()
+EventBusBase& AppCore::events()
 {
     return _context.events();
 }

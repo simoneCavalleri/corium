@@ -3,21 +3,57 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <utility>
 
 #include "corium/Events.h"
 #include "corium/internal/MpscRingBuffer.h"
 
 namespace corium {
 
+template <size_t Capacity = 1024>
 class EventQueue {
 public:
-    bool pushEvent(Event event);
-    std::optional<Event> tryPopEvent();
+    EventQueue() = default;
 
-    void setOnEventsAvailable(std::function<void()> callback);
+    bool pushEvent(Event event)
+    {
+        auto res = _ringBuffer.tryPush(std::move(event));
+        if (!res.pushed) {
+            return false;
+        }
+
+        if (res.wasEmpty) {
+            std::function<void()> callbackToInvoke;
+            {
+                std::lock_guard<std::mutex> lock(_callbackMutex);
+                callbackToInvoke = _onEventsAvailable;
+            }
+
+            if (callbackToInvoke) {
+                callbackToInvoke();
+            }
+        }
+
+        return true;
+    }
+
+    std::optional<Event> tryPopEvent()
+    {
+        Event event;
+        if (_ringBuffer.tryPop(event)) {
+            return event;
+        }
+        return std::nullopt;
+    }
+
+    void setOnEventsAvailable(std::function<void()> callback)
+    {
+        std::lock_guard<std::mutex> lock(_callbackMutex);
+        _onEventsAvailable = std::move(callback);
+    }
 
 private:
-    MpscRingBuffer<Event, 1024> _ringBuffer;
+    MpscRingBuffer<Event, Capacity> _ringBuffer;
     std::mutex _callbackMutex;
     std::function<void()> _onEventsAvailable;
 };

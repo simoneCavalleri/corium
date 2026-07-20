@@ -5,9 +5,12 @@
 #include "corium/EventBus.h"
 #include "corium/IEventSink.h"
 
+#include <cstddef>
+
 namespace corium {
 
-class Runtime;
+template <size_t Capacity>
+class BasicRuntime;
 
 class AppCore {
 public:
@@ -22,7 +25,7 @@ public:
 protected:
     AppCore() = default;
 
-    EventBus& events();
+    EventBusBase& events();
     IEventSink& eventSink();
 
     void requestQuit();
@@ -54,7 +57,8 @@ private:
 
     void setContext(AppCoreContext context);
 
-    friend class Runtime;
+    template <size_t Capacity>
+    friend class BasicRuntime;
 };
 
 } // namespace corium

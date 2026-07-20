@@ -10,12 +10,12 @@ class AppCoreContext {
 public:
     AppCoreContext() = default;
 
-    AppCoreContext(EventBus& events, IEventSink& eventSink, std::function<void()> quitCallback)
+    AppCoreContext(EventBusBase& events, IEventSink& eventSink, std::function<void()> quitCallback)
         : _events(&events), _eventSink(&eventSink), _quitCallback(quitCallback)
     {
     }
 
-    EventBus& events() const
+    EventBusBase& events() const
     {
         return *_events;
     }
@@ -38,7 +38,7 @@ public:
     }
 
 private:
-    EventBus* _events = nullptr;
+    EventBusBase* _events = nullptr;
     IEventSink* _eventSink = nullptr;
     std::function<void()> _quitCallback;
 };
