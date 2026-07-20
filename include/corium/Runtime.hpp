@@ -31,7 +31,9 @@ class BasicRuntime {
 public:
     enum class State {
         Created,
+        Initializing,
         Running,
+        Stopping,
         Terminated
     };
 
@@ -52,6 +54,12 @@ public:
     BasicRuntime(const BasicRuntime&) = delete;
     BasicRuntime& operator=(const BasicRuntime&) = delete;
 
+    /// @brief Access current lifecycle state of the runtime.
+    [[nodiscard]] State state() const noexcept
+    {
+        return _state.load(std::memory_order_acquire);
+    }
+
     /// @brief Initialize runtime with target application.
     /// Builds background services, registers handlers, and seals reactor.
     /// @param application Application instance to initialize.
@@ -61,6 +69,7 @@ public:
             throw std::logic_error("Runtime is already initialized or has been shut down.");
         }
 
+        _state.store(State::Initializing, std::memory_order_release);
         _application = &application;
         _dispatchThreadId = std::this_thread::get_id();
 
@@ -82,10 +91,10 @@ public:
             _serviceManager.start();
             servicesStarted = true;
 
-            _state.store(State::Running, std::memory_order_release);
-
             _application->initialize();
             appInitialized = true;
+
+            _state.store(State::Running, std::memory_order_release);
         }
         catch (...) {
             if (servicesStarted) {
@@ -93,7 +102,9 @@ public:
                 _serviceManager.join();
             }
             if (appInitialized) {
-                _application->shutdown();
+                try {
+                    _application->shutdown();
+                } catch (...) {}
             }
             _application = nullptr;
             _state.store(State::Terminated, std::memory_order_release);
@@ -168,9 +179,12 @@ public:
     /// @brief Stop background services and shut down application cleanly (exception-safe, noexcept).
     void shutdown() noexcept
     {
-        if (_state.load(std::memory_order_acquire) == State::Terminated) {
+        auto st = _state.load(std::memory_order_acquire);
+        if (st == State::Stopping || st == State::Terminated) {
             return;
         }
+
+        _state.store(State::Stopping, std::memory_order_release);
 
         try {
             _serviceManager.stop();
@@ -197,10 +211,11 @@ public:
         _quitRequested = true;
     }
 
-    /// @brief Check if runtime quit has been requested or if runtime terminated.
+    /// @brief Check if runtime quit has been requested or if runtime is stopping/terminated.
     [[nodiscard]] bool quitRequested() const
     {
-        return _quitRequested || _state.load(std::memory_order_acquire) == State::Terminated;
+        auto st = _state.load(std::memory_order_acquire);
+        return _quitRequested || st == State::Stopping || st == State::Terminated;
     }
 
     /// @brief Set callback triggered when event queue transitions from empty to non-empty (0 -> 1).

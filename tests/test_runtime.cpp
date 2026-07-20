@@ -123,4 +123,17 @@ TEST(RuntimeTest, ExceptionSafeShutdown) {
     // Calling shutdown() must not throw even if onShutdown() throws an exception
     EXPECT_NO_THROW(runtime.shutdown());
     EXPECT_TRUE(runtime.quitRequested());
+    EXPECT_EQ(runtime.state(), Runtime::State::Terminated);
+}
+
+TEST(RuntimeTest, StateMachineTransitions) {
+    Runtime runtime;
+    EXPECT_EQ(runtime.state(), Runtime::State::Created);
+
+    TestApp app;
+    runtime.initialize(app);
+    EXPECT_EQ(runtime.state(), Runtime::State::Running);
+
+    runtime.shutdown();
+    EXPECT_EQ(runtime.state(), Runtime::State::Terminated);
 }
