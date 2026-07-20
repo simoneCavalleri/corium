@@ -267,12 +267,15 @@ private:
 };
 
 /// @brief Default Runtime alias using DefaultEvents and default policies.
+using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, CallbackSignalPolicy>;
+
+/// @brief Templated Runtime alias for custom policies.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
     typename SignalPolicy = CallbackSignalPolicy
 >
-using Runtime = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
+using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
 
 /// @brief Fluent compile-time builder for configuring BasicRuntime type aliases.
 template <
