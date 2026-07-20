@@ -31,7 +31,8 @@ public:
     ServiceManager& operator=(const ServiceManager&) = delete;
 
     /// @brief Build background services from registry factories.
-    void build(ServiceRegistry& registry, ServiceContext& context)
+    template <typename EventVariant>
+    void build(ServiceRegistryT<EventVariant>& registry, ServiceContextT<EventVariant>& context)
     {
         for (auto& factory : registry._serviceFactories) {
             _services.push_back(factory(context));

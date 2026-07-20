@@ -206,9 +206,9 @@ private:
     }
 
     BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, DispatchPolicy> _eventBus;
-    ServiceContext _serviceContext;
+    ServiceContextT<EventVariant> _serviceContext;
 
-    ServiceRegistry _serviceRegistry;
+    ServiceRegistryT<EventVariant> _serviceRegistry;
     ServiceManager _serviceManager;
 
     AppCoreT<EventVariant>* _application = nullptr;

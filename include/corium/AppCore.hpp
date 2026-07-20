@@ -53,7 +53,7 @@ protected:
     }
 
 private:
-    void configureServices(ServiceRegistry& registry)
+    void configureServices(ServiceRegistryT<EventVariant>& registry)
     {
         if (_state >= State::Configured) {
             return;
@@ -96,7 +96,7 @@ private:
 private:
     /// @brief Override to configure background services.
     /// @param registry Service registry to register background services.
-    virtual void onConfigureServices(ServiceRegistry& registry) {};
+    virtual void onConfigureServices(ServiceRegistryT<EventVariant>& registry) {};
 
     /// @brief Override to wire up event handlers using events().registerHandler<T>().
     virtual void onRegisterHandlers() {};

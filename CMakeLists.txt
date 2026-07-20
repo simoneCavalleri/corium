@@ -9,6 +9,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(corium INTERFACE)
 target_include_directories(corium INTERFACE include)
 
-# Sample target
+# Sample targets
+add_executable(sample_01_basic samples/01_basic_app/main.cpp)
+target_link_libraries(sample_01_basic PRIVATE corium)
+
+add_executable(sample_02_services samples/02_background_services/main.cpp)
+target_link_libraries(sample_02_services PRIVATE corium)
+
+add_executable(sample_03_events samples/03_custom_events/main.cpp)
+target_link_libraries(sample_03_events PRIVATE corium)
+
+add_executable(sample_04_policies samples/04_policy_runtimes/main.cpp)
+target_link_libraries(sample_04_policies PRIVATE corium)
+
 add_executable(corium_demo samples/demo/main.cpp)
 target_link_libraries(corium_demo PRIVATE corium)

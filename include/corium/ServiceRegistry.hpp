@@ -15,10 +15,12 @@ namespace corium {
 class ServiceManager;
 
 /// @brief Service registry for configuring background services before runtime initialization.
-class ServiceRegistry {
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class ServiceRegistryT {
 public:
     using ServiceFactory =
-        std::function<std::unique_ptr<IBackgroundService>(ServiceContext&)>;
+        std::function<std::unique_ptr<IBackgroundService>(ServiceContextT<EventVariant>&)>;
 
     /// @brief Add a custom service factory lambda.
     /// @param factory Service factory lambda.
@@ -43,19 +45,19 @@ public:
 
         _serviceFactories.emplace_back(
             [capturedArgs = std::move(capturedArgs)]
-            (ServiceContext& context) mutable -> std::unique_ptr<IBackgroundService>
+            (ServiceContextT<EventVariant>& context) mutable -> std::unique_ptr<IBackgroundService>
             {
                 return std::apply(
                     [&context](auto&&... unpackedArgs) -> std::unique_ptr<IBackgroundService>
                     {
-                        if constexpr (std::is_constructible_v<ServiceType, ServiceContext&, decltype(unpackedArgs)...>)
+                        if constexpr (std::is_constructible_v<ServiceType, ServiceContextT<EventVariant>&, decltype(unpackedArgs)...>)
                         {
                             return std::make_unique<ServiceType>(
                                 context,
                                 std::forward<decltype(unpackedArgs)>(unpackedArgs)...
                             );
                         }
-                        else if constexpr (std::is_constructible_v<ServiceType, const ServiceContext&, decltype(unpackedArgs)...>)
+                        else if constexpr (std::is_constructible_v<ServiceType, const ServiceContextT<EventVariant>&, decltype(unpackedArgs)...>)
                         {
                             return std::make_unique<ServiceType>(
                                 context,
@@ -71,7 +73,7 @@ public:
                         else
                         {
                             static_assert(
-                                std::is_constructible_v<ServiceType, ServiceContext&, decltype(unpackedArgs)...>,
+                                std::is_constructible_v<ServiceType, ServiceContextT<EventVariant>&, decltype(unpackedArgs)...>,
                                 "ServiceType cannot be constructed with the provided arguments (with or without ServiceContext)."
                             );
                         }
@@ -87,5 +89,8 @@ private:
 
     std::vector<ServiceFactory> _serviceFactories;
 };
+
+/// @brief Default ServiceRegistry alias using DefaultEvents.
+using ServiceRegistry = ServiceRegistryT<DefaultEvents>;
 
 } // namespace corium
