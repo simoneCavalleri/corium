@@ -9,9 +9,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Library target
 add_library(corium STATIC
     src/AppCore.cpp
-    src/EventBus.cpp
-    src/Runtime.cpp
-    src/EventQueue.cpp
     src/Reactor.cpp
     src/ServiceManager.cpp
 )
