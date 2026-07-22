@@ -1,11 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
-#include <functional>
 #include <limits>
-#include <stdexcept>
-#include <thread>
+#include <utility>
 
 #include "corium/AppCoreContext.hpp"
 #include "corium/AppCore.hpp"
@@ -18,17 +17,22 @@
 
 namespace corium {
 
-/// @brief Corium Application Runtime managing event loops, policy execution, and background services.
+/// @brief Corium Application Runtime managing MPSC event loops and static policy execution.
+/// Zero dynamic heap allocations, zero RTTI.
 /// @tparam EventVariant The variant type list of supported events.
-/// @tparam QueuePolicy Policy governing event queueing (Lock-free MPSC, Blocking queue, etc.).
-/// @tparam SignalPolicy Policy governing thread notification (Callback, C++20 Futex, Busy-spin polling, Linux EventFd).
+/// @tparam QueuePolicy Policy governing event queueing (Lock-free MPSC).
+/// @tparam SignalPolicy Policy governing notification (NoSignalPolicy default).
+/// @tparam StoragePolicy Policy governing handler capacity and delegate inline storage size.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy
 >
 class BasicRuntime {
 public:
+    using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
+
     enum class State {
         Created,
         Initializing,
@@ -39,8 +43,6 @@ public:
 
     BasicRuntime()
         : _eventBus(),
-          _serviceContext{ .eventSink = _eventBus },
-          _application(nullptr),
           _state(State::Created),
           _quitRequested(false)
     {
@@ -60,56 +62,29 @@ public:
         return _state.load(std::memory_order_acquire);
     }
 
-    /// @brief Initialize runtime with target application.
-    /// Builds background services, registers handlers, and seals reactor.
+    /// @brief Initialize runtime with target application using static CRTP dispatch.
+    /// @tparam Derived Application core type deriving from AppCoreT<Derived, EventBusType>.
     /// @param application Application instance to initialize.
-    void initialize(AppCoreT<EventVariant>& application)
+    template <typename Derived>
+    void initialize(AppCoreT<Derived, EventBusType>& application)
     {
-        if (_state.load(std::memory_order_relaxed) != State::Created) {
-            throw std::logic_error("Runtime is already initialized or has been shut down.");
-        }
-
         _state.store(State::Initializing, std::memory_order_release);
-        _application = &application;
-        _dispatchThreadId = std::this_thread::get_id();
+        _appShutdownCb = StaticCallback{
+            [](void* appPtr) {
+                static_cast<AppCoreT<Derived, EventBusType>*>(appPtr)->shutdown();
+            },
+            &application
+        };
 
-        bool servicesStarted = false;
-        bool appInitialized = false;
+        application.setContext(applicationContext());
 
-        try {
-            _application->setContext(applicationContext());
-            _application->configureServices(_serviceRegistry);
+        registerCoreHandlers();
+        application.registerHandlers();
+        _eventBus.seal();
 
-            _serviceManager.build(_serviceRegistry, _serviceContext);
+        application.initialize();
 
-            registerCoreHandlers();
-
-            _application->registerHandlers();
-
-            _eventBus.seal();
-
-            _serviceManager.start();
-            servicesStarted = true;
-
-            _application->initialize();
-            appInitialized = true;
-
-            _state.store(State::Running, std::memory_order_release);
-        }
-        catch (...) {
-            if (servicesStarted) {
-                _serviceManager.stop();
-                _serviceManager.join();
-            }
-            if (appInitialized) {
-                try {
-                    _application->shutdown();
-                } catch (...) {}
-            }
-            _application = nullptr;
-            _state.store(State::Terminated, std::memory_order_release);
-            throw;
-        }
+        _state.store(State::Running, std::memory_order_release);
     }
 
     /// @brief Pump all pending events in the queue until empty.
@@ -122,14 +97,6 @@ public:
     /// @param maxEvents Maximum number of events to process in this call.
     void pump(std::size_t maxEvents)
     {
-        if (_state.load(std::memory_order_acquire) != State::Running) {
-            throw std::logic_error("Runtime::pump() called when runtime is not running.");
-        }
-
-        if (std::this_thread::get_id() != _dispatchThreadId) {
-            throw std::logic_error("Runtime::pump() must be called from the dispatch thread (the thread that called initialize()).");
-        }
-
         std::size_t processed = 0;
         while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested && processed < maxEvents) {
             if (!_eventBus.processOne()) {
@@ -140,21 +107,9 @@ public:
     }
 
     /// @brief Wait for at least one event to become available (or until timeout), then pump all pending events.
-    /// @tparam Rep Duration representation type.
-    /// @tparam Period Duration period type.
-    /// @param timeout Maximum duration to wait before pumping.
-    /// @return Number of events processed.
     template <typename Rep, typename Period>
     std::size_t waitAndPump(const std::chrono::duration<Rep, Period>& timeout)
     {
-        if (_state.load(std::memory_order_acquire) != State::Running) {
-            throw std::logic_error("Runtime::waitAndPump() called when runtime is not running.");
-        }
-
-        if (std::this_thread::get_id() != _dispatchThreadId) {
-            throw std::logic_error("Runtime::waitAndPump() must be called from the dispatch thread (the thread that called initialize()).");
-        }
-
         if (_eventBus.empty() && !_quitRequested) {
             _eventBus.signalPolicy().wait_for(timeout);
         }
@@ -169,14 +124,7 @@ public:
         return processed;
     }
 
-    /// @brief Wait indefinitely until an event arrives, then pump pending events.
-    /// @return Number of events processed.
-    std::size_t waitAndPump()
-    {
-        return waitAndPump(std::chrono::hours(24 * 365));
-    }
-
-    /// @brief Stop background services and shut down application cleanly (exception-safe, noexcept).
+    /// @brief Stop runtime cleanly.
     void shutdown() noexcept
     {
         auto st = _state.load(std::memory_order_acquire);
@@ -185,58 +133,29 @@ public:
         }
 
         _state.store(State::Stopping, std::memory_order_release);
-
-        try {
-            _serviceManager.stop();
-            _serviceManager.join();
-        } catch (...) {
-            // Guarantee service cleanup exceptions are swallowed during shutdown
+        if (_appShutdownCb) {
+            _appShutdownCb();
         }
-
-        if (_application != nullptr) {
-            try {
-                _application->shutdown();
-            } catch (...) {
-                // Guarantee user shutdown exceptions do not escape or prevent state cleanup
-            }
-            _application = nullptr;
-        }
-
         _state.store(State::Terminated, std::memory_order_release);
     }
 
     /// @brief Request runtime quit.
-    void requestQuit()
+    void requestQuit() noexcept
     {
-        _quitRequested = true;
+        _quitRequested.store(true, std::memory_order_release);
     }
 
-    /// @brief Check if runtime quit has been requested or if runtime is stopping/terminated.
-    [[nodiscard]] bool quitRequested() const
+    /// @brief Check if runtime quit has been requested.
+    [[nodiscard]] bool quitRequested() const noexcept
     {
         auto st = _state.load(std::memory_order_acquire);
-        return _quitRequested || st == State::Stopping || st == State::Terminated;
+        return _quitRequested.load(std::memory_order_acquire) || st == State::Stopping || st == State::Terminated;
     }
 
-    /// @brief Set callback triggered when event queue transitions from empty to non-empty (0 -> 1).
-    /// @param callback Function to invoke on 0->1 queue transition.
-    void setOnQueueNonEmpty(std::function<void()> callback)
+    /// @brief Set static callback triggered when event queue transitions from empty to non-empty (0 -> 1).
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
-        _eventBus.setOnQueueNonEmpty(std::move(callback));
-    }
-
-    /// @brief Set callback triggered when event queue transitions from empty to non-empty (alias).
-    /// @param callback Function to invoke on 0->1 queue transition.
-    void onQueueNonEmpty(std::function<void()> callback)
-    {
-        setOnQueueNonEmpty(std::move(callback));
-    }
-
-    /// @brief Legacy callback setter for queue availability (deprecated).
-    [[deprecated("Use setOnQueueNonEmpty or onQueueNonEmpty instead.")]]
-    void setOnEventsAvailable(std::function<void()> callback)
-    {
-        setOnQueueNonEmpty(std::move(callback));
+        _eventBus.setOnQueueNonEmpty(callback);
     }
 
     /// @brief Access reference to signal policy.
@@ -251,19 +170,27 @@ public:
         return _eventBus.signalPolicy();
     }
 
-    /// @brief Access reference to event sink.
-    IEventSinkT<EventVariant>& eventSink()
+    /// @brief Access event sink handle.
+    IEventSinkT<EventVariant> eventSink() noexcept
+    {
+        return _eventBus.sink();
+    }
+
+    /// @brief Access reference to internal event bus.
+    EventBusType& eventBus() noexcept
     {
         return _eventBus;
     }
 
     /// @brief Create AppCoreContext for application wiring.
-    AppCoreContextT<EventVariant> applicationContext()
+    AppCoreContextT<EventBusType> applicationContext()
     {
-        return AppCoreContextT<EventVariant>{
+        return AppCoreContextT<EventBusType>{
             _eventBus,
-            _eventBus,
-            [this]() { requestQuit(); }
+            StaticCallback{
+                [](void* ctx) { static_cast<BasicRuntime*>(ctx)->requestQuit(); },
+                this
+            }
         };
     }
 
@@ -272,33 +199,28 @@ private:
     {
         if constexpr (has_variant_type_v<QuitEvent, EventVariant>) {
             _eventBus.template registerHandler<QuitEvent>([this](const QuitEvent&) {
-                _quitRequested = true;
+                _quitRequested.store(true, std::memory_order_release);
             });
         }
     }
 
-    BasicEventBus<EventVariant, QueuePolicy, SignalPolicy> _eventBus;
-    ServiceContextT<EventVariant> _serviceContext;
-
-    ServiceRegistryT<EventVariant> _serviceRegistry;
-    ServiceManager _serviceManager;
-
-    AppCoreT<EventVariant>* _application = nullptr;
-    std::thread::id _dispatchThreadId;
+    EventBusType _eventBus;
+    StaticCallback _appShutdownCb;
     std::atomic<State> _state{State::Created};
     std::atomic<bool> _quitRequested{false};
 };
 
-/// @brief Default Runtime alias using DefaultEvents and default policies.
-using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, CallbackSignalPolicy>;
+/// @brief Default Runtime alias using DefaultEvents, NoSignalPolicy, and DefaultStoragePolicy.
+using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, NoSignalPolicy, DefaultStoragePolicy>;
 
 /// @brief Templated Runtime alias for custom policies.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy
 >
-using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
+using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
 
 } // namespace corium
 

@@ -1,28 +1,22 @@
 #pragma once
 
 #include "corium/AppCoreContext.hpp"
-#include "corium/ServiceRegistry.hpp"
-#include "corium/EventBus.hpp"
 #include "corium/IEventSink.hpp"
 
-#include <cstddef>
+#include <utility>
 
 namespace corium {
 
-template <
-    typename EventVariant,
-    typename QueuePolicy,
-    typename SignalPolicy
->
-class BasicRuntime;
-
-/// @brief Abstract base class for applications managed by Corium Runtime.
-/// Subclass AppCore to register event handlers, configure services, and manage application lifecycle.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
+/// @brief Static CRTP base class for applications managed by Corium Runtime.
+/// Subclass AppCoreT<Derived, EventBusType> for zero-vtable compile-time static dispatch.
+/// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
+/// @tparam EventBusType EventBus type used by the runtime.
+template <typename Derived, typename EventBusType>
 class AppCoreT {
 public:
-    virtual ~AppCoreT() = default;
+    using EventVariant = typename EventBusType::EventVariant;
+
+    AppCoreT() = default;
 
     AppCoreT(const AppCoreT&) = delete;
     AppCoreT& operator=(const AppCoreT&) = delete;
@@ -31,34 +25,28 @@ public:
     AppCoreT& operator=(AppCoreT&&) = delete;
 
 protected:
-    AppCoreT() = default;
-
     /// @brief Register event handler with automatic event type deduction from callable signature.
-    /// @tparam Handler Callable handler type (lambda or function pointer).
-    /// @param handler Callback to invoke when event occurs.
     template <typename Handler>
-    void on(Handler&& handler)
+    bool on(Handler&& handler)
     {
-        _context.events().registerHandler(std::forward<Handler>(handler));
+        return _context.events().registerHandler(std::forward<Handler>(handler));
     }
 
     /// @brief Register event handler with automatic event type deduction (alias for on).
-    /// @tparam Handler Callable handler type.
-    /// @param handler Callback to invoke when event occurs.
     template <typename Handler>
-    void handle(Handler&& handler)
+    bool handle(Handler&& handler)
     {
-        _context.events().registerHandler(std::forward<Handler>(handler));
+        return _context.events().registerHandler(std::forward<Handler>(handler));
     }
 
     /// @brief Access event bus reference.
-    [[nodiscard]] EventBusBaseT<EventVariant>& events()
+    [[nodiscard]] EventBusType& events()
     {
         return _context.events();
     }
 
-    /// @brief Access event sink reference.
-    [[nodiscard]] IEventSinkT<EventVariant>& eventSink()
+    /// @brief Access event sink handle.
+    [[nodiscard]] IEventSinkT<EventVariant> eventSink()
     {
         return _context.eventSink();
     }
@@ -69,83 +57,43 @@ protected:
         _context.requestQuit();
     }
 
-private:
-    void configureServices(ServiceRegistryT<EventVariant>& registry)
+public:
+    template <typename Registry>
+    void configureServices(Registry& registry)
     {
-        if (_state >= State::Configured) {
-            return;
+        if constexpr (requires(Derived& d, Registry& r) { d.onConfigureServices(r); }) {
+            static_cast<Derived*>(this)->onConfigureServices(registry);
         }
-
-        onConfigureServices(registry);
-        _state = State::Configured;
     }
 
     void registerHandlers()
     {
-        if (_state >= State::Ready) {
-            return;
+        if constexpr (requires(Derived& d) { d.onRegisterHandlers(); }) {
+            static_cast<Derived*>(this)->onRegisterHandlers();
         }
-
-        onRegisterHandlers();
-        _state = State::Ready;
     }
 
     void initialize()
     {
-        if (_state >= State::Running) {
-            return;
+        if constexpr (requires(Derived& d) { d.onInitialize(); }) {
+            static_cast<Derived*>(this)->onInitialize();
         }
-
-        onInitialize();
-        _state = State::Running;
     }
 
     void shutdown()
     {
-        if (_state == State::Shutdown) {
-            return;
+        if constexpr (requires(Derived& d) { d.onShutdown(); }) {
+            static_cast<Derived*>(this)->onShutdown();
         }
-
-        onShutdown();
-        _state = State::Shutdown;
     }
 
-private:
-    /// @brief Override to configure background services.
-    /// @param registry Service registry to register background services.
-    virtual void onConfigureServices(ServiceRegistryT<EventVariant>& registry) {};
-
-    /// @brief Override to wire up event handlers using events().registerHandler<T>().
-    virtual void onRegisterHandlers() {};
-
-    /// @brief Override to execute custom application initialization logic.
-    virtual void onInitialize() = 0;
-
-    /// @brief Override to execute application cleanup logic on shutdown.
-    virtual void onShutdown() {};
-
-private:
-    enum class State {
-        Created,
-        Configured,
-        Ready,
-        Running,
-        Shutdown
-    };
-
-    AppCoreContextT<EventVariant> _context;
-    State _state = State::Created;
-
-    void setContext(AppCoreContextT<EventVariant> context)
+    void setContext(AppCoreContextT<EventBusType> context)
     {
         _context = context;
     }
 
-    template <typename EV, typename QP, typename SP>
-    friend class BasicRuntime;
+private:
+    AppCoreContextT<EventBusType> _context;
 };
-
-/// @brief Default AppCore alias using DefaultEvents.
-using AppCore = AppCoreT<DefaultEvents>;
 
 } // namespace corium

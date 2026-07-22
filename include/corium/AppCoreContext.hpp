@@ -1,33 +1,34 @@
 #pragma once
 
-#include <functional>
-#include "corium/EventBus.hpp"
 #include "corium/IEventSink.hpp"
+#include "corium/policies/SignalPolicies.hpp"
 
 namespace corium {
 
 /// @brief Context object passed to AppCore providing event bus access and quit requests.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
+/// @tparam EventBusType Concrete event bus type used by the runtime.
+template <typename EventBusType>
 class AppCoreContextT {
 public:
+    using EventVariant = typename EventBusType::EventVariant;
+
     AppCoreContextT() = default;
 
-    AppCoreContextT(EventBusBaseT<EventVariant>& events, IEventSinkT<EventVariant>& eventSink, std::function<void()> quitCallback)
-        : _events(&events), _eventSink(&eventSink), _quitCallback(quitCallback)
+    AppCoreContextT(EventBusType& events, StaticCallback quitCallback)
+        : _events(&events), _quitCallback(quitCallback)
     {
     }
 
     /// @brief Access reference to the event bus.
-    [[nodiscard]] EventBusBaseT<EventVariant>& events() const
+    [[nodiscard]] EventBusType& events() const
     {
         return *_events;
     }
 
-    /// @brief Access reference to the event sink.
-    [[nodiscard]] IEventSinkT<EventVariant>& eventSink() const
+    /// @brief Access event sink handle.
+    [[nodiscard]] IEventSinkT<EventVariant> eventSink() const
     {
-        return *_eventSink;
+        return _events->sink();
     }
 
     /// @brief Request graceful application exit.
@@ -38,18 +39,14 @@ public:
         }
     }
 
-    explicit operator bool() const
+    explicit operator bool() const noexcept
     {
-        return _events != nullptr && _eventSink != nullptr;
+        return _events != nullptr;
     }
 
 private:
-    EventBusBaseT<EventVariant>* _events = nullptr;
-    IEventSinkT<EventVariant>* _eventSink = nullptr;
-    std::function<void()> _quitCallback;
+    EventBusType* _events = nullptr;
+    StaticCallback _quitCallback;
 };
-
-/// @brief Default AppCoreContext alias.
-using AppCoreContext = AppCoreContextT<DefaultEvents>;
 
 } // namespace corium

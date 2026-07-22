@@ -9,7 +9,8 @@ namespace corium {
 template <
     typename EventVariant,
     typename QueuePolicy,
-    typename SignalPolicy
+    typename SignalPolicy,
+    typename StoragePolicy
 >
 class BasicRuntime;
 
@@ -50,7 +51,8 @@ using rebind_queue_capacity_t = typename rebind_queue_capacity<QueuePolicy, NewC
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy
 >
 struct RuntimeBuilder {
     /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
@@ -58,7 +60,8 @@ struct RuntimeBuilder {
     using WithEvents = RuntimeBuilder<
         NewEventVariant,
         internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
-        SignalPolicy
+        SignalPolicy,
+        StoragePolicy
     >;
 
     /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
@@ -66,7 +69,8 @@ struct RuntimeBuilder {
     using WithCapacity = RuntimeBuilder<
         EventVariant,
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
-        SignalPolicy
+        SignalPolicy,
+        StoragePolicy
     >;
 
     /// @brief Specify custom QueuePolicy.
@@ -74,7 +78,8 @@ struct RuntimeBuilder {
     using WithQueuePolicy = RuntimeBuilder<
         EventVariant,
         NewQueuePolicy,
-        SignalPolicy
+        SignalPolicy,
+        StoragePolicy
     >;
 
     /// @brief Specify custom SignalPolicy.
@@ -82,11 +87,39 @@ struct RuntimeBuilder {
     using WithSignalPolicy = RuntimeBuilder<
         EventVariant,
         QueuePolicy,
-        NewSignalPolicy
+        NewSignalPolicy,
+        StoragePolicy
+    >;
+
+    /// @brief Specify custom StoragePolicy.
+    template <typename NewStoragePolicy>
+    using WithStoragePolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        NewStoragePolicy
+    >;
+
+    /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
+    template <size_t NewMaxHandlers>
+    using WithMaxHandlersPerEvent = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        FixedStoragePolicy<NewMaxHandlers, StoragePolicy::inline_storage_size>
+    >;
+
+    /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
+    template <size_t NewInlineSize>
+    using WithInlineSize = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        FixedStoragePolicy<StoragePolicy::max_handlers_per_event, NewInlineSize>
     >;
 
     /// @brief Complete builder configuration and return BasicRuntime type.
-    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy>;
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
 };
 
 } // namespace corium

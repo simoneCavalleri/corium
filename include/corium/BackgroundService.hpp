@@ -2,51 +2,41 @@
 
 #include "corium/IEventSink.hpp"
 #include "corium/ServiceContext.hpp"
-
-#include <stop_token>
 #include <utility>
 
 namespace corium {
 
-/// @brief Interface for asynchronous background services.
-class IBackgroundService {
+/// @brief Non-allocating base class for background services storing ServiceContext.
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+class BackgroundService {
 public:
-    virtual ~IBackgroundService() = default;
+    BackgroundService() = default;
 
-    /// @brief Execution loop run on a background jthread.
-    /// @param stopToken Cancellation token to check for graceful shutdown.
-    virtual void run(std::stop_token stopToken) = 0;
-};
-
-/// @brief Base class for background services storing ServiceContext.
-class BackgroundService : public IBackgroundService {
-public:
-    explicit BackgroundService(const ServiceContext& context)
+    explicit BackgroundService(ServiceContextT<EventVariant> context)
         : _context(context)
     {}
 
-    ~BackgroundService() override = default;
+    void setContext(ServiceContextT<EventVariant> context) noexcept
+    {
+        _context = context;
+    }
 
 protected:
-    /// @brief Access service context.
-    [[nodiscard]] ServiceContext& context() noexcept { return _context; }
-    [[nodiscard]] const ServiceContext& context() const noexcept { return _context; }
+    [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
+    [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
 
-    /// @brief Access event sink for posting events.
-    [[nodiscard]] IEventSink& events() noexcept { return _context.eventSink; }
-    [[nodiscard]] IEventSink& eventSink() noexcept { return _context.eventSink; }
+    [[nodiscard]] IEventSinkT<EventVariant> events() const noexcept { return _context.eventSink; }
+    [[nodiscard]] IEventSinkT<EventVariant> eventSink() const noexcept { return _context.eventSink; }
 
-    /// @brief Helper method to post an event to the main event queue.
-    /// @tparam EventType Type of the event.
-    /// @param event Event instance to post.
     template <typename EventType>
-    void postEvent(EventType&& event)
+    void postEvent(EventType&& event) const
     {
         _context.eventSink.post(std::forward<EventType>(event));
     }
 
 private:
-    ServiceContext _context;
+    ServiceContextT<EventVariant> _context;
 };
 
 } // namespace corium

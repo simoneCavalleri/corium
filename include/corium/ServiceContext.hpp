@@ -9,7 +9,7 @@ namespace corium {
 /// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 struct ServiceContextT {
-    IEventSinkT<EventVariant>& eventSink;
+    IEventSinkT<EventVariant> eventSink;
 };
 
 /// @brief Default ServiceContext alias using DefaultEvents.

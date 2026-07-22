@@ -6,80 +6,37 @@
 #include "corium/internal/Reactor.hpp"
 #include "corium/policies/Policies.hpp"
 
-#include <functional>
 #include <utility>
 
 namespace corium {
 
-/// @brief Abstract base class for event bus routing and dispatching.
-/// Provides the interface for processing events, sealing handlers, and registering handlers.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
-class EventBusBaseT : public IEventSinkT<EventVariant> {
-public:
-    virtual ~EventBusBaseT() = default;
-
-    /// @brief Process a single pending event from the queue.
-    /// @return true if an event was popped and dispatched; false if queue was empty.
-    virtual bool processOne() = 0;
-
-    /// @brief Check if event queue is empty.
-    [[nodiscard]] virtual bool empty() const = 0;
-
-    /// @brief Seal event handler registrations after initialization phase.
-    virtual void seal() = 0;
-
-    /// @brief Set callback triggered when queue transitions from empty to non-empty.
-    /// @param callback Function to invoke on empty -> non-empty transition.
-    virtual void setOnQueueNonEmpty(std::function<void()> callback) = 0;
-
-    /// @brief Register an event handler with explicit event type parameter.
-    /// @tparam EventType Event type to handle.
-    /// @tparam Handler Callable handler type.
-    /// @param handler Callback to invoke when event occurs.
-    template <typename EventType, typename Handler>
-    void registerHandler(Handler&& handler) {
-        reactor().template registerHandler<EventType>(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register an event handler with automatic event type deduction.
-    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
-    /// @param handler Callback to invoke when event occurs.
-    template <typename Handler>
-    void registerHandler(Handler&& handler) {
-        using EventType = callable_event_type_t<Handler>;
-        reactor().template registerHandler<EventType>(std::forward<Handler>(handler));
-    }
-
-protected:
-    /// @brief Access the reactor for handler registration and dispatching.
-    virtual ReactorT<EventVariant>& reactor() = 0;
-};
-
-/// @brief Default EventBusBase alias using DefaultEvents.
-using EventBusBase = EventBusBaseT<DefaultEvents>;
-
-/// @brief Policy-configurable event bus implementation.
-/// @tparam EventVariant The variant type list of supported events.
-/// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC, blocking queue, etc.).
-/// @tparam SignalPolicy Strategy for thread signaling (callback, futex atomic wait, polling, etc.).
+/// @brief Policy-configurable non-virtual event bus implementation.
+/// @tparam EventVariantType The variant type list of supported events.
+/// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (NoSignalPolicy by default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
 template <
-    typename EventVariant = DefaultEvents,
-    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy
 >
-class BasicEventBus : public EventBusBaseT<EventVariant> {
+class BasicEventBus {
 public:
+    using EventVariant = EventVariantType;
+    using ReactorType = ReactorT<EventVariant, StoragePolicy>;
+
     BasicEventBus() = default;
 
     /// @brief Post an event into the queue.
-    void post(EventVariant event) override
+    void post(EventVariant event)
     {
         _eventQueue.pushEvent(std::move(event));
     }
 
     /// @brief Process a single event from the queue.
-    bool processOne() override
+    /// @return true if an event was popped and dispatched; false if queue was empty.
+    bool processOne()
     {
         auto eventOpt = _eventQueue.tryPopEvent();
         if (!eventOpt) {
@@ -90,21 +47,41 @@ public:
     }
 
     /// @brief Check if event queue is empty.
-    [[nodiscard]] bool empty() const override
+    [[nodiscard]] bool empty() const
     {
         return _eventQueue.empty();
     }
 
     /// @brief Seal reactor handlers.
-    void seal() override
+    void seal()
     {
         _reactor.seal();
     }
 
-    /// @brief Set callback for event availability when queue transitions to non-empty.
-    void setOnQueueNonEmpty(std::function<void()> callback) override
+    /// @brief Set static callback for event availability when queue transitions to non-empty.
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
-        _eventQueue.setOnQueueNonEmpty(std::move(callback));
+        _eventQueue.setOnQueueNonEmpty(callback);
+    }
+
+    /// @brief Register an event handler with explicit event type parameter.
+    /// @tparam EventType Event type to handle.
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event occurs.
+    template <typename EventType, typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        return _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler with automatic event type deduction.
+    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
+    /// @param handler Callback to invoke when event occurs.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        using EventType = callable_event_type_t<Handler>;
+        return _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
     /// @brief Access reference to signal policy.
@@ -119,19 +96,24 @@ public:
         return _eventQueue.signalPolicy();
     }
 
-protected:
-    /// @brief Access reactor for base class handler registration.
-    ReactorT<EventVariant>& reactor() override
+    /// @brief Access reference to reactor.
+    ReactorType& reactor() noexcept
     {
         return _reactor;
     }
 
+    /// @brief Get an IEventSinkT handle pointing to this event bus.
+    IEventSinkT<EventVariant> sink() noexcept
+    {
+        return IEventSinkT<EventVariant>(*this);
+    }
+
 private:
     EventQueue<QueuePolicy, SignalPolicy> _eventQueue;
-    ReactorT<EventVariant> _reactor;
+    ReactorType _reactor;
 };
 
-/// @brief Default EventBus alias using DefaultEvents.
+/// @brief Default EventBus alias using DefaultEvents and NoSignalPolicy.
 using EventBus = BasicEventBus<DefaultEvents>;
 
 } // namespace corium

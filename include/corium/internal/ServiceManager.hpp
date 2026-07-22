@@ -1,99 +1,78 @@
 #pragma once
 
-#include "corium/ServiceRegistry.hpp"
 #include "corium/ServiceContext.hpp"
 
-#include <memory>
-#include <thread>
-#include <vector>
+#include <cstddef>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace corium {
 
-/// @brief Manager for creating, starting, stopping, and joining background service jthreads.
+/// @brief Static zero-allocation manager for background services.
+/// Stores service instances inline in a std::tuple. Zero heap allocations, zero vtables.
+/// @tparam Services Concrete background service types.
+template <typename... Services>
 class ServiceManager {
 public:
-    enum class State {
-        Created,
-        Built,
-        Started,
-        Stopped
-    };
-
     ServiceManager() = default;
 
-    ~ServiceManager()
+    /// @brief Initialize all managed services with the service context.
+    template <typename ServiceContext>
+    void initialize(ServiceContext context)
     {
-        stop();
-        join();
-    }
-
-    ServiceManager(const ServiceManager&) = delete;
-    ServiceManager& operator=(const ServiceManager&) = delete;
-
-    /// @brief Build background services from registry factories.
-    template <typename EventVariant>
-    void build(ServiceRegistryT<EventVariant>& registry, ServiceContextT<EventVariant>& context)
-    {
-        for (auto& factory : registry._serviceFactories) {
-            _services.push_back(factory(context));
-        }
-        _state = State::Built;
-    }
-
-    /// @brief Start background service threads.
-    void start()
-    {
-        if (_state == State::Started) {
-            return;
-        }
-
-        for (auto& service : _services) {
-            IBackgroundService* rawService = service.get();
-
-            _threads.emplace_back([rawService](std::stop_token stopToken) {
-                try {
-                    rawService->run(stopToken);
-                } catch (...) {
-                    // Prevent uncaught worker thread exceptions from terminating the process
+        std::apply([&context](auto&... service) {
+            (([&context](auto& s) {
+                if constexpr (requires { s.setContext(context); }) {
+                    s.setContext(context);
                 }
-            });
-        }
-
-        _state = State::Started;
+                if constexpr (requires { s.initialize(); }) {
+                    s.initialize();
+                }
+            }(service)), ...);
+        }, _services);
     }
 
-    /// @brief Request graceful stop of background service threads via stop_token.
-    void stop() noexcept
+    /// @brief Poll all background services (called periodically on bare-metal or event loop).
+    void poll()
     {
-        if (_state != State::Started) {
-            return;
-        }
-
-        for (auto& thread : _threads) {
-            try {
-                thread.request_stop();
-            } catch (...) {
-                // Ignore errors during stop request
-            }
-        }
-
-        _state = State::Stopped;
+        std::apply([](auto&... service) {
+            (([&](auto& s) {
+                if constexpr (requires { s.poll(); }) {
+                    s.poll();
+                }
+            }(service)), ...);
+        }, _services);
     }
 
-    /// @brief Join background service jthreads cleanly.
-    void join() noexcept
+    /// @brief Shutdown all managed services cleanly.
+    void shutdown() noexcept
     {
-        try {
-            _threads.clear();
-        } catch (...) {
-            // Ignore errors during thread join
-        }
+        std::apply([](auto&... service) {
+            (([&](auto& s) {
+                if constexpr (requires { s.shutdown(); }) {
+                    s.shutdown();
+                }
+            }(service)), ...);
+        }, _services);
+    }
+
+    /// @brief Access reference to a specific service by type.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType& get() noexcept
+    {
+        return std::get<ServiceType>(_services);
+    }
+
+    /// @brief Access const reference to a specific service by type.
+    template <typename ServiceType>
+    [[nodiscard]] const ServiceType& get() const noexcept
+    {
+        return std::get<ServiceType>(_services);
     }
 
 private:
-    std::vector<std::unique_ptr<IBackgroundService>> _services;
-    std::vector<std::jthread> _threads;
-    State _state = State::Created;
+    std::tuple<Services...> _services;
 };
 
 } // namespace corium
