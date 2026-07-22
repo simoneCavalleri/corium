@@ -4,7 +4,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -17,17 +16,71 @@
 
 namespace corium {
 
+/// @brief Lightweight non-allocating static callback wrapper (function pointer + optional context argument).
+struct StaticCallback {
+    using SimpleFn = void (*)();
+    using ContextFn = void (*)(void* arg);
+
+    ContextFn fn = nullptr;
+    void* arg = nullptr;
+
+    StaticCallback() = default;
+
+    /* implicit */ StaticCallback(SimpleFn simpleFn)
+        : fn(reinterpret_cast<ContextFn>(simpleFn)), arg(nullptr)
+    {
+        if (simpleFn) {
+            // Helper trampoline for parameterless function pointers
+            fn = [](void* context) {
+                reinterpret_cast<SimpleFn>(context)();
+            };
+            arg = reinterpret_cast<void*>(simpleFn);
+        }
+    }
+
+    StaticCallback(ContextFn contextFn, void* contextArg)
+        : fn(contextFn), arg(contextArg)
+    {}
+
+    void operator()() const {
+        if (fn) {
+            fn(arg);
+        }
+    }
+
+    explicit operator bool() const noexcept {
+        return fn != nullptr;
+    }
+};
+
+/// @brief Signal Policy for busy-spin / polling event loops (sub-microsecond latency, zero signaling cost).
+class NoSignalPolicy {
+public:
+    void setOnQueueNonEmpty(StaticCallback cb) noexcept { (void)cb; }
+    void signal() noexcept {}
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>&) noexcept
+    {
+#if defined(__arm__) || defined(__aarch64__)
+        asm volatile("yield");
+#elif defined(__x86_64__)
+        __builtin_ia32_pause();
+#else
+        // zero-op spin yield
+#endif
+    }
+};
+
 /// @brief Signal Policy invoking an edge-triggered callback on 0->1 transition when queue becomes non-empty.
 class CallbackSignalPolicy {
 public:
-    /// @brief Set callback triggered when queue becomes non-empty.
-    void setOnQueueNonEmpty(std::function<void()> callback)
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        _callback = std::move(callback);
+        _callback = callback;
     }
 
-    /// @brief Signal that events are available.
     void signal()
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -38,10 +91,6 @@ public:
         }
     }
 
-    /// @brief Wait for signal until timeout expires.
-    /// @tparam Rep Duration representation.
-    /// @tparam Period Duration period.
-    /// @param timeout Maximum duration to wait.
     template <typename Rep, typename Period>
     void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
@@ -51,7 +100,7 @@ public:
     }
 
 private:
-    std::function<void()> _callback;
+    StaticCallback _callback;
     std::mutex _mutex;
     std::condition_variable _cv;
     bool _hasEvents = false;
@@ -60,13 +109,11 @@ private:
 /// @brief Signal Policy using C++20 std::atomic::wait() / notify_one() for zero-mutex futex signaling.
 class AtomicWaitSignalPolicy {
 public:
-    /// @brief Set callback triggered when queue becomes non-empty.
-    void setOnQueueNonEmpty(std::function<void()> callback)
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
-        _userCallback = std::move(callback);
+        _userCallback = callback;
     }
 
-    /// @brief Signal that events are available via atomic flag and notify.
     void signal()
     {
         _flag.store(true, std::memory_order_release);
@@ -76,8 +123,6 @@ public:
         }
     }
 
-    /// @brief Wait until flag is set or timeout expires.
-    /// Uses polling with yield since std::atomic::wait() has no timeout overload in C++20.
     template <typename Rep, typename Period>
     void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
@@ -97,20 +142,7 @@ public:
 
 private:
     std::atomic<bool> _flag{false};
-    std::function<void()> _userCallback;
-};
-
-/// @brief Signal Policy for busy-spin / polling event loops (sub-microsecond latency, zero signaling cost).
-class NoSignalPolicy {
-public:
-    void setOnQueueNonEmpty(std::function<void()>) {}
-    void signal() noexcept {}
-
-    template <typename Rep, typename Period>
-    void wait_for(const std::chrono::duration<Rep, Period>&) noexcept
-    {
-        std::this_thread::yield();
-    }
+    StaticCallback _userCallback;
 };
 
 #ifdef __linux__
@@ -147,12 +179,11 @@ public:
         return *this;
     }
 
-    void setOnQueueNonEmpty(std::function<void()> callback)
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
-        _userCallback = std::move(callback);
+        _userCallback = callback;
     }
 
-    /// @brief Signal by writing a 64-bit counter to the Linux eventfd descriptor.
     void signal()
     {
         uint64_t val = 1;
@@ -162,7 +193,6 @@ public:
         }
     }
 
-    /// @brief Wait for eventfd signal using Linux poll().
     template <typename Rep, typename Period>
     void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
@@ -178,7 +208,6 @@ public:
         }
     }
 
-    /// @brief Access native Linux eventfd file descriptor for epoll integration.
     [[nodiscard]] int nativeHandle() const noexcept
     {
         return _fd;
@@ -186,8 +215,8 @@ public:
 
 private:
     int _fd = -1;
-    std::function<void()> _userCallback;
+    StaticCallback _userCallback;
 };
-#endif
+#endif // __linux__
 
 } // namespace corium

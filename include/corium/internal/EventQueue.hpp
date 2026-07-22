@@ -1,6 +1,5 @@
 #pragma once
 
-#include <functional>
 #include <optional>
 #include <utility>
 
@@ -14,7 +13,7 @@ namespace corium {
 /// @tparam SignalPolicy Signaling policy strategy.
 template <
     typename QueuePolicy = BoundedMpscQueuePolicy<DefaultEvents, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy
+    typename SignalPolicy = NoSignalPolicy
 >
 class EventQueue {
 public:
@@ -56,10 +55,10 @@ public:
         return _queuePolicy.empty();
     }
 
-    /// @brief Set callback triggered when queue transitions from empty to non-empty.
-    void setOnQueueNonEmpty(std::function<void()> callback)
+    /// @brief Set non-allocating static callback triggered when queue transitions from empty to non-empty.
+    void setOnQueueNonEmpty(StaticCallback callback)
     {
-        _signalPolicy.setOnQueueNonEmpty(std::move(callback));
+        _signalPolicy.setOnQueueNonEmpty(callback);
     }
 
     /// @brief Access reference to signal policy.
