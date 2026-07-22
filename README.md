@@ -11,7 +11,8 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
 - **Zero-Heap Allocation Guaranteed**: Hot event enqueueing and dispatching operate with **0 dynamic heap allocations** using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and static stack/inline storage.
 - **Zero RTTI & Zero Vtables**: Built for clean compilation with `-fno-rtti` and `-fno-exceptions`. Replaces virtual methods and type erasure with **CRTP static polymorphism** and compile-time template metaprogramming.
 - **Multi-Producer Single-Consumer (MPSC)**: Multiple thread/hardware event producers push concurrently into a lock-free ring buffer, while a single consumer thread processes and dispatches events efficiently.
-- **CRTP Static Application Core (`AppCoreT`)**: Define application logic without virtual methods (`override`). Lifecycle hooks (`onRegisterHandlers`, `onInitialize`, `onShutdown`) are resolved statically at compile time.
+- **CRTP Static Application Core (`AppCoreT`)**: Define application logic without virtual methods (`override`). Lifecycle hooks (`onConfigureServices`, `onRegisterHandlers`, `onInitialize`, `onShutdown`) are resolved statically at compile time.
+- **Multi-Threaded Background Services**: Define background worker loops using `std::jthread` and `std::stop_token`. Managed automatically via `onConfigureServices(ServiceRegistry& registry)` with zero heap allocation.
 - **Header-Only C++20 Framework**: Include `#include <corium/corium.hpp>` and link with CMake `INTERFACE`. No pre-compiled binaries required.
 - **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
 - **Policy-Based Modular Runtime**:
@@ -19,13 +20,12 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
   - `SignalPolicy`: Busy-Spin Polling (`NoSignalPolicy`), Edge-Triggered Callback (`CallbackSignalPolicy`), Futex C++20 `std::atomic::wait()` (`AtomicWaitSignalPolicy`), Linux `eventfd` (`EventFdSignalPolicy`).
   - `StoragePolicy`: Compile-time handler capacity & delegate inline storage configuration (`FixedStoragePolicy`, `DefaultStoragePolicy`, `CompactStoragePolicy`, `LargeStoragePolicy`).
 - **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types.
-- **Static Service Manager**: Manage background services stored inline in a `std::tuple` with zero dynamic allocations (`new`/`unique_ptr`/`vector`).
 
 ---
 
 ## 🚀 Quick Start
 
-### Minimal Example (CRTP & Zero-Heap)
+### Minimal Application Example (CRTP & Zero-Heap)
 
 ```cpp
 #include <corium/corium.hpp>
@@ -72,6 +72,66 @@ int main() {
         runtime.pump();
     }
 
+    runtime.shutdown();
+    return 0;
+}
+```
+
+---
+
+## 🧵 Multi-Threaded Background Services & `ServiceRegistry`
+
+Background services run on dedicated C++20 `std::jthread` worker loops, posting events concurrently to the lock-free MPSC ring buffer:
+
+```cpp
+#include <corium/corium.hpp>
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+using namespace corium;
+
+// 1. Background Worker Service (runs on its own std::jthread)
+class SensorService : public BackgroundService<> {
+public:
+    void run(std::stop_token stopToken) {
+        double elapsed = 0.0;
+        while (!stopToken.stop_requested()) {
+            postEvent(TickEvent{elapsed});
+            elapsed += 0.2;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }
+};
+
+// 2. Application Registering Background Service
+class MultiThreadApp : public AppCoreT<MultiThreadApp, Runtime::EventBusType> {
+public:
+    SensorService sensorService;
+
+    void onConfigureServices(ServiceRegistry& registry) {
+        registry.registerService(sensorService);
+    }
+
+    void onRegisterHandlers() {
+        on([](const TickEvent& e) {
+            std::cout << "Sensor Tick received (time: " << e.deltaTime << "s)\n";
+        });
+    }
+};
+
+int main() {
+    Runtime runtime;
+    MultiThreadApp app;
+
+    // Runtime automatically launches all service jthreads registered in onConfigureServices
+    runtime.initialize(app);
+
+    while (!runtime.quitRequested()) {
+        runtime.waitAndPump(std::chrono::milliseconds(50));
+    }
+
+    // Runtime signals stop_token and cleanly joins all background service jthreads
     runtime.shutdown();
     return 0;
 }
