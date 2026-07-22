@@ -31,13 +31,13 @@ TEST(FastDelegateTest, InlineSBOExecution) {
     EXPECT_EQ(invokedVal, 42);
 }
 
-TEST(FastDelegateTest, LargeHeapFallbackExecution) {
-    // Large capture exceeding 32 bytes to force heap fallback
+TEST(FastDelegateTest, CustomInlineSizeExecution) {
+    // Large capture fitted into customized 256-byte inline storage
     char largeBuffer[128];
     for (int i = 0; i < 128; ++i) largeBuffer[i] = static_cast<char>(i);
 
     int sum = 0;
-    EventHandlerDelegate<TickEvent> delegate([largeBuffer, &sum](const TickEvent&) {
+    EventHandlerDelegate<TickEvent, 256> delegate([largeBuffer, &sum](const TickEvent&) {
         for (int i = 0; i < 128; ++i) sum += largeBuffer[i];
     });
 

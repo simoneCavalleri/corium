@@ -11,10 +11,8 @@ namespace corium {
 /// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
 /// Eliminates std::function heap allocations and virtual table overhead for event handlers.
 /// @tparam EventType The concrete event type invoked by this delegate.
-template <typename EventType>
+template <typename EventType, std::size_t InlineSize = 32>
 class EventHandlerDelegate {
-    static constexpr std::size_t InlineSize = 32;
-
     using StubFn = void (*)(void* instance, const EventType& event);
     using DestroyFn = void (*)(void* instance) noexcept;
     using MoveFn = void (*)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept;
@@ -39,46 +37,34 @@ public:
             std::is_nothrow_destructible_v<Decayed>,
             "Handler destructor must be noexcept"
         );
+        static_assert(
+            sizeof(Decayed) <= InlineSize,
+            "Handler size exceeds FastDelegate inline storage size! Reduce captured state or increase InlineSize."
+        );
+        static_assert(
+            alignof(Decayed) <= alignof(std::max_align_t),
+            "Handler alignment requirement exceeds inline storage alignment."
+        );
+        static_assert(
+            std::is_nothrow_move_constructible_v<Decayed>,
+            "Handler must be nothrow move constructible."
+        );
 
-        constexpr bool fitsInline =
-            sizeof(Decayed) <= InlineSize &&
-            alignof(Decayed) <= alignof(std::max_align_t) &&
-            std::is_nothrow_move_constructible_v<Decayed>;
+        void* storage = static_cast<void*>(_inlineStorage);
+        ::new (storage) Decayed(std::forward<Handler>(handler));
+        _instance = storage;
 
-        if constexpr (fitsInline) {
-            void* storage = static_cast<void*>(_inlineStorage);
+        _destroy = [](void* instance) noexcept {
+            reinterpret_cast<Decayed*>(instance)->~Decayed();
+        };
 
-            ::new (storage) Decayed(std::forward<Handler>(handler));
-
-            _instance = storage;
-
-            _destroy = [](void* instance) noexcept {
-                reinterpret_cast<Decayed*>(instance)->~Decayed();
-            };
-
-            _move = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
-                auto* src = reinterpret_cast<Decayed*>(srcInstance);
-
-                ::new (destStorage) Decayed(std::move(*src));
-                src->~Decayed();
-
-                destInstance = destStorage;
-                srcInstance = nullptr;
-            };
-        } else {
-            auto* heapObj = new Decayed(std::forward<Handler>(handler));
-
-            _instance = heapObj;
-
-            _destroy = [](void* instance) noexcept {
-                delete reinterpret_cast<Decayed*>(instance);
-            };
-
-            _move = [](void*, void*& destInstance, void*& srcInstance) noexcept {
-                destInstance = srcInstance;
-                srcInstance = nullptr;
-            };
-        }
+        _move = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
+            auto* src = reinterpret_cast<Decayed*>(srcInstance);
+            ::new (destStorage) Decayed(std::move(*src));
+            src->~Decayed();
+            destInstance = destStorage;
+            srcInstance = nullptr;
+        };
 
         _stub = [](void* instance, const EventType& event) {
             (*reinterpret_cast<Decayed*>(instance))(event);

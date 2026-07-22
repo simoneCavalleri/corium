@@ -8,9 +8,9 @@ TEST(ReactorTest, ExplicitHandlerRegistrationAndDispatch) {
     Reactor reactor;
     int tickCount = 0;
 
-    reactor.registerHandler<TickEvent>([&tickCount](const TickEvent&) {
+    EXPECT_TRUE(reactor.registerHandler<TickEvent>([&tickCount](const TickEvent&) {
         tickCount++;
-    });
+    }));
 
     reactor.seal();
 
@@ -26,13 +26,13 @@ TEST(ReactorTest, AutoDeduceLambdaHandler) {
     int updateCount = 0;
     int quitCount = 0;
 
-    reactor.registerHandler([&updateCount](const UpdateEvent&) {
+    EXPECT_TRUE(reactor.registerHandler([&updateCount](const UpdateEvent&) {
         updateCount++;
-    });
+    }));
 
-    reactor.registerHandler([&quitCount](const QuitEvent&) {
+    EXPECT_TRUE(reactor.registerHandler([&quitCount](const QuitEvent&) {
         quitCount++;
-    });
+    }));
 
     reactor.seal();
 
@@ -52,8 +52,8 @@ TEST(ReactorTest, MultipleHandlersForSameEvent) {
     int h1Count = 0;
     int h2Count = 0;
 
-    reactor.registerHandler([&h1Count](const TickEvent&) { h1Count++; });
-    reactor.registerHandler([&h2Count](const TickEvent&) { h2Count++; });
+    EXPECT_TRUE(reactor.registerHandler([&h1Count](const TickEvent&) { h1Count++; }));
+    EXPECT_TRUE(reactor.registerHandler([&h2Count](const TickEvent&) { h2Count++; }));
 
     reactor.seal();
 
@@ -62,4 +62,14 @@ TEST(ReactorTest, MultipleHandlersForSameEvent) {
 
     EXPECT_EQ(h1Count, 1);
     EXPECT_EQ(h2Count, 1);
+}
+
+TEST(ReactorTest, FixedCapacityLimit) {
+    // Reactor with max 2 handlers per event type using FixedStoragePolicy
+    ReactorT<DefaultEvents, FixedStoragePolicy<2>> reactor;
+
+    EXPECT_TRUE(reactor.registerHandler([](const TickEvent&) {}));
+    EXPECT_TRUE(reactor.registerHandler([](const TickEvent&) {}));
+    // 3rd registration exceeds capacity
+    EXPECT_FALSE(reactor.registerHandler([](const TickEvent&) {}));
 }

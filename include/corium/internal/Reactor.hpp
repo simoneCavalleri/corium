@@ -1,121 +1,125 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
-#include <memory>
-#include <mutex>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "corium/Events.hpp"
 #include "corium/internal/CallableTraits.hpp"
 #include "corium/internal/FastDelegate.hpp"
 #include "corium/internal/VariantIndex.hpp"
+#include "corium/policies/StoragePolicies.hpp"
 
 namespace corium {
 
-/// @brief Static Event Reactor providing O(1) direct array indexing and zero type erasure dispatching.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
-class ReactorT {
-    static constexpr size_t VariantSize = std::variant_size_v<EventVariant>;
+/// @brief Fixed-capacity stack-allocated list of event handlers for a single event type.
+/// @tparam EventType Event type handled.
+/// @tparam MaxHandlers Maximum number of handlers allowed for this event type.
+/// @tparam InlineSize Max payload size in bytes for handler inline storage.
+template <typename EventType, size_t MaxHandlers, size_t InlineSize>
+class FixedHandlerList {
+public:
+    FixedHandlerList() = default;
 
-    struct TypeHandlersBase {
-        virtual ~TypeHandlersBase() = default;
-        virtual void dispatch(const EventVariant& event) = 0;
-    };
-
-    template <typename EventType>
-    struct TypeHandlers : public TypeHandlersBase {
-        std::vector<EventHandlerDelegate<EventType>> handlers;
-
-        void dispatch(const EventVariant& event) override
-        {
-            const auto& concreteEvent = std::get<EventType>(event);
-            for (const auto& handler : handlers) {
-                handler.invoke(concreteEvent);
-            }
+    template <typename Handler>
+    bool registerHandler(Handler&& handler) {
+        if (_count >= MaxHandlers) {
+            return false;
         }
-    };
+        _handlers[_count] = EventHandlerDelegate<EventType, InlineSize>(std::forward<Handler>(handler));
+        _count++;
+        return true;
+    }
+
+    void dispatch(const EventType& event) const {
+        for (size_t i = 0; i < _count; ++i) {
+            _handlers[i].invoke(event);
+        }
+    }
+
+    [[nodiscard]] size_t size() const noexcept {
+        return _count;
+    }
+
+private:
+    std::array<EventHandlerDelegate<EventType, InlineSize>, MaxHandlers> _handlers{};
+    size_t _count = 0;
+};
+
+/// @brief Primary template declaration for ReactorT.
+template <typename EventVariant = DefaultEvents, typename StoragePolicy = DefaultStoragePolicy>
+class ReactorT;
+
+/// @brief Static Event Reactor providing compile-time zero-heap dispatching.
+/// @tparam Events Supported event types in std::variant.
+/// @tparam StoragePolicy Configuration policy for handler capacity and inline storage size.
+template <typename... Events, typename StoragePolicy>
+class ReactorT<std::variant<Events...>, StoragePolicy> {
+    static constexpr size_t MaxHandlersPerEvent = StoragePolicy::max_handlers_per_event;
+    static constexpr size_t InlineSize = StoragePolicy::inline_storage_size;
 
 public:
+    using EventVariant = std::variant<Events...>;
+
     ReactorT() = default;
     ~ReactorT() = default;
 
     ReactorT(const ReactorT&) = delete;
     ReactorT& operator=(const ReactorT&) = delete;
 
+    ReactorT(ReactorT&&) noexcept = default;
+    ReactorT& operator=(ReactorT&&) noexcept = default;
+
     /// @brief Register event handler for concrete event type with explicit type parameter.
     /// @tparam EventType Event type to handle.
     /// @tparam Handler Callable handler type.
     /// @param handler Callback to invoke when event is dispatched.
     template <typename EventType, typename Handler>
-    void registerHandler(Handler&& handler) {
-        std::lock_guard<std::mutex> lock(_mutex);
-
-        constexpr size_t eventIndex = variant_index_v<EventType, EventVariant>;
-
-        if (!_handlers[eventIndex]) {
-            _handlers[eventIndex] = std::make_unique<TypeHandlers<EventType>>();
-        }
-
-        auto* concreteHandlers = static_cast<TypeHandlers<EventType>*>(_handlers[eventIndex].get());
-        concreteHandlers->handlers.emplace_back(std::forward<Handler>(handler));
+    bool registerHandler(Handler&& handler) {
+        static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
+        auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+        return list.registerHandler(std::forward<Handler>(handler));
     }
 
     /// @brief Register event handler with automatic event type deduction from handler parameter signature.
     /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
     /// @param handler Callback to invoke when event is dispatched.
     template <typename Handler>
-    void registerHandler(Handler&& handler) {
+    bool registerHandler(Handler&& handler) {
         using EventType = callable_event_type_t<Handler>;
-        registerHandler<EventType>(std::forward<Handler>(handler));
+        return registerHandler<EventType>(std::forward<Handler>(handler));
     }
 
-    /// @brief Dispatch event via direct O(1) array lookup (zero lock acquisition once sealed).
+    /// @brief Dispatch event via std::visit to concrete static handler array.
     /// @param event Event instance to dispatch.
-    void dispatch(const EventVariant& event)
-    {
-        size_t currentIndex = event.index();
-        if (currentIndex >= _handlers.size()) {
-            return;
-        }
-
-        if (_sealed) {
-            if (_handlers[currentIndex]) {
-                _handlers[currentIndex]->dispatch(event);
-            }
-            return;
-        }
-
-        TypeHandlersBase* target = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            if (_handlers[currentIndex]) {
-                target = _handlers[currentIndex].get();
-            }
-        }
-
-        if (target) {
-            target->dispatch(event);
-        }
+    void dispatch(const EventVariant& event) const {
+        std::visit([this](const auto& concreteEvent) {
+            using EventType = std::decay_t<decltype(concreteEvent)>;
+            const auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+            list.dispatch(concreteEvent);
+        }, event);
     }
 
-    /// @brief Seal reactor handlers for lock-free dispatch during event loop execution.
-    void seal()
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
+    /// @brief Seal reactor handlers.
+    void seal() noexcept {
         _sealed = true;
     }
 
+    /// @brief Check if reactor has been sealed.
+    [[nodiscard]] bool sealed() const noexcept {
+        return _sealed;
+    }
+
 private:
-    std::array<std::unique_ptr<TypeHandlersBase>, VariantSize> _handlers;
-    std::mutex _mutex;
+    std::tuple<FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
     bool _sealed = false;
 };
 
-/// @brief Default Reactor alias using DefaultEvents.
+/// @brief Default Reactor alias using DefaultEvents and DefaultStoragePolicy.
 using Reactor = ReactorT<DefaultEvents>;
 
 } // namespace corium
