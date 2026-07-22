@@ -1,5 +1,5 @@
 // =============================================================================
-// Corium Sample 02 — Multi-Producer Background Services (Zero-Heap Bare Metal)
+// Corium Sample 02 — Multi-Producer Background Services (Zero-Heap)
 //
 // This example demonstrates:
 //   1. Static non-allocating BackgroundService instances.
@@ -29,18 +29,18 @@ private:
     double _elapsed = 0.0;
 };
 
-// 2. Background Input Simulation Service
-class InputSimulationService : public BackgroundService<> {
+// 2. Background Signal Producer Service
+class SignalProducerService : public BackgroundService<> {
 public:
     void poll() {
-        _clickCount++;
-        if (_clickCount % 3 == 0) {
-            postEvent(MouseClickEvent{_clickCount * 10, _clickCount * 15, true, false});
+        _signalCount++;
+        if (_signalCount % 3 == 0) {
+            postEvent(SignalEvent{static_cast<uint32_t>(_signalCount)});
         }
     }
 
 private:
-    int _clickCount = 0;
+    int _signalCount = 0;
 };
 
 // 3. Application Managing Both Services via CRTP
@@ -52,8 +52,8 @@ public:
             std::cout << "[ServiceApp] Sensor Tick #" << _tickCount << " (time: " << e.deltaTime << "s)\n";
         });
 
-        on([this](const MouseClickEvent& e) {
-            std::cout << "[ServiceApp] Simulated MouseClick at (" << e.x << ", " << e.y << ")\n";
+        on([this](const SignalEvent& e) {
+            std::cout << "[ServiceApp] SignalEvent received with ID: " << e.id << "\n";
             if (_tickCount >= 5) {
                 std::cout << "[ServiceApp] Processed 5 ticks, requesting quit...\n";
                 requestQuit();
@@ -76,7 +76,7 @@ int main() {
 
     Runtime runtime;
     ServiceApp app;
-    ServiceManager<SensorService, InputSimulationService> serviceManager;
+    ServiceManager<SensorService, SignalProducerService> serviceManager;
 
     runtime.initialize(app);
     serviceManager.initialize(ServiceContext{runtime.eventSink()});

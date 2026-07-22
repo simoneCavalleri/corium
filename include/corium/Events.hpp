@@ -1,129 +1,61 @@
 #pragma once
 
+#include <cstdint>
 #include <variant>
 
 namespace corium {
 
-/// @brief Event emitted for logical frame updates.
-struct UpdateEvent {
-    double deltaTime;
-
-    explicit UpdateEvent(double dt = 0.0)
-        : deltaTime(dt) {}
-};
-
-/// @brief Event emitted for rendering updates.
-struct RenderEvent {
-    double deltaTime;
-
-    explicit RenderEvent(double dt = 0.0)
-        : deltaTime(dt) {}
-};
-
-/// @brief Periodic heartbeat or timer tick event.
-struct TickEvent {
-    double deltaTime;
-
-    explicit TickEvent(double dt = 0.0)
-        : deltaTime(dt) {}
-};
-
-/// @brief Event emitted when application window is resized.
-struct WindowResizeEvent {
-    int width;
-    int height;
-
-    WindowResizeEvent(int newWidth, int newHeight)
-        : width(newWidth), height(newHeight) {}
-};
-
-/// @brief Event emitted when window close button is pressed.
-struct WindowCloseEvent {};
-
-/// @brief Mouse click event.
-struct MouseClickEvent {
-    int x;
-    int y;
-    bool leftButton;
-    bool rightButton;
-
-    MouseClickEvent(int xPos, int yPos, bool left, bool right)
-        : x(xPos), y(yPos), leftButton(left), rightButton(right) {}
-};
-
-/// @brief Mouse button press event.
-struct MousePressedEvent {
-    int x;
-    int y;
-    int button;
-
-    MousePressedEvent(int xPos, int yPos, int buttonCode)
-        : x(xPos), y(yPos), button(buttonCode) {}
-};
-
-/// @brief Mouse button release event.
-struct MouseReleasedEvent {
-    int x;
-    int y;
-    int button;
-
-    MouseReleasedEvent(int xPos, int yPos, int buttonCode)
-        : x(xPos), y(yPos), button(buttonCode) {}
-};
-
-/// @brief Mouse cursor move event.
-struct MouseMoveEvent {
-    int x;
-    int y;
-
-    MouseMoveEvent(int xPos, int yPos)
-        : x(xPos), y(yPos) {}
-};
-
-/// @brief Mouse wheel scroll event.
-struct MouseScrollEvent {
-    int delta;
-
-    explicit MouseScrollEvent(int scrollDelta)
-        : delta(scrollDelta) {}
-};
-
-/// @brief Keyboard key press event.
-struct KeyPressedEvent {
-    int keyCode;
-
-    explicit KeyPressedEvent(int code)
-        : keyCode(code) {}
-};
-
-/// @brief Keyboard key release event.
-struct KeyReleasedEvent {
-    int keyCode;
-
-    explicit KeyReleasedEvent(int code)
-        : keyCode(code) {}
-};
-
 /// @brief Application shutdown event.
 struct QuitEvent {};
 
-/// @brief Default variant list of standard Corium events.
-using DefaultEvents = std::variant<
-    UpdateEvent,
-    RenderEvent,
-    TickEvent,
-    WindowResizeEvent,
-    WindowCloseEvent,
-    MouseClickEvent,
-    MousePressedEvent,
-    MouseReleasedEvent,
-    MouseMoveEvent,
-    MouseScrollEvent,
-    KeyPressedEvent,
-    KeyReleasedEvent,
-    QuitEvent>;
+/// @brief Periodic heartbeat or hardware timer tick event.
+struct TickEvent {
+    uint64_t tick = 0;
+    double deltaTime = 0.0;
 
-/// @brief Alias for backwards compatibility with DefaultEvents.
+    constexpr TickEvent() = default;
+    constexpr explicit TickEvent(double dt, uint64_t t = 0)
+        : tick(t), deltaTime(dt) {}
+};
+
+/// @brief Logical update or execution step event.
+struct UpdateEvent {
+    double deltaTime = 0.0;
+
+    constexpr UpdateEvent() = default;
+    constexpr explicit UpdateEvent(double dt)
+        : deltaTime(dt) {}
+};
+
+/// @brief System, hardware, or framework error event.
+struct ErrorEvent {
+    uint32_t code = 0;
+    uintptr_t payload = 0;
+
+    constexpr ErrorEvent() = default;
+    constexpr ErrorEvent(uint32_t errCode, uintptr_t data = 0)
+        : code(errCode), payload(data) {}
+};
+
+/// @brief Generic signal or notification trigger event.
+struct SignalEvent {
+    uint32_t id = 0;
+
+    constexpr SignalEvent() = default;
+    constexpr explicit SignalEvent(uint32_t signalId)
+        : id(signalId) {}
+};
+
+/// @brief Default variant list of core Corium events.
+using DefaultEvents = std::variant<
+    QuitEvent,
+    TickEvent,
+    UpdateEvent,
+    ErrorEvent,
+    SignalEvent
+>;
+
+/// @brief Alias for DefaultEvents.
 using Event = DefaultEvents;
 
 } // namespace corium
