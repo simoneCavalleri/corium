@@ -86,16 +86,16 @@ BENCHMARK(BM_MpscRingBufferPop);
 // 4. Runtime End-To-End Post & Pump Throughput
 // =============================================================================
 
-class BenchApp : public AppCore {
-protected:
-    void onRegisterHandlers() override {
+class BenchApp : public AppCoreT<BenchApp, Runtime::EventBusType> {
+public:
+    void onRegisterHandlers() {
         on([](const TickEvent& e) {
             double dt = e.deltaTime;
             benchmark::DoNotOptimize(dt);
         });
     }
 
-    void onInitialize() override {}
+    void onInitialize() {}
 };
 
 static void BM_RuntimePostAndPump(benchmark::State& state) {
@@ -116,7 +116,7 @@ static void BM_RuntimePostAndPump(benchmark::State& state) {
 BENCHMARK(BM_RuntimePostAndPump);
 
 // =============================================================================
-// 5. Signal Policy Comparison (NoSignalPolicy vs AtomicWaitSignalPolicy vs CallbackSignalPolicy)
+// 5. Signal Policy Comparison (NoSignalPolicy vs AtomicWaitSignalPolicy)
 // =============================================================================
 
 static void BM_SignalPolicy_NoSignal(benchmark::State& state) {
@@ -140,13 +140,25 @@ static void BM_SignalPolicy_NoSignal(benchmark::State& state) {
 }
 BENCHMARK(BM_SignalPolicy_NoSignal);
 
-static void BM_SignalPolicy_AtomicWait(benchmark::State& state) {
-    using FutexRuntime = RuntimeBuilder<>
-        ::WithSignalPolicy<AtomicWaitSignalPolicy>
-        ::Build;
+using FutexRuntime = RuntimeBuilder<>
+    ::WithSignalPolicy<AtomicWaitSignalPolicy>
+    ::Build;
 
+class FutexBenchApp : public AppCoreT<FutexBenchApp, FutexRuntime::EventBusType> {
+public:
+    void onRegisterHandlers() {
+        on([](const TickEvent& e) {
+            double dt = e.deltaTime;
+            benchmark::DoNotOptimize(dt);
+        });
+    }
+
+    void onInitialize() {}
+};
+
+static void BM_SignalPolicy_AtomicWait(benchmark::State& state) {
     FutexRuntime runtime;
-    BenchApp app;
+    FutexBenchApp app;
     runtime.initialize(app);
 
     TickEvent event{0.016};
