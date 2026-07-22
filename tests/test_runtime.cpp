@@ -3,34 +3,34 @@
 
 using namespace corium;
 
-class TestApp : public AppCore {
+template <typename EventBusType = Runtime::EventBusType>
+class TestApp : public AppCoreT<TestApp<EventBusType>, EventBusType> {
 public:
     int tickCount = 0;
     bool initialized = false;
     bool shutdownCalled = false;
 
-protected:
-    void onRegisterHandlers() override {
-        on([this](const TickEvent&) {
+    void onRegisterHandlers() {
+        this->on([this](const TickEvent&) {
             tickCount++;
             if (tickCount >= 3) {
-                requestQuit();
+                this->requestQuit();
             }
         });
     }
 
-    void onInitialize() override {
+    void onInitialize() {
         initialized = true;
     }
 
-    void onShutdown() override {
+    void onShutdown() {
         shutdownCalled = true;
     }
 };
 
 TEST(RuntimeTest, BasicLifecycleAndPump) {
     Runtime runtime;
-    TestApp app;
+    TestApp<> app;
 
     runtime.initialize(app);
     EXPECT_TRUE(app.initialized);
@@ -53,48 +53,14 @@ TEST(RuntimeTest, BasicLifecycleAndPump) {
     EXPECT_TRUE(app.shutdownCalled);
 }
 
-TEST(RuntimeTest, WaitAndPumpTimeout) {
-    Runtime runtime;
-    TestApp app;
-
-    runtime.initialize(app);
-
-    // Wait and pump when empty should timeout safely without processing events
-    auto processed = runtime.waitAndPump(std::chrono::milliseconds(10));
-    EXPECT_EQ(processed, 0);
-
-    runtime.eventSink().post(TickEvent{0.1});
-    processed = runtime.waitAndPump(std::chrono::milliseconds(10));
-    EXPECT_EQ(processed, 1);
-
-    runtime.shutdown();
-}
-
 TEST(RuntimeTest, PolicyRuntimes) {
-    // 1. AtomicWaitSignalPolicy Futex Runtime
-    using FutexRuntime = RuntimeBuilder<>
-        ::WithSignalPolicy<AtomicWaitSignalPolicy>
-        ::Build;
-
-    FutexRuntime futexRuntime;
-    TestApp futexApp;
-
-    futexRuntime.initialize(futexApp);
-    futexRuntime.eventSink().post(TickEvent{0.1});
-    futexRuntime.eventSink().post(TickEvent{0.2});
-    futexRuntime.eventSink().post(TickEvent{0.3});
-
-    futexRuntime.waitAndPump(std::chrono::milliseconds(50));
-    EXPECT_TRUE(futexRuntime.quitRequested());
-    futexRuntime.shutdown();
-
-    // 2. NoSignalPolicy Busy-Spin Runtime
+    // 1. NoSignalPolicy Busy-Spin Runtime
     using BusySpinRuntime = RuntimeBuilder<>
         ::WithSignalPolicy<NoSignalPolicy>
         ::Build;
 
     BusySpinRuntime spinRuntime;
-    TestApp spinApp;
+    TestApp<BusySpinRuntime::EventBusType> spinApp;
 
     spinRuntime.initialize(spinApp);
     spinRuntime.eventSink().post(TickEvent{0.1});
@@ -104,33 +70,30 @@ TEST(RuntimeTest, PolicyRuntimes) {
     spinRuntime.pump();
     EXPECT_TRUE(spinRuntime.quitRequested());
     spinRuntime.shutdown();
-}
 
-class ThrowingApp : public AppCore {
-protected:
-    void onInitialize() override {}
-    void onShutdown() override {
-        throw std::runtime_error("Simulated user exception in onShutdown()");
-    }
-};
+    // 2. StoragePolicy Customization
+    using LargeRuntime = RuntimeBuilder<>
+        ::WithStoragePolicy<LargeStoragePolicy>
+        ::Build;
 
-TEST(RuntimeTest, ExceptionSafeShutdown) {
-    Runtime runtime;
-    ThrowingApp app;
+    LargeRuntime largeRuntime;
+    TestApp<LargeRuntime::EventBusType> largeApp;
 
-    runtime.initialize(app);
+    largeRuntime.initialize(largeApp);
+    largeRuntime.eventSink().post(TickEvent{0.1});
+    largeRuntime.eventSink().post(TickEvent{0.2});
+    largeRuntime.eventSink().post(TickEvent{0.3});
 
-    // Calling shutdown() must not throw even if onShutdown() throws an exception
-    EXPECT_NO_THROW(runtime.shutdown());
-    EXPECT_TRUE(runtime.quitRequested());
-    EXPECT_EQ(runtime.state(), Runtime::State::Terminated);
+    largeRuntime.pump();
+    EXPECT_TRUE(largeRuntime.quitRequested());
+    largeRuntime.shutdown();
 }
 
 TEST(RuntimeTest, StateMachineTransitions) {
     Runtime runtime;
     EXPECT_EQ(runtime.state(), Runtime::State::Created);
 
-    TestApp app;
+    TestApp<> app;
     runtime.initialize(app);
     EXPECT_EQ(runtime.state(), Runtime::State::Running);
 
@@ -144,9 +107,11 @@ TEST(RuntimeTest, BuilderOrderIndependence) {
     using OrderA = RuntimeBuilder<>
         ::WithCapacity<4096>
         ::WithEvents<GameEvents>
+        ::WithStoragePolicy<LargeStoragePolicy>
         ::Build;
 
     using OrderB = RuntimeBuilder<>
+        ::WithStoragePolicy<LargeStoragePolicy>
         ::WithEvents<GameEvents>
         ::WithCapacity<4096>
         ::Build;

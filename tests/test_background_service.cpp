@@ -3,28 +3,24 @@
 
 using namespace corium;
 
-class TestProducerService : public BackgroundService {
+class TestProducerService : public BackgroundService<> {
 public:
-    using BackgroundService::BackgroundService;
-
-    void run(std::stop_token stopToken) override {
-        while (!stopToken.stop_requested()) {
-            postEvent(TickEvent{0.05});
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
+    void poll() {
+        _tickCount++;
+        postEvent(TickEvent{0.05});
     }
+
+    int count() const { return _tickCount; }
+
+private:
+    int _tickCount = 0;
 };
 
-class ServiceTestApp : public AppCore {
+class ServiceTestApp : public AppCoreT<ServiceTestApp, Runtime::EventBusType> {
 public:
     int tickEventsReceived = 0;
 
-protected:
-    void onConfigureServices(ServiceRegistry& registry) override {
-        registry.addService<TestProducerService>();
-    }
-
-    void onRegisterHandlers() override {
+    void onRegisterHandlers() {
         on([this](const TickEvent&) {
             tickEventsReceived++;
             if (tickEventsReceived >= 5) {
@@ -32,21 +28,24 @@ protected:
             }
         });
     }
-
-    void onInitialize() override {}
 };
 
-TEST(BackgroundServiceTest, ServiceThreadLifecycleAndEventPosting) {
+TEST(BackgroundServiceTest, StaticServiceLifecycleAndEventPosting) {
     Runtime runtime;
     ServiceTestApp app;
+    ServiceManager<TestProducerService> manager;
 
     runtime.initialize(app);
+    manager.initialize(ServiceContext{runtime.eventSink()});
 
     while (!runtime.quitRequested()) {
-        runtime.waitAndPump(std::chrono::milliseconds(50));
+        manager.poll();
+        runtime.pump();
     }
 
     EXPECT_GE(app.tickEventsReceived, 5);
+    EXPECT_GE(manager.get<TestProducerService>().count(), 5);
 
+    manager.shutdown();
     runtime.shutdown();
 }

@@ -1,10 +1,10 @@
 // =============================================================================
-// Corium Sample 01 — Basic Application
+// Corium Sample 01 — Basic Application (Bare-Metal CRTP)
 //
 // This example demonstrates:
-//   1. Subclassing AppCore to define application logic.
+//   1. Subclassing AppCoreT<BasicApp, EventBusType> using CRTP static dispatch.
 //   2. Registering auto-deduced lambda event handlers via on(...).
-//   3. Initializing Runtime and driving the event loop via pump().
+//   3. Initializing zero-heap Runtime and driving the event loop via pump().
 //   4. Gracefully stopping the event loop with requestQuit().
 // =============================================================================
 
@@ -13,9 +13,9 @@
 
 using namespace corium;
 
-class BasicApp : public AppCore {
-protected:
-    void onRegisterHandlers() override {
+class BasicApp : public AppCoreT<BasicApp, Runtime::EventBusType> {
+public:
+    void onRegisterHandlers() {
         // Auto-deduces UpdateEvent from lambda argument signature
         on([this](const UpdateEvent& event) {
             _frameCount++;
@@ -34,11 +34,11 @@ protected:
         });
     }
 
-    void onInitialize() override {
+    void onInitialize() {
         std::cout << "[BasicApp] Initialized successfully.\n";
     }
 
-    void onShutdown() override {
+    void onShutdown() {
         std::cout << "[BasicApp] Shutdown complete.\n";
     }
 

@@ -1,59 +1,52 @@
 // =============================================================================
-// Corium Sample 02 — Multi-Threaded Background Services
+// Corium Sample 02 — Multi-Producer Background Services (Zero-Heap Bare Metal)
 //
 // This example demonstrates:
-//   1. Registering multiple BackgroundService instances in ServiceRegistry.
-//   2. Asynchronous thread producers writing concurrently to the Lock-Free MPSC queue.
+//   1. Static non-allocating BackgroundService instances.
+//   2. Multiple producers pushing to the lock-free MPSC event queue.
 //   3. Auto-deduced lambda event handlers via on(...).
-//   4. Power-saving main event loop using runtime.waitAndPump(timeout).
-//   5. Graceful thread shutdown via std::stop_token.
+//   4. Clean main event loop with zero dynamic allocations.
 // =============================================================================
 
 #include <corium/corium.hpp>
-#include <chrono>
 #include <iostream>
 
 using namespace corium;
 
 // 1. Background Sensor Service
-class SensorService : public BackgroundService {
+class SensorService : public BackgroundService<> {
 public:
-    using BackgroundService::BackgroundService;
-
-    void run(std::stop_token stopToken) override {
-        double elapsed = 0.0;
-        while (!stopToken.stop_requested()) {
-            postEvent(TickEvent{elapsed});
-            elapsed += 0.2;
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    void poll() {
+        _tickCounter++;
+        if (_tickCounter % 2 == 0) {
+            postEvent(TickEvent{_elapsed});
+            _elapsed += 0.2;
         }
     }
+
+private:
+    int _tickCounter = 0;
+    double _elapsed = 0.0;
 };
 
 // 2. Background Input Simulation Service
-class InputSimulationService : public BackgroundService {
+class InputSimulationService : public BackgroundService<> {
 public:
-    using BackgroundService::BackgroundService;
-
-    void run(std::stop_token stopToken) override {
-        int clickCount = 0;
-        while (!stopToken.stop_requested()) {
-            clickCount++;
-            postEvent(MouseClickEvent{clickCount * 10, clickCount * 15, true, false});
-            std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    void poll() {
+        _clickCount++;
+        if (_clickCount % 3 == 0) {
+            postEvent(MouseClickEvent{_clickCount * 10, _clickCount * 15, true, false});
         }
     }
+
+private:
+    int _clickCount = 0;
 };
 
-// 3. Application Managing Both Services
-class ServiceApp : public AppCore {
-protected:
-    void onConfigureServices(ServiceRegistry& registry) override {
-        registry.addService<SensorService>();
-        registry.addService<InputSimulationService>();
-    }
-
-    void onRegisterHandlers() override {
+// 3. Application Managing Both Services via CRTP
+class ServiceApp : public AppCoreT<ServiceApp, Runtime::EventBusType> {
+public:
+    void onRegisterHandlers() {
         on([this](const TickEvent& e) {
             _tickCount++;
             std::cout << "[ServiceApp] Sensor Tick #" << _tickCount << " (time: " << e.deltaTime << "s)\n";
@@ -68,8 +61,8 @@ protected:
         });
     }
 
-    void onInitialize() override {
-        std::cout << "[ServiceApp] All background services started.\n";
+    void onInitialize() {
+        std::cout << "[ServiceApp] All background services ready.\n";
     }
 
 private:
@@ -78,19 +71,22 @@ private:
 
 int main() {
     std::cout << "========================================\n";
-    std::cout << "Corium Sample 02: Multi-Threaded Services\n";
+    std::cout << "Corium Sample 02: Multi-Producer Services\n";
     std::cout << "========================================\n";
 
     Runtime runtime;
     ServiceApp app;
+    ServiceManager<SensorService, InputSimulationService> serviceManager;
 
     runtime.initialize(app);
+    serviceManager.initialize(ServiceContext{runtime.eventSink()});
 
-    // Clean, zero-boilerplate event loop using waitAndPump(timeout)
     while (!runtime.quitRequested()) {
-        runtime.waitAndPump(std::chrono::milliseconds(50));
+        serviceManager.poll();
+        runtime.pump();
     }
 
+    serviceManager.shutdown();
     runtime.shutdown();
     std::cout << "[Main] Exit complete.\n";
     return 0;

@@ -1,16 +1,15 @@
 // =============================================================================
-// Corium Sample 03 — Custom Event Variant List & Auto-Deduction
+// Corium Sample 03 — Custom Event Variant List & Auto-Deduction (Bare-Metal CRTP)
 //
 // This example demonstrates:
 //   1. Defining domain-specific event structs (PlayerSpawnEvent, ScoreEvent, etc.).
 //   2. Creating a custom compile-time event list std::variant<MyEvents...>.
-//   3. Subclassing AppCoreT<MyEvents> with auto-deduced event handlers via on(...).
-//   4. Instantiating a custom runtime using RuntimeBuilder<>::WithEvents<MyEvents>::Build.
+//   3. Subclassing AppCoreT<GameApp, GameRuntime::EventBusType> via CRTP.
+//   4. Instantiating a custom runtime using RuntimeBuilder<>::WithEvents<GameEvents>::Build.
 // =============================================================================
 
 #include <corium/corium.hpp>
 #include <iostream>
-#include <string>
 #include <variant>
 
 using namespace corium;
@@ -18,7 +17,6 @@ using namespace corium;
 // 1. Custom User Event Definitions
 struct PlayerSpawnEvent {
     int playerId;
-    std::string name;
     float posX;
     float posY;
 };
@@ -30,7 +28,7 @@ struct ScoreChangedEvent {
 
 struct NetworkPacketEvent {
     uint16_t packetId;
-    std::string payload;
+    uint32_t payloadData;
 };
 
 // 2. Combine into a Custom Event Variant List (including QuitEvent for shutdown)
@@ -41,13 +39,16 @@ using GameEvents = std::variant<
     NetworkPacketEvent
 >;
 
-// 3. Subclass AppCoreT using GameEvents with auto-deduced on(...) handlers
-class GameApp : public AppCoreT<GameEvents> {
-protected:
-    void onRegisterHandlers() override {
+// 3. Configure Runtime using RuntimeBuilder
+using GameRuntime = RuntimeBuilder<>::WithEvents<GameEvents>::Build;
+
+// 4. Subclass AppCoreT using GameEvents with auto-deduced on(...) handlers via CRTP
+class GameApp : public AppCoreT<GameApp, GameRuntime::EventBusType> {
+public:
+    void onRegisterHandlers() {
         on([](const PlayerSpawnEvent& e) {
-            std::cout << "[GameApp] Player #" << e.playerId << " ('" << e.name 
-                      << "') spawned at (" << e.posX << ", " << e.posY << ")\n";
+            std::cout << "[GameApp] Player #" << e.playerId 
+                      << " spawned at (" << e.posX << ", " << e.posY << ")\n";
         });
 
         on([this](const ScoreChangedEvent& e) {
@@ -60,20 +61,17 @@ protected:
         });
 
         on([](const NetworkPacketEvent& e) {
-            std::cout << "[GameApp] Network Packet #" << e.packetId << " payload: '" << e.payload << "'\n";
+            std::cout << "[GameApp] Network Packet #" << e.packetId << " payload data: " << e.payloadData << "\n";
         });
     }
 
-    void onInitialize() override {
+    void onInitialize() {
         std::cout << "[GameApp] Game initialized with custom EventVariant.\n";
     }
 
 private:
     int _eventsProcessed = 0;
 };
-
-// 4. Configure Runtime using RuntimeBuilder
-using GameRuntime = RuntimeBuilder<>::WithEvents<GameEvents>::Build;
 
 int main() {
     std::cout << "========================================\n";
@@ -86,8 +84,8 @@ int main() {
     runtime.initialize(app);
 
     // Post custom events into the event sink
-    runtime.eventSink().post(PlayerSpawnEvent{1, "Hero", 100.0f, 250.0f});
-    runtime.eventSink().post(NetworkPacketEvent{101, "SYNC_POS"});
+    runtime.eventSink().post(PlayerSpawnEvent{1, 100.0f, 250.0f});
+    runtime.eventSink().post(NetworkPacketEvent{101, 0xAABBCCDD});
     runtime.eventSink().post(ScoreChangedEvent{1, 500});
     runtime.eventSink().post(ScoreChangedEvent{1, 1000});
     runtime.eventSink().post(ScoreChangedEvent{1, 1500});
