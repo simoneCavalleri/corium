@@ -2,6 +2,7 @@
 
 #include "corium/AppCoreContext.hpp"
 #include "corium/IEventSink.hpp"
+#include "corium/ServiceRegistry.hpp"
 
 #include <utility>
 
@@ -15,6 +16,7 @@ template <typename Derived, typename EventBusType>
 class AppCoreT {
 public:
     using EventVariant = typename EventBusType::EventVariant;
+    using ServiceRegistryType = ServiceRegistryT<8, EventVariant>;
 
     AppCoreT() = default;
 
@@ -66,6 +68,17 @@ public:
         }
     }
 
+    void initializeServices(IEventSinkT<EventVariant> sink)
+    {
+        configureServices(_serviceRegistry);
+        _serviceRegistry.initialize(ServiceContextT<EventVariant>{sink});
+    }
+
+    void shutdownServices() noexcept
+    {
+        _serviceRegistry.shutdown();
+    }
+
     void registerHandlers()
     {
         if constexpr (requires(Derived& d) { d.onRegisterHandlers(); }) {
@@ -94,6 +107,7 @@ public:
 
 private:
     AppCoreContextT<EventBusType> _context;
+    ServiceRegistryType _serviceRegistry;
 };
 
 } // namespace corium

@@ -1,51 +1,57 @@
 // =============================================================================
-// Corium Sample 02 — Multi-Producer Background Services (Zero-Heap)
+// Corium Sample 02 — Multi-Threaded Background Services (Zero-Heap MPSC)
 //
 // This example demonstrates:
-//   1. Static non-allocating BackgroundService instances.
-//   2. Multiple producers pushing to the lock-free MPSC event queue.
-//   3. Auto-deduced lambda event handlers via on(...).
-//   4. Clean main event loop with zero dynamic allocations.
+//   1. Registering BackgroundServices with dedicated std::jthread worker loops.
+//   2. Multiple asynchronous thread producers posting to the Lock-Free MPSC queue.
+//   3. Registering background services inside onConfigureServices(ServiceRegistry& registry).
+//   4. Automatic thread launching, stop_token signaling, and graceful join on shutdown.
 // =============================================================================
 
 #include <corium/corium.hpp>
+#include <chrono>
 #include <iostream>
+#include <thread>
 
 using namespace corium;
 
-// 1. Background Sensor Service
+// 1. Background Sensor Producer Service (running on its own std::jthread)
 class SensorService : public BackgroundService<> {
 public:
-    void poll() {
-        _tickCounter++;
-        if (_tickCounter % 2 == 0) {
-            postEvent(TickEvent{_elapsed});
-            _elapsed += 0.2;
+    void run(std::stop_token stopToken) {
+        double elapsed = 0.0;
+        while (!stopToken.stop_requested()) {
+            postEvent(TickEvent{elapsed});
+            elapsed += 0.2;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
-
-private:
-    int _tickCounter = 0;
-    double _elapsed = 0.0;
 };
 
-// 2. Background Signal Producer Service
+// 2. Background Signal Producer Service (running on its own std::jthread)
 class SignalProducerService : public BackgroundService<> {
 public:
-    void poll() {
-        _signalCount++;
-        if (_signalCount % 3 == 0) {
-            postEvent(SignalEvent{static_cast<uint32_t>(_signalCount)});
+    void run(std::stop_token stopToken) {
+        uint32_t signalId = 0;
+        while (!stopToken.stop_requested()) {
+            signalId++;
+            postEvent(SignalEvent{signalId});
+            std::this_thread::sleep_for(std::chrono::milliseconds(350));
         }
     }
-
-private:
-    int _signalCount = 0;
 };
 
-// 3. Application Managing Both Services via CRTP
+// 3. Application Managing Both Thread-Based Services via onConfigureServices
 class ServiceApp : public AppCoreT<ServiceApp, Runtime::EventBusType> {
 public:
+    SensorService sensorService;
+    SignalProducerService signalProducerService;
+
+    void onConfigureServices(ServiceRegistry& registry) {
+        registry.registerService(sensorService);
+        registry.registerService(signalProducerService);
+    }
+
     void onRegisterHandlers() {
         on([this](const TickEvent& e) {
             _tickCount++;
@@ -62,7 +68,7 @@ public:
     }
 
     void onInitialize() {
-        std::cout << "[ServiceApp] All background services ready.\n";
+        std::cout << "[ServiceApp] All background service jthreads started.\n";
     }
 
 private:
@@ -71,22 +77,21 @@ private:
 
 int main() {
     std::cout << "========================================\n";
-    std::cout << "Corium Sample 02: Multi-Producer Services\n";
+    std::cout << "Corium Sample 02: Multi-Threaded Services\n";
     std::cout << "========================================\n";
 
     Runtime runtime;
     ServiceApp app;
-    ServiceManager<SensorService, SignalProducerService> serviceManager;
 
+    // Runtime automatically initializes the app and launches all service jthreads
     runtime.initialize(app);
-    serviceManager.initialize(ServiceContext{runtime.eventSink()});
 
+    // Main thread acts as Single Consumer waiting and pumping events from the lock-free MPSC queue
     while (!runtime.quitRequested()) {
-        serviceManager.poll();
-        runtime.pump();
+        runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
-    serviceManager.shutdown();
+    // Runtime gracefully requests stop and joins all background jthreads
     runtime.shutdown();
     std::cout << "[Main] Exit complete.\n";
     return 0;

@@ -80,13 +80,8 @@ public:
             }
         }
 
-        // Calculate wasEmpty BEFORE publishing the event.
-        // After publication, the consumer could consume the event and advance
-        // _dequeuePos, causing wasEmpty to be false even though the queue WAS
-        // empty — missing the signal() call and causing deadlock in waitAndPump().
-        // Over-signaling (false positive) is harmless; a missed signal is not.
-        size_t readPos = _dequeuePos.load(std::memory_order_acquire);
-        bool wasEmpty = (pos == readPos);
+        // Calculate wasEmpty based on whether the dequeue cell is empty.
+        bool wasEmpty = empty();
 
         cell->construct(std::move(value));
         cell->sequence.store(pos + 1, std::memory_order_release);
@@ -112,12 +107,14 @@ public:
         return false;
     }
 
-    /// @brief Check if ring buffer is empty (approximate, safe for single consumer).
-    /// Reads dequeuePos first (consumer-owned) then enqueuePos for correct MPSC ordering.
+    /// @brief Check if ring buffer is empty (safe for single consumer).
+    /// Returns true if the next cell to dequeue is not yet published with a valid sequence.
     [[nodiscard]] bool empty() const noexcept {
-        size_t readPos = _dequeuePos.load(std::memory_order_relaxed);
-        size_t writePos = _enqueuePos.load(std::memory_order_acquire);
-        return writePos == readPos;
+        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+        const Cell* cell = &_buffer[pos & Mask];
+        size_t seq = cell->sequence.load(std::memory_order_acquire);
+        intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+        return diff != 0;
     }
 
 private:

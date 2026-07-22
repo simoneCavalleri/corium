@@ -11,7 +11,6 @@
 #include "corium/EventBus.hpp"
 #include "corium/ServiceContext.hpp"
 #include "corium/ServiceRegistry.hpp"
-#include "corium/internal/ServiceManager.hpp"
 #include "corium/internal/VariantIndex.hpp"
 #include "corium/policies/Policies.hpp"
 
@@ -71,7 +70,9 @@ public:
         _state.store(State::Initializing, std::memory_order_release);
         _appShutdownCb = StaticCallback{
             [](void* appPtr) {
-                static_cast<AppCoreT<Derived, EventBusType>*>(appPtr)->shutdown();
+                auto* app = static_cast<AppCoreT<Derived, EventBusType>*>(appPtr);
+                app->shutdownServices();
+                app->shutdown();
             },
             &application
         };
@@ -82,6 +83,7 @@ public:
         application.registerHandlers();
         _eventBus.seal();
 
+        application.initializeServices(applicationContext().eventSink());
         application.initialize();
 
         _state.store(State::Running, std::memory_order_release);
