@@ -10,7 +10,8 @@ template <
     typename EventVariant,
     typename QueuePolicy,
     typename SignalPolicy,
-    typename StoragePolicy
+    typename StoragePolicy,
+    typename OverflowPolicy
 >
 class BasicRuntime;
 
@@ -62,7 +63,8 @@ template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
     typename SignalPolicy = NoSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
 >
 struct RuntimeBuilder {
     /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
@@ -71,7 +73,8 @@ struct RuntimeBuilder {
         NewEventVariant,
         internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
         SignalPolicy,
-        StoragePolicy
+        StoragePolicy,
+        OverflowPolicy
     >;
 
     /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
@@ -80,7 +83,8 @@ struct RuntimeBuilder {
         EventVariant,
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
         SignalPolicy,
-        StoragePolicy
+        StoragePolicy,
+        OverflowPolicy
     >;
 
     /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
@@ -89,7 +93,8 @@ struct RuntimeBuilder {
         EventVariant,
         PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
         SignalPolicy,
-        StoragePolicy
+        StoragePolicy,
+        OverflowPolicy
     >;
 
     /// @brief Specify custom QueuePolicy.
@@ -98,7 +103,8 @@ struct RuntimeBuilder {
         EventVariant,
         NewQueuePolicy,
         SignalPolicy,
-        StoragePolicy
+        StoragePolicy,
+        OverflowPolicy
     >;
 
     /// @brief Specify custom SignalPolicy.
@@ -107,7 +113,8 @@ struct RuntimeBuilder {
         EventVariant,
         QueuePolicy,
         NewSignalPolicy,
-        StoragePolicy
+        StoragePolicy,
+        OverflowPolicy
     >;
 
     /// @brief Specify custom StoragePolicy.
@@ -116,7 +123,18 @@ struct RuntimeBuilder {
         EventVariant,
         QueuePolicy,
         SignalPolicy,
-        NewStoragePolicy
+        NewStoragePolicy,
+        OverflowPolicy
+    >;
+
+    /// @brief Specify custom OverflowPolicy.
+    template <typename NewOverflowPolicy>
+    using WithOverflowPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        NewOverflowPolicy
     >;
 
     /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
@@ -125,7 +143,8 @@ struct RuntimeBuilder {
         EventVariant,
         QueuePolicy,
         SignalPolicy,
-        FixedStoragePolicy<NewMaxHandlers, StoragePolicy::inline_storage_size>
+        FixedStoragePolicy<NewMaxHandlers, StoragePolicy::inline_storage_size>,
+        OverflowPolicy
     >;
 
     /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
@@ -134,11 +153,12 @@ struct RuntimeBuilder {
         EventVariant,
         QueuePolicy,
         SignalPolicy,
-        FixedStoragePolicy<StoragePolicy::max_handlers_per_event, NewInlineSize>
+        FixedStoragePolicy<StoragePolicy::max_handlers_per_event, NewInlineSize>,
+        OverflowPolicy
     >;
 
     /// @brief Complete builder configuration and return BasicRuntime type.
-    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
 };
 
 } // namespace corium

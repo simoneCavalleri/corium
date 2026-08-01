@@ -8,12 +8,14 @@
 
 namespace corium {
 
-/// @brief Event queue composing QueuePolicy and SignalPolicy strategy types.
+/// @brief Event queue composing QueuePolicy, SignalPolicy, and OverflowPolicy strategy types.
 /// @tparam QueuePolicy Queueing policy strategy.
 /// @tparam SignalPolicy Signaling policy strategy.
+/// @tparam OverflowPolicy Strategy for handling queue overflow when capacity is exceeded.
 template <
     typename QueuePolicy = BoundedMpscQueuePolicy<DefaultEvents, 1024>,
-    typename SignalPolicy = NoSignalPolicy
+    typename SignalPolicy = NoSignalPolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
 >
 class EventQueue {
 public:
@@ -29,7 +31,7 @@ public:
     {
         auto res = _queuePolicy.tryPush(std::move(event), priority);
         if (!res.pushed) {
-            return false;
+            return _overflowPolicy.handleOverflow(_queuePolicy, std::move(event), priority);
         }
 
         if (res.wasEmpty) {
@@ -74,9 +76,22 @@ public:
         return _signalPolicy;
     }
 
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _overflowPolicy;
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _overflowPolicy;
+    }
+
 private:
     QueuePolicy _queuePolicy;
     SignalPolicy _signalPolicy;
+    [[no_unique_address]] OverflowPolicy _overflowPolicy;
 };
 
 } // namespace corium

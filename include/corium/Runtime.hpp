@@ -22,15 +22,17 @@ namespace corium {
 /// @tparam QueuePolicy Policy governing event queueing (Lock-free MPSC).
 /// @tparam SignalPolicy Policy governing notification (NoSignalPolicy default).
 /// @tparam StoragePolicy Policy governing handler capacity and delegate inline storage size.
+/// @tparam OverflowPolicy Policy governing queue overflow handling (DropNewestOverflowPolicy default).
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
     typename SignalPolicy = NoSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
 >
 class BasicRuntime {
 public:
-    using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
+    using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
 
     enum class State {
         Created,
@@ -172,6 +174,18 @@ public:
         return _eventBus.signalPolicy();
     }
 
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _eventBus.overflowPolicy();
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _eventBus.overflowPolicy();
+    }
+
     /// @brief Access event sink handle.
     IEventSinkT<EventVariant> eventSink() noexcept
     {
@@ -212,17 +226,18 @@ private:
     std::atomic<bool> _quitRequested{false};
 };
 
-/// @brief Default Runtime alias using DefaultEvents, NoSignalPolicy, and DefaultStoragePolicy.
-using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, NoSignalPolicy, DefaultStoragePolicy>;
+/// @brief Default Runtime alias using DefaultEvents, NoSignalPolicy, DefaultStoragePolicy, and DropNewestOverflowPolicy.
+using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, NoSignalPolicy, DefaultStoragePolicy, DropNewestOverflowPolicy>;
 
 /// @brief Templated Runtime alias for custom policies.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
     typename SignalPolicy = NoSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
 >
-using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy>;
+using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
 
 } // namespace corium
 

@@ -19,9 +19,10 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
 - **Event Priority & High-Priority ISR Dispatching**: Native support for high-priority interrupt and fault events via `PriorityMpscQueuePolicy` (`EventPriority::High`, `Normal`, `Low`). High-priority events are guaranteed to be dispatched ahead of standard events with 0 heap allocation and lock-free ISR safety.
 - **Policy-Based Modular Runtime**:
   - `QueuePolicy`: Single Bounded Lock-Free MPSC Queue (`BoundedMpscQueuePolicy`) or Multi-Tier Priority Lock-Free MPSC Queue (`PriorityMpscQueuePolicy`).
+  - `OverflowPolicy`: Configurable queue saturation strategies (`DropNewestOverflowPolicy`, `DropOldestOverflowPolicy`, `AuditOverflowPolicy`, `PanicOverflowPolicy`).
   - `SignalPolicy`: Busy-Spin Polling (`NoSignalPolicy`), Edge-Triggered Callback (`CallbackSignalPolicy`), Futex C++20 `std::atomic::wait()` (`AtomicWaitSignalPolicy`), Linux `eventfd` (`EventFdSignalPolicy`).
   - `StoragePolicy`: Compile-time handler capacity & delegate inline storage configuration (`FixedStoragePolicy`, `DefaultStoragePolicy`, `CompactStoragePolicy`, `LargeStoragePolicy`).
-- **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types (e.g. `::WithPriorityQueue<256, 1024>`).
+- **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types (e.g. `::WithPriorityQueue<256, 1024>`, `::WithOverflowPolicy<AuditOverflowPolicy>`).
 
 ---
 

@@ -25,6 +25,9 @@ target_link_libraries(sample_04_policies PRIVATE corium)
 add_executable(sample_06_priority samples/06_priority_events/main.cpp)
 target_link_libraries(sample_06_priority PRIVATE corium)
 
+add_executable(sample_07_overflow samples/07_overflow_policies/main.cpp)
+target_link_libraries(sample_07_overflow PRIVATE corium)
+
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
 
@@ -51,6 +54,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_runtime.cpp
         tests/test_background_service.cpp
         tests/test_priority_queue.cpp
+        tests/test_overflow_policy.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

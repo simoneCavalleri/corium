@@ -15,11 +15,13 @@ namespace corium {
 /// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC).
 /// @tparam SignalPolicy Strategy for signaling (NoSignalPolicy by default).
 /// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
 template <
     typename EventVariantType = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
     typename SignalPolicy = NoSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
 >
 class BasicEventBus {
 public:
@@ -102,6 +104,18 @@ public:
         return _eventQueue.signalPolicy();
     }
 
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _eventQueue.overflowPolicy();
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _eventQueue.overflowPolicy();
+    }
+
     /// @brief Access reference to reactor.
     ReactorType& reactor() noexcept
     {
@@ -115,7 +129,7 @@ public:
     }
 
 private:
-    EventQueue<QueuePolicy, SignalPolicy> _eventQueue;
+    EventQueue<QueuePolicy, SignalPolicy, OverflowPolicy> _eventQueue;
     ReactorType _reactor;
 };
 
