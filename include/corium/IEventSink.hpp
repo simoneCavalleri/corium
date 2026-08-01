@@ -2,6 +2,7 @@
 
 #include <utility>
 #include "corium/Events.hpp"
+#include "corium/policies/QueuePolicies.hpp"
 
 namespace corium {
 
@@ -9,7 +10,7 @@ namespace corium {
 /// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
 class IEventSinkT {
-    using PostFn = void (*)(void* sinkPtr, EventVariant event);
+    using PostFn = void (*)(void* sinkPtr, EventVariant event, EventPriority priority);
 
 public:
     IEventSinkT() = default;
@@ -17,17 +18,23 @@ public:
     template <typename ConcreteSink>
     explicit IEventSinkT(ConcreteSink& sink)
         : _sinkPtr(&sink),
-          _postFn([](void* ptr, EventVariant evt) {
-              reinterpret_cast<ConcreteSink*>(ptr)->post(std::move(evt));
+          _postFn([](void* ptr, EventVariant evt, EventPriority prio) {
+              reinterpret_cast<ConcreteSink*>(ptr)->post(std::move(evt), prio);
           })
     {}
 
-    /// @brief Post an event into the event sink.
-    void post(EventVariant event) const
+    /// @brief Post an event into the event sink with priority.
+    void post(EventVariant event, EventPriority priority = EventPriority::Normal) const
     {
         if (_postFn && _sinkPtr) {
-            _postFn(_sinkPtr, std::move(event));
+            _postFn(_sinkPtr, std::move(event), priority);
         }
+    }
+
+    /// @brief Convenience helper for posting high-priority events (e.g. from ISR handlers).
+    void postHighPriority(EventVariant event) const
+    {
+        post(std::move(event), EventPriority::High);
     }
 
     explicit operator bool() const noexcept

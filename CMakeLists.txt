@@ -22,6 +22,9 @@ target_link_libraries(sample_03_events PRIVATE corium)
 add_executable(sample_04_policies samples/04_policy_runtimes/main.cpp)
 target_link_libraries(sample_04_policies PRIVATE corium)
 
+add_executable(sample_06_priority samples/06_priority_events/main.cpp)
+target_link_libraries(sample_06_priority PRIVATE corium)
+
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
 
@@ -47,6 +50,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_reactor.cpp
         tests/test_runtime.cpp
         tests/test_background_service.cpp
+        tests/test_priority_queue.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

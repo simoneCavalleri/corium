@@ -23,10 +23,11 @@ public:
 
     /// @brief Push an event into the queue and trigger signal policy on 0->1 transition.
     /// @param event Event instance to push.
+    /// @param priority Priority level of the event (defaults to Normal).
     /// @return true if event was pushed successfully; false if queue was full.
-    bool pushEvent(EventVariant event)
+    bool pushEvent(EventVariant event, EventPriority priority = EventPriority::Normal)
     {
-        auto res = _queuePolicy.tryPush(std::move(event));
+        auto res = _queuePolicy.tryPush(std::move(event), priority);
         if (!res.pushed) {
             return false;
         }

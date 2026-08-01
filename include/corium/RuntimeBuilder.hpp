@@ -25,6 +25,11 @@ struct rebind_queue_policy<QueuePolicy<OldEventVariant, Capacity>, NewEventVaria
     using type = QueuePolicy<NewEventVariant, Capacity>;
 };
 
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename OldEventVariant, size_t HighCap, size_t NormalCap, size_t LowCap, typename NewEventVariant>
+struct rebind_queue_policy<QueuePolicy<OldEventVariant, HighCap, NormalCap, LowCap>, NewEventVariant> {
+    using type = QueuePolicy<NewEventVariant, HighCap, NormalCap, LowCap>;
+};
+
 template <template <typename> class QueuePolicy, typename OldEventVariant, typename NewEventVariant>
 struct rebind_queue_policy<QueuePolicy<OldEventVariant>, NewEventVariant> {
     using type = QueuePolicy<NewEventVariant>;
@@ -40,6 +45,11 @@ struct rebind_queue_capacity;
 template <template <typename, size_t> class QueuePolicy, typename EventVariant, size_t OldCapacity, size_t NewCapacity>
 struct rebind_queue_capacity<QueuePolicy<EventVariant, OldCapacity>, NewCapacity> {
     using type = QueuePolicy<EventVariant, NewCapacity>;
+};
+
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t OldHigh, size_t OldNormal, size_t OldLow, size_t NewCapacity>
+struct rebind_queue_capacity<QueuePolicy<EventVariant, OldHigh, OldNormal, OldLow>, NewCapacity> {
+    using type = QueuePolicy<EventVariant, OldHigh, NewCapacity, OldLow>;
 };
 
 template <typename QueuePolicy, size_t NewCapacity>
@@ -69,6 +79,15 @@ struct RuntimeBuilder {
     using WithCapacity = RuntimeBuilder<
         EventVariant,
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
+        SignalPolicy,
+        StoragePolicy
+    >;
+
+    /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
+    template <size_t HighCapacity = 256, size_t NormalCapacity = 1024>
+    using WithPriorityQueue = RuntimeBuilder<
+        EventVariant,
+        PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
         SignalPolicy,
         StoragePolicy
     >;

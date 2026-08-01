@@ -28,10 +28,16 @@ public:
 
     BasicEventBus() = default;
 
-    /// @brief Post an event into the queue.
-    void post(EventVariant event)
+    /// @brief Post an event into the queue with optional priority.
+    void post(EventVariant event, EventPriority priority = EventPriority::Normal)
     {
-        _eventQueue.pushEvent(std::move(event));
+        _eventQueue.pushEvent(std::move(event), priority);
+    }
+
+    /// @brief Convenience helper for posting high-priority events.
+    void postHighPriority(EventVariant event)
+    {
+        _eventQueue.pushEvent(std::move(event), EventPriority::High);
     }
 
     /// @brief Process a single event from the queue.
