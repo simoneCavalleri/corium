@@ -75,7 +75,7 @@ public:
         _state.store(State::Initializing, std::memory_order_release);
         _appShutdownCb = StaticCallback{
             [](void* appPtr) {
-                auto* app = static_cast<AppCoreT<Derived, EventBusType>*>(appPtr);
+                auto* app = static_cast<Derived*>(static_cast<AppCoreT<Derived, EventBusType>*>(appPtr));
                 app->shutdownServices();
                 app->shutdown();
             },

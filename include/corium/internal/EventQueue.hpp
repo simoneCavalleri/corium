@@ -29,7 +29,7 @@ public:
     /// @return true if event was pushed successfully; false if queue was full.
     bool pushEvent(EventVariant event, EventPriority priority = EventPriority::Normal)
     {
-        auto res = _queuePolicy.tryPush(std::move(event), priority);
+        auto res = _queuePolicy.tryPush(EventVariant{event}, priority);
         if (!res.pushed) {
             return _overflowPolicy.handleOverflow(_queuePolicy, std::move(event), priority);
         }

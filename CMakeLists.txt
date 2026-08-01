@@ -35,7 +35,7 @@ add_executable(sample_09_desktop samples/09_desktop_gui/main.cpp)
 target_link_libraries(sample_09_desktop PRIVATE corium)
 
 # Optional Real GLFW Desktop GUI Sample
-option(CORIUM_BUILD_GUI_GLFW "Build real GLFW desktop window sample" ON)
+option(CORIUM_BUILD_GUI_GLFW "Build real GLFW desktop window sample" OFF)
 
 if(CORIUM_BUILD_GUI_GLFW)
     include(FetchContent)

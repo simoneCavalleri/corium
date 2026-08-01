@@ -96,19 +96,19 @@ public:
         static_assert(sizeof(EventSink) <= sizeof(_sinkHolder.sinkStorage), "EventSink size exceeds GlfwWindowBackend inline storage size!");
 
         _sinkHolder.postResize = [](void* sinkPtr, WindowResizeEvent evt) {
-            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
-            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
-            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
-            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postClose = [](void* sinkPtr, WindowCloseEvent evt) {
-            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(evt);
         };
 
         std::memcpy(_sinkHolder.sinkStorage, &sink, sizeof(EventSink));
