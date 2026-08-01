@@ -6,7 +6,7 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
 - **Zero-Heap Allocation Guaranteed**: Hot event enqueueing and dispatching operate with **0 dynamic heap allocations** using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and static stack/inline storage.
 - **Zero RTTI & Zero Vtables**: Built for clean compilation with `-fno-rtti` and `-fno-exceptions`. Replaces virtual methods and type erasure with **CRTP static polymorphism** and compile-time template metaprogramming.
@@ -17,16 +17,18 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
 - **Header-Only C++20 Framework**: Include `#include <corium/corium.hpp>` and link with CMake `INTERFACE`. No pre-compiled binaries required.
 - **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
 - **Event Priority & High-Priority ISR Dispatching**: Native support for high-priority interrupt and fault events via `PriorityMpscQueuePolicy` (`EventPriority::High`, `Normal`, `Low`). High-priority events are guaranteed to be dispatched ahead of standard events with 0 heap allocation and lock-free ISR safety.
+- **Zero-Heap Timer Scheduler**: Native delayed (`postDelayed()`) and periodic (`postPeriodic()`) event scheduling with cancellation handles (`cancelTimer()`) using static fixed-capacity timer storage (0 heap allocations).
 - **Policy-Based Modular Runtime**:
   - `QueuePolicy`: Single Bounded Lock-Free MPSC Queue (`BoundedMpscQueuePolicy`) or Multi-Tier Priority Lock-Free MPSC Queue (`PriorityMpscQueuePolicy`).
   - `OverflowPolicy`: Configurable queue saturation strategies (`DropNewestOverflowPolicy`, `DropOldestOverflowPolicy`, `AuditOverflowPolicy`, `PanicOverflowPolicy`).
+  - `TimerStoragePolicy`: Configurable static timer capacity (`FixedTimerStoragePolicy<MaxTimers>`).
   - `SignalPolicy`: Busy-Spin Polling (`NoSignalPolicy`), Edge-Triggered Callback (`CallbackSignalPolicy`), Futex C++20 `std::atomic::wait()` (`AtomicWaitSignalPolicy`), Linux `eventfd` (`EventFdSignalPolicy`).
   - `StoragePolicy`: Compile-time handler capacity & delegate inline storage configuration (`FixedStoragePolicy`, `DefaultStoragePolicy`, `CompactStoragePolicy`, `LargeStoragePolicy`).
-- **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types (e.g. `::WithPriorityQueue<256, 1024>`, `::WithOverflowPolicy<AuditOverflowPolicy>`).
+- **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types (e.g. `::WithPriorityQueue<256, 1024>`, `::WithMaxTimers<32>`).
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Minimal Application Example (CRTP & Zero-Heap)
 
@@ -82,7 +84,7 @@ int main() {
 
 ---
 
-## ⚡ ESP32 & FreeRTOS Integration Example (ESP-IDF)
+## ESP32 & FreeRTOS Integration Example (ESP-IDF)
 
 Corium allows lock-free event posting directly from **GPIO ISR hardware interrupt handlers** and FreeRTOS tasks without heap allocations.
 
@@ -170,7 +172,7 @@ extern "C" void app_main(void) {
 
 ---
 
-## 🧵 Multi-Threaded Background Services & `ServiceRegistry`
+## Multi-Threaded Background Services & `ServiceRegistry`
 
 Background services run on dedicated C++20 `std::jthread` worker loops, posting events concurrently to the lock-free MPSC ring buffer:
 
@@ -230,7 +232,7 @@ int main() {
 
 ---
 
-## ⚙️ Policy-Based Runtime Design & `RuntimeBuilder`
+## Policy-Based Runtime Design & `RuntimeBuilder`
 
 Corium allows developers to customize queueing, signaling, and storage policies at compile time:
 
@@ -263,7 +265,7 @@ using CustomAppRuntime = RuntimeBuilder<>
 
 ---
 
-## 🧪 Unit Testing
+## Unit Testing
 
 Corium features a comprehensive unit test suite powered by **GoogleTest** and **CTest**:
 
@@ -289,7 +291,7 @@ g++ -std=c++20 -fno-rtti -fno-exceptions -Iinclude samples/01_basic_app/main.cpp
 
 ---
 
-## 🛠️ Integration & CMake
+## Integration & CMake
 
 Corium is a header-only library target using CMake `INTERFACE`:
 
@@ -310,6 +312,7 @@ target_link_libraries(my_app PRIVATE corium)
 
 ---
 
-## 📄 License
+## License
 
 Corium is open-source software distributed under the MIT License.
+

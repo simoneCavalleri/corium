@@ -26,7 +26,7 @@ public:
         });
 
         on([this](const EmergencyStopEvent& e) {
-            std::cout << "🔥 [HIGH PRIORITY ISR/EMERGENCY] Triggered: " << e.reason << "\n";
+            std::cout << "[HIGH PRIORITY ISR/EMERGENCY] Triggered: " << e.reason << "\n";
             std::cout << "   Halting application loop...\n";
             requestQuit();
         });

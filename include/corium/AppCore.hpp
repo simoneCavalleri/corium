@@ -53,6 +53,26 @@ protected:
         return _context.eventSink();
     }
 
+    /// @brief Schedule a single-shot delayed event.
+    template <typename Rep, typename Period>
+    TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.scheduleDelayed(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+    }
+
+    /// @brief Schedule a recurring periodic event.
+    template <typename Rep, typename Period>
+    TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.schedulePeriodic(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+    }
+
+    /// @brief Cancel an active timer handle.
+    bool cancelTimer(TimerId id)
+    {
+        return _context.cancelTimer(id);
+    }
+
     /// @brief Request graceful application shutdown.
     void requestQuit()
     {

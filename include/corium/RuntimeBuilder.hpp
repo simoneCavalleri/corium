@@ -11,7 +11,8 @@ template <
     typename QueuePolicy,
     typename SignalPolicy,
     typename StoragePolicy,
-    typename OverflowPolicy
+    typename OverflowPolicy,
+    typename TimerStoragePolicy
 >
 class BasicRuntime;
 
@@ -64,7 +65,8 @@ template <
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
     typename SignalPolicy = NoSignalPolicy,
     typename StoragePolicy = DefaultStoragePolicy,
-    typename OverflowPolicy = DropNewestOverflowPolicy
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename TimerStoragePolicy = DefaultTimerStoragePolicy
 >
 struct RuntimeBuilder {
     /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
@@ -74,7 +76,8 @@ struct RuntimeBuilder {
         internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
         SignalPolicy,
         StoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
@@ -84,7 +87,8 @@ struct RuntimeBuilder {
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
         SignalPolicy,
         StoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
@@ -94,7 +98,8 @@ struct RuntimeBuilder {
         PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
         SignalPolicy,
         StoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify custom QueuePolicy.
@@ -104,7 +109,8 @@ struct RuntimeBuilder {
         NewQueuePolicy,
         SignalPolicy,
         StoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify custom SignalPolicy.
@@ -114,7 +120,8 @@ struct RuntimeBuilder {
         QueuePolicy,
         NewSignalPolicy,
         StoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify custom StoragePolicy.
@@ -124,7 +131,8 @@ struct RuntimeBuilder {
         QueuePolicy,
         SignalPolicy,
         NewStoragePolicy,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify custom OverflowPolicy.
@@ -134,7 +142,30 @@ struct RuntimeBuilder {
         QueuePolicy,
         SignalPolicy,
         StoragePolicy,
-        NewOverflowPolicy
+        NewOverflowPolicy,
+        TimerStoragePolicy
+    >;
+
+    /// @brief Specify maximum number of concurrent active timers.
+    template <size_t MaxTimers>
+    using WithMaxTimers = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        FixedTimerStoragePolicy<MaxTimers>
+    >;
+
+    /// @brief Specify custom TimerStoragePolicy.
+    template <typename NewTimerStoragePolicy>
+    using WithTimerStoragePolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        NewTimerStoragePolicy
     >;
 
     /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
@@ -144,7 +175,8 @@ struct RuntimeBuilder {
         QueuePolicy,
         SignalPolicy,
         FixedStoragePolicy<NewMaxHandlers, StoragePolicy::inline_storage_size>,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
@@ -154,11 +186,12 @@ struct RuntimeBuilder {
         QueuePolicy,
         SignalPolicy,
         FixedStoragePolicy<StoragePolicy::max_handlers_per_event, NewInlineSize>,
-        OverflowPolicy
+        OverflowPolicy,
+        TimerStoragePolicy
     >;
 
     /// @brief Complete builder configuration and return BasicRuntime type.
-    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, TimerStoragePolicy>;
 };
 
 } // namespace corium
