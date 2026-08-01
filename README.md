@@ -1,36 +1,92 @@
 # Corium
 
-**Corium** is a high-performance, header-only, **zero-heap allocation, zero-RTTI** C++20 application framework designed for **Multi-Producer Single-Consumer (MPSC)** event-driven systems.
+**Corium** is a high-performance, header-only C++20 framework designed for **Multi-Producer Single-Consumer (MPSC)** event-driven architectures.
 
-Whether running on **bare-metal microcontrollers, embedded RTOS, or high-performance desktop systems** (Linux, Windows, macOS), Corium guarantees **zero dynamic memory allocations** on the heap, **zero virtual table / RTTI overhead**, and **pure compile-time static dispatching**.
+Engineered equally for **high-performance desktop applications (GUI event loops, game engines, audio/DSP processing, real-time desktop tools)** and **embedded microcontrollers & RTOS (ARM Cortex-M, ESP32, FreeRTOS, Zephyr)**, Corium guarantees **zero dynamic memory allocations** on the heap, **zero virtual table / RTTI overhead**, and **pure compile-time static dispatching**.
+
+---
+
+## What is Corium?
+
+Traditional C++ event libraries rely heavily on `std::function`, dynamic memory allocation (`new`/`malloc`), and virtual method dispatch (`override`). In real-time desktop software (game loops, audio engines, responsive UIs) or resource-constrained embedded systems, these mechanisms introduce:
+- **Non-deterministic latency spikes** due to heap allocation and lock contention.
+- **Memory fragmentation** over long execution periods.
+- **Virtual table (vtables) and RTTI overhead**, which bloat binary size and reduce CPU cache efficiency.
+
+**Corium solves this completely** by moving all type resolution, storage allocation, and policy choices to **compile time**. Multiple concurrent producers (hardware ISRs, background worker threads, user input events, timer loops) push events into a lock-free Vyukov ring buffer without acquiring locks or allocating heap memory. A single consumer thread processes and dispatches events via CRTP static polymorphism and FastDelegates.
+
+---
+
+## Architecture Overview
+
+```mermaid
+flowchart TD
+    subgraph Producers ["Event Producers (Multi-Producer)"]
+        ISR["Hardware ISRs (GPIO, Timers, ESP32)"]
+        Thread["Background Worker Services (std::jthread)"]
+        Timer["Zero-Heap Timer Scheduler"]
+        Main["Main Application Loop"]
+    end
+
+    subgraph Corium ["Corium Runtime Core (Zero-Heap / Zero-RTTI)"]
+        Sink["IEventSinkT Handle (Lock-Free Push)"]
+        Queue["PriorityMpscQueuePolicy / BoundedMpscQueuePolicy"]
+        Reactor["ReactorT & FastDelegate Dispatcher"]
+    end
+
+    subgraph App ["Application Core (Single-Consumer)"]
+        Core["AppCoreT (CRTP Static Polymorphism)"]
+        Handlers["Auto-Deduced Event Handlers"]
+    end
+
+    ISR -->|postHighPriority| Sink
+    Thread -->|post| Sink
+    Timer -->|postDelayed / postPeriodic| Sink
+    Main -->|post| Sink
+
+    Sink --> Queue
+    Queue -->|tryPop| Reactor
+    Reactor -->|Static Dispatch| Handlers
+    Handlers --> Core
+```
 
 ---
 
 ## Key Features
 
-- **Zero-Heap Allocation Guaranteed**: Hot event enqueueing and dispatching operate with **0 dynamic heap allocations** using a lock-free **MPSC RingBuffer** (Vyukov algorithm) and static stack/inline storage.
-- **Zero RTTI & Zero Vtables**: Built for clean compilation with `-fno-rtti` and `-fno-exceptions`. Replaces virtual methods and type erasure with **CRTP static polymorphism** and compile-time template metaprogramming.
-- **Multi-Producer Single-Consumer (MPSC)**: Multiple thread/hardware event producers push concurrently into a lock-free ring buffer, while a single consumer thread processes and dispatches events efficiently.
-- **CRTP Static Application Core (`AppCoreT`)**: Define application logic without virtual methods (`override`). Lifecycle hooks (`onConfigureServices`, `onRegisterHandlers`, `onInitialize`, `onShutdown`) are resolved statically at compile time.
-- **Multi-Threaded Background Services**: Define background worker loops using `std::jthread` and `std::stop_token`. Managed automatically via `onConfigureServices(ServiceRegistry& registry)` with zero heap allocation.
-- **ESP32 & Embedded RTOS Native**: Lock-free MPSC event posting directly from **GPIO ISR hardware interrupt handlers** and FreeRTOS tasks.
-- **Header-Only C++20 Framework**: Include `#include <corium/corium.hpp>` and link with CMake `INTERFACE`. No pre-compiled binaries required.
-- **Auto-Deduced Event Handlers**: Register handlers via `on([](const MyEvent& e) { ... })` with zero template argument boilerplate.
-- **Event Priority & High-Priority ISR Dispatching**: Native support for high-priority interrupt and fault events via `PriorityMpscQueuePolicy` (`EventPriority::High`, `Normal`, `Low`). High-priority events are guaranteed to be dispatched ahead of standard events with 0 heap allocation and lock-free ISR safety.
-- **Zero-Heap Timer Scheduler**: Native delayed (`postDelayed()`) and periodic (`postPeriodic()`) event scheduling with cancellation handles (`cancelTimer()`) using static fixed-capacity timer storage (0 heap allocations).
-- **Policy-Based Modular Runtime**:
-  - `QueuePolicy`: Single Bounded Lock-Free MPSC Queue (`BoundedMpscQueuePolicy`) or Multi-Tier Priority Lock-Free MPSC Queue (`PriorityMpscQueuePolicy`).
-  - `OverflowPolicy`: Configurable queue saturation strategies (`DropNewestOverflowPolicy`, `DropOldestOverflowPolicy`, `AuditOverflowPolicy`, `PanicOverflowPolicy`).
-  - `TimerStoragePolicy`: Configurable static timer capacity (`FixedTimerStoragePolicy<MaxTimers>`).
-  - `SignalPolicy`: Busy-Spin Polling (`NoSignalPolicy`), Edge-Triggered Callback (`CallbackSignalPolicy`), Futex C++20 `std::atomic::wait()` (`AtomicWaitSignalPolicy`), Linux `eventfd` (`EventFdSignalPolicy`).
-  - `StoragePolicy`: Compile-time handler capacity & delegate inline storage configuration (`FixedStoragePolicy`, `DefaultStoragePolicy`, `CompactStoragePolicy`, `LargeStoragePolicy`).
-- **Fluent `RuntimeBuilder`**: Configure custom runtimes cleanly via compile-time builder types (e.g. `::WithPriorityQueue<256, 1024>`, `::WithMaxTimers<32>`).
+### Core Performance
+- **Zero-Heap Allocation Guaranteed**: Hot-path event enqueueing, timer scheduling, and handler dispatching operate with **0 dynamic heap allocations**.
+- **Zero RTTI & Zero Vtables**: Compiles cleanly with `-fno-rtti` and `-fno-exceptions`. Virtual methods are replaced by **CRTP static polymorphism** and FastDelegates.
+- **Lock-Free MPSC Engine**: Multiple hardware interrupt handlers (ISRs) and worker threads push concurrently into Dmitry Vyukov's lock-free ring buffer algorithm.
+
+### Priority & Overflow Management
+- **Multi-Tier Event Priorities**: Native support for strict event priorities (`EventPriority::High`, `Normal`, `Low`). High-priority interrupt and emergency events are guaranteed to be dispatched ahead of standard background events.
+- **Configurable Overflow Policies**: Transparent queue saturation strategies (`DropNewestOverflowPolicy`, `DropOldestOverflowPolicy`, `AuditOverflowPolicy`, `PanicOverflowPolicy`).
+
+### Timers & Concurrency
+- **Zero-Heap Timer Scheduler**: Schedule single-shot delayed events (`postDelayed()`) or recurring periodic events (`postPeriodic()`) with cancellation handles (`cancelTimer()`) using static fixed-capacity storage.
+- **Multi-Threaded Background Services**: Managed worker loops using C++20 `std::jthread` and `std::stop_token`, posting events concurrently with zero heap allocation.
+- **ESP32 & Embedded RTOS Native**: Lock-free event posting directly from hardware GPIO ISR handlers and FreeRTOS tasks.
 
 ---
 
-## Quick Start
+## Feature Comparison Matrix
 
-### Minimal Application Example (CRTP & Zero-Heap)
+| Feature | Corium | Traditional Event Systems |
+| :--- | :--- | :--- |
+| **Dynamic Memory** | **0 Heap Allocations** (Static Arrays & Inline SBO) | Heap Allocation (`new`, `malloc`, `std::function`) |
+| **Dispatch Mechanism** | **CRTP Static Polymorphism & FastDelegate** | Virtual Tables (`override`) & RTTI |
+| **Thread Safety** | **Lock-Free MPSC** (Signal & ISR Safe) | Mutex Locks & Condition Variables |
+| **Interrupt Safety (ISR)** | **100% Safe** (Non-blocking lock-free pushes) | Unsafe (Locks can deadlock ISR) |
+| **Priority Channels** | **Strict Multi-RingBuffer Priority Draining** | Dynamic Sorting / Heap Priority Queues |
+| **Timer Scheduling** | **Zero-Heap Static Scheduler** | Dynamic Heap Timer Wheels / Heap Min-Heaps |
+| **Bare-Metal Support** | **Full Support** (`-fno-rtti -fno-exceptions`) | Poor / Requires Heap & RTTI |
+
+---
+
+## Quick Start & Code Examples
+
+### 1. Minimal Application Example (CRTP & Zero-Heap)
 
 ```cpp
 #include <corium/corium.hpp>
@@ -38,7 +94,7 @@ Whether running on **bare-metal microcontrollers, embedded RTOS, or high-perform
 
 using namespace corium;
 
-// Application uses CRTP static inheritance
+// Application inherits statically via CRTP
 class DemoApp : public AppCoreT<DemoApp, Runtime::EventBusType> {
 public:
     void onRegisterHandlers() {
@@ -71,7 +127,6 @@ int main() {
 
     runtime.initialize(app);
 
-    // Event pump loop
     while (!runtime.quitRequested()) {
         runtime.eventSink().post(UpdateEvent{0.016}); // ~60 FPS dt
         runtime.pump();
@@ -84,15 +139,133 @@ int main() {
 
 ---
 
-## ESP32 & FreeRTOS Integration Example (ESP-IDF)
-
-Corium allows lock-free event posting directly from **GPIO ISR hardware interrupt handlers** and FreeRTOS tasks without heap allocations.
-
-> **Note on GPIO Pin Customization**: The example uses `GPIO_NUM_27` as the default button pin, but it can be customized to any valid GPIO pin (e.g. `GPIO_NUM_0` for the built-in BOOT button, `GPIO_NUM_4`, `GPIO_NUM_12`, etc.).
+### 2. Event Priorities & High-Priority ISR Handling
 
 ```cpp
 #include <corium/corium.hpp>
+#include <iostream>
 
+using namespace corium;
+
+struct NormalUpdateEvent { int frame; };
+struct EmergencyStopEvent { const char* reason; };
+
+using AppEvents = std::variant<QuitEvent, NormalUpdateEvent, EmergencyStopEvent>;
+
+// Configure Runtime with PriorityMpscQueuePolicy
+using PriorityRuntime = RuntimeBuilder<>
+    ::WithEvents<AppEvents>
+    ::WithPriorityQueue<256, 1024>
+    ::Build;
+
+class PriorityApp : public AppCoreT<PriorityApp, PriorityRuntime::EventBusType> {
+public:
+    void onRegisterHandlers() {
+        on([](const NormalUpdateEvent& e) {
+            std::cout << "  [Normal] Processing Frame #" << e.frame << "\n";
+        });
+
+        on([this](const EmergencyStopEvent& e) {
+            std::cout << "[HIGH PRIORITY ISR/EMERGENCY] Triggered: " << e.reason << "\n";
+            requestQuit();
+        });
+    }
+};
+
+int main() {
+    PriorityRuntime runtime;
+    PriorityApp app;
+    runtime.initialize(app);
+
+    auto sink = runtime.eventSink();
+
+    // Post normal events
+    sink.post(NormalUpdateEvent{1});
+    sink.post(NormalUpdateEvent{2});
+
+    // Post high-priority event (simulating ISR/Interrupt)
+    sink.postHighPriority(EmergencyStopEvent{"Over-temperature threshold exceeded!"});
+
+    // High-priority event executes FIRST when pump() is called
+    runtime.pump();
+
+    runtime.shutdown();
+    return 0;
+}
+```
+
+---
+
+### 3. Zero-Heap Timer Scheduler (Delayed & Periodic Events)
+
+```cpp
+#include <corium/corium.hpp>
+#include <iostream>
+
+using namespace corium;
+
+struct HeartbeatEvent {};
+struct DelayedAlertEvent { const char* message; };
+
+using AppEvents = std::variant<QuitEvent, HeartbeatEvent, DelayedAlertEvent>;
+
+using TimerRuntime = RuntimeBuilder<>
+    ::WithEvents<AppEvents>
+    ::WithMaxTimers<32>
+    ::Build;
+
+class TimerApp : public AppCoreT<TimerApp, TimerRuntime::EventBusType> {
+public:
+    TimerId heartbeatTimerId = INVALID_TIMER_ID;
+
+    void onRegisterHandlers() {
+        on([this](const HeartbeatEvent&) {
+            _heartbeats++;
+            std::cout << "[Periodic Heartbeat #" << _heartbeats << "] System healthy.\n";
+
+            if (_heartbeats >= 3) {
+                cancelTimer(heartbeatTimerId);
+                requestQuit();
+            }
+        });
+
+        on([](const DelayedAlertEvent& e) {
+            std::cout << "[Delayed Notification] " << e.message << "\n";
+        });
+    }
+
+    void onInitialize() {
+        // Schedule single-shot delayed event after 100ms
+        postDelayed(DelayedAlertEvent{"100ms delayed timer fired!"}, std::chrono::milliseconds(100));
+
+        // Schedule periodic heartbeat every 50ms
+        heartbeatTimerId = postPeriodic(HeartbeatEvent{}, std::chrono::milliseconds(50));
+    }
+
+private:
+    int _heartbeats = 0;
+};
+
+int main() {
+    TimerRuntime runtime;
+    TimerApp app;
+    runtime.initialize(app);
+
+    while (!runtime.quitRequested()) {
+        runtime.waitAndPump(std::chrono::milliseconds(20));
+    }
+
+    runtime.shutdown();
+    return 0;
+}
+```
+
+---
+
+### 4. ESP32 & FreeRTOS GPIO Interrupt (ISR) Integration
+
+```cpp
+#include <corium/corium.hpp>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -100,14 +273,11 @@ Corium allows lock-free event posting directly from **GPIO ISR hardware interrup
 
 using namespace corium;
 
-// Configurable button GPIO pin (customizable to GPIO_NUM_0, GPIO_NUM_4, etc.)
 static constexpr gpio_num_t BUTTON_GPIO = GPIO_NUM_27;
 
-struct ButtonPressEvent { uint8_t pin; uint32_t pressDurationMs; };
-
+struct ButtonPressEvent { uint8_t pin; };
 using Esp32Events = std::variant<QuitEvent, ButtonPressEvent>;
 
-// Embedded policy: CompactStoragePolicy (4 handlers, 16B inline) + NoSignalPolicy
 using Esp32Runtime = RuntimeBuilder<>
     ::WithEvents<Esp32Events>
     ::WithCapacity<256>
@@ -133,48 +303,33 @@ static EventSinkType g_sink;
 // Hardware ISR handler (executed in IRAM interrupt context)
 static void IRAM_ATTR gpio_button_isr_handler(void* arg) {
     auto sink = static_cast<EventSinkType*>(arg);
-    sink->post(ButtonPressEvent{static_cast<uint8_t>(BUTTON_GPIO), 42}); // Lock-free push from ISR
-}
-
-static void init_button_gpio(EventSinkType* sink) {
-    gpio_config_t io_conf{};
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = 1ULL << static_cast<uint64_t>(BUTTON_GPIO);
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io_conf);
-
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(BUTTON_GPIO, gpio_button_isr_handler, sink);
-}
-
-// FreeRTOS Task (runs on Core 1 - Corium Single Consumer)
-static void runtime_task(void* pvParameters) {
-    auto runtime = static_cast<Esp32Runtime*>(pvParameters);
-    while (!runtime->quitRequested()) {
-        runtime->pump();
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    vTaskDelete(nullptr);
+    sink->post(ButtonPressEvent{static_cast<uint8_t>(BUTTON_GPIO)}); // Lock-free push from ISR
 }
 
 extern "C" void app_main(void) {
     g_runtime.initialize(g_app);
     g_sink = g_runtime.eventSink();
 
-    init_button_gpio(&g_sink);
+    gpio_config_t io_conf{};
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = 1ULL << static_cast<uint64_t>(BUTTON_GPIO);
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf);
 
-    // Create FreeRTOS Task pinned to Core 1 for Corium Event Consumer
-    xTaskCreatePinnedToCore(runtime_task, "runtime_task", 8192, &g_runtime, 1, nullptr, 1);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(BUTTON_GPIO, gpio_button_isr_handler, &g_sink);
+
+    while (!g_runtime.quitRequested()) {
+        g_runtime.pump();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 ```
 
 ---
 
-## Multi-Threaded Background Services & `ServiceRegistry`
-
-Background services run on dedicated C++20 `std::jthread` worker loops, posting events concurrently to the lock-free MPSC ring buffer:
+### 5. Multi-Threaded Background Services & `ServiceRegistry`
 
 ```cpp
 #include <corium/corium.hpp>
@@ -184,7 +339,7 @@ Background services run on dedicated C++20 `std::jthread` worker loops, posting 
 
 using namespace corium;
 
-// 1. Background Worker Service (runs on its own std::jthread)
+// Background Worker Service (runs on its own std::jthread)
 class SensorService : public BackgroundService<> {
 public:
     void run(std::stop_token stopToken) {
@@ -197,7 +352,6 @@ public:
     }
 };
 
-// 2. Application Registering Background Service
 class MultiThreadApp : public AppCoreT<MultiThreadApp, Runtime::EventBusType> {
 public:
     SensorService sensorService;
@@ -217,14 +371,14 @@ int main() {
     Runtime runtime;
     MultiThreadApp app;
 
-    // Runtime automatically launches all service jthreads registered in onConfigureServices
+    // Automatically launches all registered background service jthreads
     runtime.initialize(app);
 
     while (!runtime.quitRequested()) {
         runtime.waitAndPump(std::chrono::milliseconds(50));
     }
 
-    // Runtime signals stop_token and cleanly joins all background service jthreads
+    // Signals stop_token and cleanly joins background threads
     runtime.shutdown();
     return 0;
 }
@@ -232,57 +386,58 @@ int main() {
 
 ---
 
-## Policy-Based Runtime Design & `RuntimeBuilder`
+## Policy-Based Architecture & `RuntimeBuilder`
 
-Corium allows developers to customize queueing, signaling, and storage policies at compile time:
+Corium provides a flexible policy-based modular architecture allowing developers to configure queue types, overflow handling, signaling strategies, and memory footprints at compile time:
+
+| Policy Area | Available Strategies | Description |
+| :--- | :--- | :--- |
+| **`QueuePolicy`** | `BoundedMpscQueuePolicy`<br>`PriorityMpscQueuePolicy`<br>`BlockingQueuePolicy` | Lock-free MPSC Vyukov ring buffer, multi-channel priority queue, or mutex-protected queue. |
+| **`OverflowPolicy`** | `DropNewestOverflowPolicy`<br>`DropOldestOverflowPolicy`<br>`AuditOverflowPolicy`<br>`PanicOverflowPolicy` | Defines behavior when queue is full (drop newest, evict oldest, audit atomic counter, or assert/panic). |
+| **`TimerStoragePolicy`**| `FixedTimerStoragePolicy<MaxTimers>` | Configures static array capacity for delayed and periodic timers. |
+| **`SignalPolicy`** | `NoSignalPolicy`<br>`CallbackSignalPolicy`<br>`AtomicWaitSignalPolicy`<br>`EventFdSignalPolicy` | Busy-spin polling, edge callback, C++20 `atomic::wait()`, or Linux `eventfd`. |
+| **`StoragePolicy`** | `DefaultStoragePolicy`<br>`CompactStoragePolicy`<br>`LargeStoragePolicy` | Configures max handlers per event type and FastDelegate inline SBO buffer size. |
+
+### Building Custom Runtimes with `RuntimeBuilder`
 
 ```cpp
 #include <corium/corium.hpp>
 
 using namespace corium;
 
-// 1. Standard Default Runtime (NoSignalPolicy, DefaultStoragePolicy: 8 handlers, 32B inline)
-using StandardRuntime = RuntimeBuilder<>::Build;
+// Custom Event Variant List
+struct TelemetryData { float temp; };
+using MyEvents = std::variant<QuitEvent, TelemetryData>;
 
-// 2. High-Capacity Storage Policy Runtime (16 handlers per event, 64B inline storage)
-using LargeRuntime = RuntimeBuilder<>
-    ::WithStoragePolicy<LargeStoragePolicy>
-    ::Build;
-
-// 3. Custom Event Variant List
-struct SensorReadEvent { float value; };
-struct NetworkPacketEvent { uint16_t id; };
-
-using MyEvents = std::variant<QuitEvent, SensorReadEvent, NetworkPacketEvent>;
-
-using CustomAppRuntime = RuntimeBuilder<>
+// Fluent Compile-Time Builder
+using CustomEmbeddedRuntime = RuntimeBuilder<>
     ::WithEvents<MyEvents>
-    ::WithCapacity<4096>
-    ::WithSignalPolicy<NoSignalPolicy>
-    ::WithStoragePolicy<FixedStoragePolicy<16, 64>>
+    ::WithPriorityQueue<128, 512>            // 128 High, 512 Normal priority slots
+    ::WithOverflowPolicy<AuditOverflowPolicy> // Track dropped event counts
+    ::WithMaxTimers<16>                      // Max 16 concurrent timers
+    ::WithSignalPolicy<NoSignalPolicy>       // Zero-cost polling for bare-metal
+    ::WithStoragePolicy<CompactStoragePolicy>// 4 handlers/event, 16B inline SBO
     ::Build;
 ```
 
 ---
 
-## Unit Testing
+## Unit Testing & Verification
 
-Corium features a comprehensive unit test suite powered by **GoogleTest** and **CTest**:
+Corium includes a comprehensive test suite powered by GoogleTest and CTest:
 
 ```bash
-# Configure and build unit tests
+# Configure and build unit test suite
 cmake -B build -DCORIUM_BUILD_TESTS=ON
 cmake --build build
 
-# Run unit tests via CTest or test executable
+# Execute unit tests
 ctest --test-dir build --output-on-failure
-# or
-./build/corium_tests
 ```
 
-### Strict Bare-Metal / Desktop Audit (`-fno-rtti -fno-exceptions`)
+### Strict Bare-Metal Verification (`-fno-rtti -fno-exceptions`)
 
-You can compile Corium applications with strict bare-metal flags to verify zero RTTI / zero exception dependency:
+You can compile Corium with strict bare-metal flags to verify zero RTTI / zero exception dependency:
 
 ```bash
 g++ -std=c++20 -fno-rtti -fno-exceptions -Iinclude samples/01_basic_app/main.cpp -o my_app
@@ -291,7 +446,7 @@ g++ -std=c++20 -fno-rtti -fno-exceptions -Iinclude samples/01_basic_app/main.cpp
 
 ---
 
-## Integration & CMake
+## CMake Integration
 
 Corium is a header-only library target using CMake `INTERFACE`:
 
@@ -314,5 +469,4 @@ target_link_libraries(my_app PRIVATE corium)
 
 ## License
 
-Corium is open-source software distributed under the MIT License.
-
+Corium is open-source software distributed under the [MIT License](file:///home/simone/dev/corium/LICENSE).
