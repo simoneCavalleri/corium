@@ -124,6 +124,9 @@ public:
     void setContext(AppCoreContextT<EventBusType> context)
     {
         _context = context;
+        if constexpr (requires(Derived& d, AppCoreContextT<EventBusType> c) { d.onSetContext(c); }) {
+            static_cast<Derived*>(this)->onSetContext(context);
+        }
     }
 
 private:

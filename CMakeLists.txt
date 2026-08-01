@@ -31,6 +31,9 @@ target_link_libraries(sample_07_overflow PRIVATE corium)
 add_executable(sample_08_timer samples/08_timer_scheduler/main.cpp)
 target_link_libraries(sample_08_timer PRIVATE corium)
 
+add_executable(sample_09_desktop samples/09_desktop_gui/main.cpp)
+target_link_libraries(sample_09_desktop PRIVATE corium)
+
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
 
@@ -59,6 +62,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_priority_queue.cpp
         tests/test_overflow_policy.cpp
         tests/test_timer_scheduler.cpp
+        tests/test_ui_window.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

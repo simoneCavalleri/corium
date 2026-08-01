@@ -386,6 +386,73 @@ int main() {
 
 ---
 
+### 6. Desktop GUI Window Application (`corium/ui/`)
+
+Corium includes an optional, header-only Desktop GUI module (`#include <corium/ui/ui.hpp>`) providing window management and OS event bridging to Corium's MPSC event queue:
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/ui/ui.hpp>
+#include <iostream>
+
+using namespace corium;
+using namespace corium::ui;
+
+using DesktopEvents = std::variant<
+    QuitEvent,
+    WindowResizeEvent,
+    MouseMoveEvent,
+    MouseButtonEvent,
+    KeyEvent,
+    WindowCloseEvent
+>;
+
+using DesktopRuntime = RuntimeBuilder<>
+    ::WithEvents<DesktopEvents>
+    ::Build;
+
+class MyDesktopApp : public WindowApp<MyDesktopApp, GlfwWindow, DesktopRuntime::EventBusType> {
+public:
+    MyDesktopApp()
+        : WindowApp(WindowConfig{"Corium Desktop GUI App", 1280, 720})
+    {}
+
+    void onRegisterHandlers() {
+        WindowApp::onRegisterHandlers();
+
+        on([](const WindowResizeEvent& e) {
+            std::cout << "Resized to " << e.width << "x" << e.height << "\n";
+        });
+
+        on([](const MouseMoveEvent& e) {
+            std::cout << "Mouse pos: (" << e.x << ", " << e.y << ")\n";
+        });
+    }
+
+    void onRender() {
+        // Frame rendering logic (OpenGL, Vulkan, Metal, ImGui)
+    }
+};
+
+int main() {
+    DesktopRuntime runtime;
+    MyDesktopApp app;
+
+    runtime.initialize(app);
+
+    while (!runtime.quitRequested() && !app.window().shouldClose()) {
+        app.window().pollEvents();
+        runtime.pump();
+        app.render();
+    }
+
+    runtime.shutdown();
+    return 0;
+}
+```
+
+---
+
 ## Policy-Based Architecture & `RuntimeBuilder`
 
 Corium provides a flexible policy-based modular architecture allowing developers to configure queue types, overflow handling, signaling strategies, and memory footprints at compile time:
