@@ -34,6 +34,27 @@ target_link_libraries(sample_08_timer PRIVATE corium)
 add_executable(sample_09_desktop samples/09_desktop_gui/main.cpp)
 target_link_libraries(sample_09_desktop PRIVATE corium)
 
+# Optional Real GLFW Desktop GUI Sample
+option(CORIUM_BUILD_GUI_GLFW "Build real GLFW desktop window sample" ON)
+
+if(CORIUM_BUILD_GUI_GLFW)
+    include(FetchContent)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+
+    add_executable(sample_10_glfw samples/10_glfw_window/main.cpp)
+    target_link_libraries(sample_10_glfw PRIVATE corium glfw)
+    target_compile_definitions(sample_10_glfw PRIVATE CORIUM_HAS_GLFW=1)
+endif()
+
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
 

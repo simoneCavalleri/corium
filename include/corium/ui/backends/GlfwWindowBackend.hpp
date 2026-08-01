@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+#include <cstring>
 #include "corium/ui/WindowConfig.hpp"
 #include "corium/ui/WindowEvents.hpp"
 
@@ -29,7 +31,12 @@ public:
     {
 #if CORIUM_HAS_GLFW
         _window = rhs._window;
+        _sinkHolder = rhs._sinkHolder;
         rhs._window = nullptr;
+        rhs._sinkHolder.active = false;
+        if (_window) {
+            glfwSetWindowUserPointer(_window, &_sinkHolder);
+        }
 #else
         (void)rhs;
 #endif
@@ -41,7 +48,12 @@ public:
             close();
 #if CORIUM_HAS_GLFW
             _window = rhs._window;
+            _sinkHolder = rhs._sinkHolder;
             rhs._window = nullptr;
+            rhs._sinkHolder.active = false;
+            if (_window) {
+                glfwSetWindowUserPointer(_window, &_sinkHolder);
+            }
 #else
             (void)rhs;
 #endif
@@ -54,6 +66,7 @@ public:
     {
 #if CORIUM_HAS_GLFW
         if (!glfwInit()) {
+            std::cerr << "[Corium GLFW Error] Failed to initialize GLFW library!\n" << std::flush;
             return false;
         }
 
@@ -70,35 +83,35 @@ public:
         );
 
         if (!_window) {
+            const char* description = nullptr;
+            int errorCode = glfwGetError(&description);
+            std::cerr << "[Corium GLFW Error] Failed to create GLFW window! (Error "
+                      << errorCode << ": " << (description ? description : "Unknown error") << ")\n" << std::flush;
             return false;
         }
 
         glfwMakeContextCurrent(_window);
         glfwSwapInterval(config.vsync ? 1 : 0);
 
-        static_assert(sizeof(EventSink) <= 64, "EventSink size exceeds GlfwWindowBackend inline storage size!");
+        static_assert(sizeof(EventSink) <= sizeof(_sinkHolder.sinkStorage), "EventSink size exceeds GlfwWindowBackend inline storage size!");
 
         _sinkHolder.postResize = [](void* sinkPtr, WindowResizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
         };
         _sinkHolder.postClose = [](void* sinkPtr, WindowCloseEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
-        };
-        _sinkHolder.destroySink = [](void* sinkPtr) noexcept {
-            static_cast<EventSink*>(sinkPtr)->~EventSink();
+            reinterpret_cast<EventSink*>(sinkPtr)->post(evt);
         };
 
-        // Construct EventSink in-place into inline storage (0 heap allocations)
-        ::new (static_cast<void*>(_sinkHolder.sinkStorage)) EventSink(sink);
+        std::memcpy(_sinkHolder.sinkStorage, &sink, sizeof(EventSink));
         _sinkHolder.active = true;
 
         glfwSetWindowUserPointer(_window, &_sinkHolder);
@@ -190,10 +203,7 @@ public:
     {
 #if CORIUM_HAS_GLFW
         if (_window) {
-            if (_sinkHolder.active && _sinkHolder.destroySink) {
-                _sinkHolder.destroySink(_sinkHolder.sinkStorage);
-                _sinkHolder.active = false;
-            }
+            _sinkHolder.active = false;
             glfwDestroyWindow(_window);
             _window = nullptr;
             glfwTerminate();
@@ -213,7 +223,6 @@ private:
         void (*postMouseButton)(void*, MouseButtonEvent) = nullptr;
         void (*postKey)(void*, KeyEvent) = nullptr;
         void (*postClose)(void*, WindowCloseEvent) = nullptr;
-        void (*destroySink)(void*) noexcept = nullptr;
         bool active = false;
     };
 

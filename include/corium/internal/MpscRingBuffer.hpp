@@ -97,10 +97,10 @@ public:
         intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
 
         if (diff == 0) {
-            _dequeuePos.store(pos + 1, std::memory_order_relaxed);
             value = std::move(cell->value());
             cell->destroy();
             cell->sequence.store(pos + Mask + 1, std::memory_order_release);
+            _dequeuePos.store(pos + 1, std::memory_order_relaxed);
             return true;
         }
 
