@@ -17,7 +17,7 @@ using AuditRuntime = RuntimeBuilder<>
     ::WithOverflowPolicy<AuditOverflowPolicy>
     ::Build;
 
-class OverflowDemoApp : public AppCoreT<OverflowDemoApp, AuditRuntime::EventBusType> {
+class OverflowDemoApp : public AppCore<OverflowDemoApp, AuditRuntime::EventBusType> {
 public:
     void onRegisterHandlers()
     {

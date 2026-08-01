@@ -42,7 +42,7 @@ public:
 };
 
 // 3. Application Managing Both Thread-Based Services via onConfigureServices
-class ServiceApp : public AppCoreT<ServiceApp, Runtime::EventBusType> {
+class ServiceApp : public AppCore<ServiceApp> {
 public:
     SensorService sensorService;
     SignalProducerService signalProducerService;

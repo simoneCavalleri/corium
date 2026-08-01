@@ -1,6 +1,7 @@
 #pragma once
 
 #include "corium/AppCoreContext.hpp"
+#include "corium/EventBus.hpp"
 #include "corium/IEventSink.hpp"
 #include "corium/ServiceRegistry.hpp"
 
@@ -9,10 +10,10 @@
 namespace corium {
 
 /// @brief Static CRTP base class for applications managed by Corium Runtime.
-/// Subclass AppCoreT<Derived, EventBusType> for zero-vtable compile-time static dispatch.
+/// Subclass AppCore<Derived> or AppCoreT<Derived, EventBusType> for zero-vtable compile-time static dispatch.
 /// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
-/// @tparam EventBusType EventBus type used by the runtime.
-template <typename Derived, typename EventBusType>
+/// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
+template <typename Derived, typename EventBusType = EventBus>
 class AppCoreT {
 public:
     using EventVariant = typename EventBusType::EventVariant;
@@ -129,5 +130,9 @@ private:
     AppCoreContextT<EventBusType> _context;
     ServiceRegistryType _serviceRegistry;
 };
+
+/// @brief Simplified alias for AppCoreT with default EventBus.
+template <typename Derived, typename EventBusType = EventBus>
+using AppCore = AppCoreT<Derived, EventBusType>;
 
 } // namespace corium

@@ -95,7 +95,7 @@ flowchart TD
 using namespace corium;
 
 // Application inherits statically via CRTP
-class DemoApp : public AppCoreT<DemoApp, Runtime::EventBusType> {
+class DemoApp : public AppCore<DemoApp> {
 public:
     void onRegisterHandlers() {
         // Auto-deduces UpdateEvent from lambda argument signature
@@ -352,7 +352,7 @@ public:
     }
 };
 
-class MultiThreadApp : public AppCoreT<MultiThreadApp, Runtime::EventBusType> {
+class MultiThreadApp : public AppCore<MultiThreadApp> {
 public:
     SensorService sensorService;
 

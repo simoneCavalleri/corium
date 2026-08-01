@@ -17,7 +17,7 @@ using PriorityRuntime = RuntimeBuilder<>
     ::WithPriorityQueue<256, 1024>
     ::Build;
 
-class PriorityDemoApp : public AppCoreT<PriorityDemoApp, PriorityRuntime::EventBusType> {
+class PriorityDemoApp : public AppCore<PriorityDemoApp, PriorityRuntime::EventBusType> {
 public:
     void onRegisterHandlers()
     {

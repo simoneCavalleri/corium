@@ -16,7 +16,7 @@ using TimerDemoRuntime = RuntimeBuilder<>
     ::WithMaxTimers<32>
     ::Build;
 
-class TimerDemoApp : public AppCoreT<TimerDemoApp, TimerDemoRuntime::EventBusType> {
+class TimerDemoApp : public AppCore<TimerDemoApp, TimerDemoRuntime::EventBusType> {
 public:
     TimerId periodicTimerId = INVALID_TIMER_ID;
     TimerId delayedTimerId = INVALID_TIMER_ID;

@@ -42,8 +42,8 @@ using GameEvents = std::variant<
 // 3. Configure Runtime using RuntimeBuilder
 using GameRuntime = RuntimeBuilder<>::WithEvents<GameEvents>::Build;
 
-// 4. Subclass AppCoreT using GameEvents with auto-deduced on(...) handlers via CRTP
-class GameApp : public AppCoreT<GameApp, GameRuntime::EventBusType> {
+// 4. Subclass AppCore using GameEvents with auto-deduced on(...) handlers via CRTP
+class GameApp : public AppCore<GameApp, GameRuntime::EventBusType> {
 public:
     void onRegisterHandlers() {
         on([](const PlayerSpawnEvent& e) {
