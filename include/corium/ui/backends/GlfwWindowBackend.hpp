@@ -95,20 +95,50 @@ public:
 
         static_assert(sizeof(EventSink) <= sizeof(_sinkHolder.sinkStorage), "EventSink size exceeds GlfwWindowBackend inline storage size!");
 
+        _sinkHolder.postMove = [](void* sinkPtr, WindowMoveEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
         _sinkHolder.postResize = [](void* sinkPtr, WindowResizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
         };
-        _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+        _sinkHolder.postFramebufferResize = [](void* sinkPtr, FramebufferResizeEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
         };
-        _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+        _sinkHolder.postMinimize = [](void* sinkPtr, WindowMinimizeEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
         };
-        _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+        _sinkHolder.postMaximize = [](void* sinkPtr, WindowMaximizeEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postFocus = [](void* sinkPtr, WindowFocusEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postRefresh = [](void* sinkPtr, WindowRefreshEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postContentScale = [](void* sinkPtr, WindowContentScaleEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
         };
         _sinkHolder.postClose = [](void* sinkPtr, WindowCloseEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(evt);
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postMouseScroll = [](void* sinkPtr, MouseScrollEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postMouseEnter = [](void* sinkPtr, MouseEnterEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+        };
+        _sinkHolder.postChar = [](void* sinkPtr, CharEvent evt) {
+            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
         };
 
         std::memcpy(_sinkHolder.sinkStorage, &sink, sizeof(EventSink));
@@ -117,10 +147,66 @@ public:
         glfwSetWindowUserPointer(_window, &_sinkHolder);
 
         // Bind GLFW Callbacks
+        glfwSetWindowPosCallback(_window, [](GLFWwindow* win, int xpos, int ypos) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postMove && holder->active) {
+                holder->postMove(holder->sinkStorage, WindowMoveEvent{xpos, ypos});
+            }
+        });
+
         glfwSetWindowSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
             auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
             if (holder && holder->postResize && holder->active) {
                 holder->postResize(holder->sinkStorage, WindowResizeEvent{width, height});
+            }
+        });
+
+        glfwSetFramebufferSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postFramebufferResize && holder->active) {
+                holder->postFramebufferResize(holder->sinkStorage, FramebufferResizeEvent{width, height});
+            }
+        });
+
+        glfwSetWindowIconifyCallback(_window, [](GLFWwindow* win, int iconified) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postMinimize && holder->active) {
+                holder->postMinimize(holder->sinkStorage, WindowMinimizeEvent{iconified == GLFW_TRUE});
+            }
+        });
+
+        glfwSetWindowMaximizeCallback(_window, [](GLFWwindow* win, int maximized) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postMaximize && holder->active) {
+                holder->postMaximize(holder->sinkStorage, WindowMaximizeEvent{maximized == GLFW_TRUE});
+            }
+        });
+
+        glfwSetWindowFocusCallback(_window, [](GLFWwindow* win, int focused) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postFocus && holder->active) {
+                holder->postFocus(holder->sinkStorage, WindowFocusEvent{focused == GLFW_TRUE});
+            }
+        });
+
+        glfwSetWindowRefreshCallback(_window, [](GLFWwindow* win) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postRefresh && holder->active) {
+                holder->postRefresh(holder->sinkStorage, WindowRefreshEvent{});
+            }
+        });
+
+        glfwSetWindowContentScaleCallback(_window, [](GLFWwindow* win, float xscale, float yscale) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postContentScale && holder->active) {
+                holder->postContentScale(holder->sinkStorage, WindowContentScaleEvent{xscale, yscale});
+            }
+        });
+
+        glfwSetWindowCloseCallback(_window, [](GLFWwindow* win) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postClose && holder->active) {
+                holder->postClose(holder->sinkStorage, WindowCloseEvent{});
             }
         });
 
@@ -146,6 +232,23 @@ public:
             }
         });
 
+        glfwSetScrollCallback(_window, [](GLFWwindow* win, double xoffset, double yoffset) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postMouseScroll && holder->active) {
+                holder->postMouseScroll(holder->sinkStorage, MouseScrollEvent{
+                    static_cast<float>(xoffset),
+                    static_cast<float>(yoffset)
+                });
+            }
+        });
+
+        glfwSetCursorEnterCallback(_window, [](GLFWwindow* win, int entered) {
+            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+            if (holder && holder->postMouseEnter && holder->active) {
+                holder->postMouseEnter(holder->sinkStorage, MouseEnterEvent{entered == GLFW_TRUE});
+            }
+        });
+
         glfwSetKeyCallback(_window, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
             (void)mods;
             auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
@@ -159,10 +262,10 @@ public:
             }
         });
 
-        glfwSetWindowCloseCallback(_window, [](GLFWwindow* win) {
+        glfwSetCharCallback(_window, [](GLFWwindow* win, unsigned int codepoint) {
             auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postClose && holder->active) {
-                holder->postClose(holder->sinkStorage, WindowCloseEvent{});
+            if (holder && holder->postChar && holder->active) {
+                holder->postChar(holder->sinkStorage, CharEvent{static_cast<uint32_t>(codepoint)});
             }
         });
 
@@ -218,11 +321,21 @@ public:
 private:
     struct StaticSinkHolder {
         alignas(alignof(std::max_align_t)) std::byte sinkStorage[64]{};
+        void (*postMove)(void*, WindowMoveEvent) = nullptr;
         void (*postResize)(void*, WindowResizeEvent) = nullptr;
+        void (*postFramebufferResize)(void*, FramebufferResizeEvent) = nullptr;
+        void (*postMinimize)(void*, WindowMinimizeEvent) = nullptr;
+        void (*postMaximize)(void*, WindowMaximizeEvent) = nullptr;
+        void (*postFocus)(void*, WindowFocusEvent) = nullptr;
+        void (*postRefresh)(void*, WindowRefreshEvent) = nullptr;
+        void (*postContentScale)(void*, WindowContentScaleEvent) = nullptr;
+        void (*postClose)(void*, WindowCloseEvent) = nullptr;
         void (*postMouseMove)(void*, MouseMoveEvent) = nullptr;
         void (*postMouseButton)(void*, MouseButtonEvent) = nullptr;
+        void (*postMouseScroll)(void*, MouseScrollEvent) = nullptr;
+        void (*postMouseEnter)(void*, MouseEnterEvent) = nullptr;
         void (*postKey)(void*, KeyEvent) = nullptr;
-        void (*postClose)(void*, WindowCloseEvent) = nullptr;
+        void (*postChar)(void*, CharEvent) = nullptr;
         bool active = false;
     };
 
