@@ -10,3 +10,4 @@
 #include "corium/ServiceRegistry.hpp"
 #include "corium/Events.hpp"
 #include "corium/policies/Policies.hpp"
+#include "corium/logging/logging.hpp"

@@ -34,6 +34,9 @@ target_link_libraries(sample_08_timer PRIVATE corium)
 add_executable(sample_09_desktop samples/09_desktop_gui/main.cpp)
 target_link_libraries(sample_09_desktop PRIVATE corium)
 
+add_executable(sample_11_logging samples/11_logging/main.cpp)
+target_link_libraries(sample_11_logging PRIVATE corium)
+
 # Optional Real GLFW Desktop GUI Sample
 option(CORIUM_BUILD_GUI_GLFW "Build real GLFW desktop window sample" OFF)
 
@@ -84,6 +87,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_overflow_policy.cpp
         tests/test_timer_scheduler.cpp
         tests/test_ui_window.cpp
+        tests/test_logging.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 
