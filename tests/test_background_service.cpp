@@ -144,3 +144,32 @@ TEST(BackgroundServiceTest, ServiceRegistryTypedLookup) {
     EXPECT_TRUE(static_cast<bool>(registry.getServiceSink<TestConsumerService>()));
 }
 
+class PassiveThreadlessService : public Service<> {
+public:
+    PassiveThreadlessService() {
+        on([this](const SignalEvent& e) {
+            _eventsHandled++;
+            _lastVal = e.id;
+        });
+    }
+
+    int eventsHandled() const { return _eventsHandled; }
+    uint32_t lastVal() const { return _lastVal; }
+
+private:
+    int _eventsHandled = 0;
+    uint32_t _lastVal = 0;
+};
+
+TEST(ServiceTest, PassiveThreadlessServicePump) {
+    PassiveThreadlessService service;
+    service.sink().post(SignalEvent{42});
+    service.sink().post(SignalEvent{100});
+
+    EXPECT_EQ(service.eventsHandled(), 0);
+    EXPECT_EQ(service.pump(), 2u);
+    EXPECT_EQ(service.eventsHandled(), 2);
+    EXPECT_EQ(service.lastVal(), 100u);
+}
+
+
