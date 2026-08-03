@@ -1,7 +1,7 @@
 #pragma once
 
-#include <iostream>
 #include <cstring>
+#include "corium/logging/Logger.hpp"
 #include "corium/ui/WindowConfig.hpp"
 #include "corium/ui/WindowEvents.hpp"
 
@@ -66,7 +66,8 @@ public:
     {
 #if CORIUM_HAS_GLFW
         if (!glfwInit()) {
-            std::cerr << "[Corium GLFW Error] Failed to initialize GLFW library!\n" << std::flush;
+            corium::logging::ConsoleLogger logger{"GLFW"};
+            logger.error("Failed to initialize GLFW library!");
             return false;
         }
 
@@ -89,8 +90,8 @@ public:
         if (!_window) {
             const char* description = nullptr;
             int errorCode = glfwGetError(&description);
-            std::cerr << "[Corium GLFW Error] Failed to create GLFW window! (Error "
-                      << errorCode << ": " << (description ? description : "Unknown error") << ")\n" << std::flush;
+            corium::logging::ConsoleLogger logger{"GLFW"};
+            logger.error("Failed to create GLFW window! (Error %d: %s)", errorCode, description ? description : "Unknown error");
             return false;
         }
 
