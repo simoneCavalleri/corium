@@ -89,7 +89,14 @@ if(CORIUM_BUILD_TESTS)
         tests/test_ui_window.cpp
         tests/test_logging.cpp
     )
-    target_link_libraries(corium_tests PRIVATE corium gtest)
+    find_package(glfw3 QUIET)
+    if(glfw3_FOUND)
+        target_link_libraries(corium_tests PRIVATE corium gtest glfw)
+    elseif(TARGET glfw)
+        target_link_libraries(corium_tests PRIVATE corium gtest glfw)
+    else()
+        target_link_libraries(corium_tests PRIVATE corium gtest)
+    endif()
 
     include(GoogleTest)
     gtest_discover_tests(corium_tests)

@@ -102,179 +102,313 @@ public:
 
         static_assert(sizeof(EventSink) <= sizeof(_sinkHolder.sinkStorage), "EventSink size exceeds GlfwWindowBackend inline storage size!");
 
-        _sinkHolder.postMove = [](void* sinkPtr, WindowMoveEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postResize = [](void* sinkPtr, WindowResizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postFramebufferResize = [](void* sinkPtr, FramebufferResizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMinimize = [](void* sinkPtr, WindowMinimizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMaximize = [](void* sinkPtr, WindowMaximizeEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postFocus = [](void* sinkPtr, WindowFocusEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postRefresh = [](void* sinkPtr, WindowRefreshEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postContentScale = [](void* sinkPtr, WindowContentScaleEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postClose = [](void* sinkPtr, WindowCloseEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMouseScroll = [](void* sinkPtr, MouseScrollEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postMouseEnter = [](void* sinkPtr, MouseEnterEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
-        _sinkHolder.postChar = [](void* sinkPtr, CharEvent evt) {
-            static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
-        };
+        if constexpr (requires(EventSink& s, WindowMoveEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMove = [](void* sinkPtr, WindowMoveEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMove = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowResizeEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postResize = [](void* sinkPtr, WindowResizeEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postResize = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, FramebufferResizeEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postFramebufferResize = [](void* sinkPtr, FramebufferResizeEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postFramebufferResize = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowMinimizeEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMinimize = [](void* sinkPtr, WindowMinimizeEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMinimize = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowMaximizeEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMaximize = [](void* sinkPtr, WindowMaximizeEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMaximize = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowFocusEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postFocus = [](void* sinkPtr, WindowFocusEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postFocus = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowRefreshEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postRefresh = [](void* sinkPtr, WindowRefreshEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postRefresh = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowContentScaleEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postContentScale = [](void* sinkPtr, WindowContentScaleEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postContentScale = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, WindowCloseEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postClose = [](void* sinkPtr, WindowCloseEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postClose = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, MouseMoveEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMouseMove = [](void* sinkPtr, MouseMoveEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMouseMove = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, MouseButtonEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMouseButton = [](void* sinkPtr, MouseButtonEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMouseButton = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, MouseScrollEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMouseScroll = [](void* sinkPtr, MouseScrollEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMouseScroll = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, MouseEnterEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postMouseEnter = [](void* sinkPtr, MouseEnterEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postMouseEnter = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, KeyEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postKey = [](void* sinkPtr, KeyEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postKey = nullptr;
+        }
+
+        if constexpr (requires(EventSink& s, CharEvent e) { s.post(std::move(e)); }) {
+            _sinkHolder.postChar = [](void* sinkPtr, CharEvent evt) {
+                static_cast<EventSink*>(sinkPtr)->post(std::move(evt));
+            };
+        } else {
+            _sinkHolder.postChar = nullptr;
+        }
 
         std::memcpy(_sinkHolder.sinkStorage, &sink, sizeof(EventSink));
         _sinkHolder.active = true;
 
         glfwSetWindowUserPointer(_window, &_sinkHolder);
 
-        // Bind GLFW Callbacks
-        glfwSetWindowPosCallback(_window, [](GLFWwindow* win, int xpos, int ypos) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMove && holder->active) {
-                holder->postMove(holder->sinkStorage, WindowMoveEvent{xpos, ypos});
-            }
-        });
+        // Bind GLFW Callbacks conditionally based on sink capabilities
+        if (_sinkHolder.postMove) {
+            glfwSetWindowPosCallback(_window, [](GLFWwindow* win, int xpos, int ypos) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMove && holder->active) {
+                    holder->postMove(holder->sinkStorage, WindowMoveEvent{xpos, ypos});
+                }
+            });
+        } else {
+            glfwSetWindowPosCallback(_window, nullptr);
+        }
 
-        glfwSetWindowSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postResize && holder->active) {
-                holder->postResize(holder->sinkStorage, WindowResizeEvent{width, height});
-            }
-        });
+        if (_sinkHolder.postResize) {
+            glfwSetWindowSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postResize && holder->active) {
+                    holder->postResize(holder->sinkStorage, WindowResizeEvent{width, height});
+                }
+            });
+        } else {
+            glfwSetWindowSizeCallback(_window, nullptr);
+        }
 
-        glfwSetFramebufferSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postFramebufferResize && holder->active) {
-                holder->postFramebufferResize(holder->sinkStorage, FramebufferResizeEvent{width, height});
-            }
-        });
+        if (_sinkHolder.postFramebufferResize) {
+            glfwSetFramebufferSizeCallback(_window, [](GLFWwindow* win, int width, int height) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postFramebufferResize && holder->active) {
+                    holder->postFramebufferResize(holder->sinkStorage, FramebufferResizeEvent{width, height});
+                }
+            });
+        } else {
+            glfwSetFramebufferSizeCallback(_window, nullptr);
+        }
 
-        glfwSetWindowIconifyCallback(_window, [](GLFWwindow* win, int iconified) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMinimize && holder->active) {
-                holder->postMinimize(holder->sinkStorage, WindowMinimizeEvent{iconified == GLFW_TRUE});
-            }
-        });
+        if (_sinkHolder.postMinimize) {
+            glfwSetWindowIconifyCallback(_window, [](GLFWwindow* win, int iconified) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMinimize && holder->active) {
+                    holder->postMinimize(holder->sinkStorage, WindowMinimizeEvent{iconified == GLFW_TRUE});
+                }
+            });
+        } else {
+            glfwSetWindowIconifyCallback(_window, nullptr);
+        }
 
-        glfwSetWindowMaximizeCallback(_window, [](GLFWwindow* win, int maximized) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMaximize && holder->active) {
-                holder->postMaximize(holder->sinkStorage, WindowMaximizeEvent{maximized == GLFW_TRUE});
-            }
-        });
+        if (_sinkHolder.postMaximize) {
+            glfwSetWindowMaximizeCallback(_window, [](GLFWwindow* win, int maximized) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMaximize && holder->active) {
+                    holder->postMaximize(holder->sinkStorage, WindowMaximizeEvent{maximized == GLFW_TRUE});
+                }
+            });
+        } else {
+            glfwSetWindowMaximizeCallback(_window, nullptr);
+        }
 
-        glfwSetWindowFocusCallback(_window, [](GLFWwindow* win, int focused) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postFocus && holder->active) {
-                holder->postFocus(holder->sinkStorage, WindowFocusEvent{focused == GLFW_TRUE});
-            }
-        });
+        if (_sinkHolder.postFocus) {
+            glfwSetWindowFocusCallback(_window, [](GLFWwindow* win, int focused) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postFocus && holder->active) {
+                    holder->postFocus(holder->sinkStorage, WindowFocusEvent{focused == GLFW_TRUE});
+                }
+            });
+        } else {
+            glfwSetWindowFocusCallback(_window, nullptr);
+        }
 
-        glfwSetWindowRefreshCallback(_window, [](GLFWwindow* win) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postRefresh && holder->active) {
-                holder->postRefresh(holder->sinkStorage, WindowRefreshEvent{});
-            }
-        });
+        if (_sinkHolder.postRefresh) {
+            glfwSetWindowRefreshCallback(_window, [](GLFWwindow* win) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postRefresh && holder->active) {
+                    holder->postRefresh(holder->sinkStorage, WindowRefreshEvent{});
+                }
+            });
+        } else {
+            glfwSetWindowRefreshCallback(_window, nullptr);
+        }
 
-        glfwSetWindowContentScaleCallback(_window, [](GLFWwindow* win, float xscale, float yscale) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postContentScale && holder->active) {
-                holder->postContentScale(holder->sinkStorage, WindowContentScaleEvent{xscale, yscale});
-            }
-        });
+        if (_sinkHolder.postContentScale) {
+            glfwSetWindowContentScaleCallback(_window, [](GLFWwindow* win, float xscale, float yscale) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postContentScale && holder->active) {
+                    holder->postContentScale(holder->sinkStorage, WindowContentScaleEvent{xscale, yscale});
+                }
+            });
+        } else {
+            glfwSetWindowContentScaleCallback(_window, nullptr);
+        }
 
-        glfwSetWindowCloseCallback(_window, [](GLFWwindow* win) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postClose && holder->active) {
-                holder->postClose(holder->sinkStorage, WindowCloseEvent{});
-            }
-        });
+        if (_sinkHolder.postClose) {
+            glfwSetWindowCloseCallback(_window, [](GLFWwindow* win) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postClose && holder->active) {
+                    holder->postClose(holder->sinkStorage, WindowCloseEvent{});
+                }
+            });
+        } else {
+            glfwSetWindowCloseCallback(_window, nullptr);
+        }
 
-        glfwSetCursorPosCallback(_window, [](GLFWwindow* win, double xpos, double ypos) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMouseMove && holder->active) {
-                holder->postMouseMove(holder->sinkStorage, MouseMoveEvent{static_cast<float>(xpos), static_cast<float>(ypos)});
-            }
-        });
+        if (_sinkHolder.postMouseMove) {
+            glfwSetCursorPosCallback(_window, [](GLFWwindow* win, double xpos, double ypos) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMouseMove && holder->active) {
+                    holder->postMouseMove(holder->sinkStorage, MouseMoveEvent{static_cast<float>(xpos), static_cast<float>(ypos)});
+                }
+            });
+        } else {
+            glfwSetCursorPosCallback(_window, nullptr);
+        }
 
-        glfwSetMouseButtonCallback(_window, [](GLFWwindow* win, int button, int action, int mods) {
-            (void)mods;
-            double xpos = 0, ypos = 0;
-            glfwGetCursorPos(win, &xpos, &ypos);
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMouseButton && holder->active) {
-                holder->postMouseButton(holder->sinkStorage, MouseButtonEvent{
-                    button,
-                    action == GLFW_PRESS,
-                    static_cast<float>(xpos),
-                    static_cast<float>(ypos)
-                });
-            }
-        });
+        if (_sinkHolder.postMouseButton) {
+            glfwSetMouseButtonCallback(_window, [](GLFWwindow* win, int button, int action, int mods) {
+                (void)mods;
+                double xpos = 0, ypos = 0;
+                glfwGetCursorPos(win, &xpos, &ypos);
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMouseButton && holder->active) {
+                    holder->postMouseButton(holder->sinkStorage, MouseButtonEvent{
+                        button,
+                        action == GLFW_PRESS,
+                        static_cast<float>(xpos),
+                        static_cast<float>(ypos)
+                    });
+                }
+            });
+        } else {
+            glfwSetMouseButtonCallback(_window, nullptr);
+        }
 
-        glfwSetScrollCallback(_window, [](GLFWwindow* win, double xoffset, double yoffset) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMouseScroll && holder->active) {
-                holder->postMouseScroll(holder->sinkStorage, MouseScrollEvent{
-                    static_cast<float>(xoffset),
-                    static_cast<float>(yoffset)
-                });
-            }
-        });
+        if (_sinkHolder.postMouseScroll) {
+            glfwSetScrollCallback(_window, [](GLFWwindow* win, double xoffset, double yoffset) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMouseScroll && holder->active) {
+                    holder->postMouseScroll(holder->sinkStorage, MouseScrollEvent{
+                        static_cast<float>(xoffset),
+                        static_cast<float>(yoffset)
+                    });
+                }
+            });
+        } else {
+            glfwSetScrollCallback(_window, nullptr);
+        }
 
-        glfwSetCursorEnterCallback(_window, [](GLFWwindow* win, int entered) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postMouseEnter && holder->active) {
-                holder->postMouseEnter(holder->sinkStorage, MouseEnterEvent{entered == GLFW_TRUE});
-            }
-        });
+        if (_sinkHolder.postMouseEnter) {
+            glfwSetCursorEnterCallback(_window, [](GLFWwindow* win, int entered) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postMouseEnter && holder->active) {
+                    holder->postMouseEnter(holder->sinkStorage, MouseEnterEvent{entered == GLFW_TRUE});
+                }
+            });
+        } else {
+            glfwSetCursorEnterCallback(_window, nullptr);
+        }
 
-        glfwSetKeyCallback(_window, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
-            (void)mods;
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postKey && holder->active) {
-                holder->postKey(holder->sinkStorage, KeyEvent{
-                    key,
-                    scancode,
-                    action != GLFW_RELEASE,
-                    action == GLFW_REPEAT
-                });
-            }
-        });
+        if (_sinkHolder.postKey) {
+            glfwSetKeyCallback(_window, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
+                (void)mods;
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postKey && holder->active) {
+                    holder->postKey(holder->sinkStorage, KeyEvent{
+                        key,
+                        scancode,
+                        action != GLFW_RELEASE,
+                        action == GLFW_REPEAT
+                    });
+                }
+            });
+        } else {
+            glfwSetKeyCallback(_window, nullptr);
+        }
 
-        glfwSetCharCallback(_window, [](GLFWwindow* win, unsigned int codepoint) {
-            auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
-            if (holder && holder->postChar && holder->active) {
-                holder->postChar(holder->sinkStorage, CharEvent{static_cast<uint32_t>(codepoint)});
-            }
-        });
+        if (_sinkHolder.postChar) {
+            glfwSetCharCallback(_window, [](GLFWwindow* win, unsigned int codepoint) {
+                auto holder = static_cast<StaticSinkHolder*>(glfwGetWindowUserPointer(win));
+                if (holder && holder->postChar && holder->active) {
+                    holder->postChar(holder->sinkStorage, CharEvent{static_cast<uint32_t>(codepoint)});
+                }
+            });
+        } else {
+            glfwSetCharCallback(_window, nullptr);
+        }
 
         return true;
 #else

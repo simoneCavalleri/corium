@@ -152,3 +152,27 @@ TEST(UiWindowTest, NullWindowAppLifecycle)
     EXPECT_TRUE(runtime.quitRequested());
     runtime.shutdown();
 }
+
+#if CORIUM_HAS_GLFW
+TEST(UiWindowTest, GlfwCompileTimeEventFiltering)
+{
+    using RestrictedEvents = std::variant<QuitEvent, WindowCloseEvent>;
+
+    class RestrictedSink {
+    public:
+        void post(RestrictedEvents, EventPriority = EventPriority::Normal) {}
+    } sink;
+
+    backends::GlfwWindowBackend backend;
+    WindowConfig config{"Headless Filtering Test", 640, 480};
+    config.noApi = true;
+
+    // Backend creation should succeed and filter out unhandled event types compile-time
+    bool created = backend.create(config, sink);
+    if (created) {
+        backend.close();
+    }
+}
+#endif
+
+
