@@ -12,6 +12,7 @@ struct WindowConfig {
     bool vsync = true;
     bool resizable = true;
     bool fullscreen = false;
+    bool noApi = false;
 };
 
 } // namespace corium::ui

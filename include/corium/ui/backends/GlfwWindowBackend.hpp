@@ -70,8 +70,12 @@ public:
             return false;
         }
 
+        _noApi = config.noApi;
         glfwWindowHint(GLFW_RESIZABLE, config.resizable ? GLFW_TRUE : GLFW_FALSE);
         glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+        if (_noApi) {
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        }
 
         GLFWmonitor* monitor = config.fullscreen ? glfwGetPrimaryMonitor() : nullptr;
         _window = glfwCreateWindow(
@@ -90,8 +94,10 @@ public:
             return false;
         }
 
-        glfwMakeContextCurrent(_window);
-        glfwSwapInterval(config.vsync ? 1 : 0);
+        if (!_noApi) {
+            glfwMakeContextCurrent(_window);
+            glfwSwapInterval(config.vsync ? 1 : 0);
+        }
 
         static_assert(sizeof(EventSink) <= sizeof(_sinkHolder.sinkStorage), "EventSink size exceeds GlfwWindowBackend inline storage size!");
 
@@ -287,7 +293,7 @@ public:
     void swapBuffers() noexcept
     {
 #if CORIUM_HAS_GLFW
-        if (_window) {
+        if (_window && !_noApi) {
             glfwSwapBuffers(_window);
         }
 #endif
@@ -342,6 +348,7 @@ private:
 #if CORIUM_HAS_GLFW
     GLFWwindow* _window = nullptr;
     StaticSinkHolder _sinkHolder{};
+    bool _noApi = false;
 #endif
 };
 
