@@ -57,6 +57,7 @@ public:
     /// @brief Non-allocating type-erased handle for static background services.
     struct ServiceHandle {
         void* instance = nullptr;
+        internal::TypeIdPtr typeId = nullptr;
         void (*initFn)(void* inst, ServiceContext ctx) = nullptr;
         void (*startFn)(void* inst) = nullptr;
         void (*stopFn)(void* inst) noexcept = nullptr;
@@ -77,6 +78,7 @@ public:
         }
         _services[_count] = ServiceHandle{
             &serviceInstance,
+            internal::getTypeId<ServiceType>(),
             [](void* ptr, ServiceContext ctx) {
                 auto* s = static_cast<ServiceType*>(ptr);
                 if constexpr (internal::HasSetContext<ServiceType, ServiceContext>) { s->setContext(ctx); }
@@ -103,9 +105,51 @@ public:
         return true;
     }
 
+    /// @brief Retrieve a registered service instance by static type ID.
+    [[nodiscard]] void* getServiceById(internal::TypeIdPtr typeId) const noexcept
+    {
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].typeId == typeId) {
+                return _services[i].instance;
+            }
+        }
+        return nullptr;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not found.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        return static_cast<ServiceType*>(getServiceById(internal::getTypeId<ServiceType>()));
+    }
+
+    /// @brief Retrieve event sink handle of a target registered service if available.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return IEventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
+    template <typename ServiceType>
+    [[nodiscard]] IEventSinkT<EventVariant> getServiceSink() const noexcept
+    {
+        auto* service = getService<ServiceType>();
+        if (service) {
+            if constexpr (requires { service->sink(); }) {
+                return service->sink();
+            } else if constexpr (requires { service->serviceSink(); }) {
+                return service->serviceSink();
+            }
+        }
+        return IEventSinkT<EventVariant>{};
+    }
+
     /// @brief Initialize and launch all registered background service jthreads.
     void initialize(ServiceContext ctx)
     {
+        ctx.registryPtr = const_cast<ServiceRegistryT*>(this);
+        ctx.getServiceFn = [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
+            return static_cast<ServiceRegistryT*>(regPtr)->getServiceById(typeId);
+        };
+
         for (size_t i = 0; i < _count; ++i) {
             if (_services[i].initFn) {
                 _services[i].initFn(_services[i].instance, ctx);

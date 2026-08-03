@@ -37,6 +37,10 @@ target_link_libraries(sample_09_desktop PRIVATE corium)
 add_executable(sample_11_logging samples/11_logging/main.cpp)
 target_link_libraries(sample_11_logging PRIVATE corium)
 
+add_executable(sample_12_service_communication samples/12_service_communication/main.cpp)
+target_link_libraries(sample_12_service_communication PRIVATE corium)
+
+
 # Optional Real GLFW Desktop GUI Sample
 option(CORIUM_BUILD_GUI_GLFW "Build real GLFW desktop window sample" OFF)
 

@@ -45,4 +45,22 @@ struct has_variant_type<T, std::variant<Types...>> {
 template <typename T, typename Variant>
 inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
 
+namespace internal {
+
+template <typename T>
+struct TypeId {
+    static inline const char id = 0;
+};
+
+using TypeIdPtr = const void*;
+
+/// @brief Get static unique address for type T without dynamic allocations or RTTI.
+template <typename T>
+inline TypeIdPtr getTypeId() noexcept {
+    return &TypeId<T>::id;
+}
+
+} // namespace internal
+
 } // namespace corium
+
