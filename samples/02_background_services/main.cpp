@@ -15,8 +15,8 @@
 
 using namespace corium;
 
-// 1. Background Sensor Producer Service (running on its own std::jthread)
-class SensorService : public BackgroundService<> {
+// 1. Background Sensor Producer Service (running on its own std::jthread, zero incoming queue overhead)
+class SensorService : public ProducerBackgroundService<> {
 public:
     void run(std::stop_token stopToken) {
         double elapsed = 0.0;
@@ -28,8 +28,8 @@ public:
     }
 };
 
-// 2. Background Signal Producer Service (running on its own std::jthread)
-class SignalProducerService : public BackgroundService<> {
+// 2. Background Signal Producer Service (running on its own std::jthread, zero incoming queue overhead)
+class SignalProducerService : public ProducerBackgroundService<> {
 public:
     void run(std::stop_token stopToken) {
         uint32_t signalId = 0;

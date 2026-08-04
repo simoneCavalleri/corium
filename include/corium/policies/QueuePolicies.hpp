@@ -191,5 +191,37 @@ private:
     mutable std::mutex _mutex;
 };
 
+/// @brief Zero-overhead Queue Policy for services or buses that do not receive or queue incoming events.
+/// Occupies zero storage space when combined with [[no_unique_address]] in container types.
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class NoQueuePolicy {
+public:
+    using EventType = EventVariant;
+
+    struct PushResult {
+        bool pushed = false;
+        bool wasEmpty = false;
+    };
+
+    /// @brief Always fails to push events as queue capacity is 0.
+    PushResult tryPush(EventVariant, EventPriority = EventPriority::Normal) noexcept
+    {
+        return {false, false};
+    }
+
+    /// @brief Always fails to pop events as queue capacity is 0.
+    bool tryPop(EventVariant&) noexcept
+    {
+        return false;
+    }
+
+    /// @brief Always returns true as no events can be queued.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return true;
+    }
+};
+
 } // namespace corium
 

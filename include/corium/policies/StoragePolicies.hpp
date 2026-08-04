@@ -22,4 +22,7 @@ using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
 /// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
 using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
 
+/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
+using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
+
 } // namespace corium

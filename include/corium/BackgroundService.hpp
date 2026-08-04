@@ -105,4 +105,25 @@ private:
     std::jthread _thread;
 };
 
+/// @brief Zero-overhead BackgroundService alias for producer worker threads (zero incoming queue/reactor footprint).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerBackgroundService = BackgroundService<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief BackgroundService alias for consumer worker threads with configurable queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerBackgroundService = BackgroundService<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
+
 } // namespace corium

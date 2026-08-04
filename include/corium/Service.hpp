@@ -3,7 +3,9 @@
 #include "corium/EventBus.hpp"
 #include "corium/IEventSink.hpp"
 #include "corium/ServiceContext.hpp"
+#include "corium/policies/QueuePolicies.hpp"
 #include "corium/policies/SignalPolicies.hpp"
+#include "corium/policies/StoragePolicies.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -137,7 +139,28 @@ protected:
 
 private:
     ServiceContextT<EventVariant> _context;
-    IncomingBus _incomingBus;
+    [[no_unique_address]] IncomingBus _incomingBus;
 };
+
+/// @brief Zero-overhead Service alias for pure producer services (no incoming event queue/reactor allocations).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerService = Service<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief Explicit Service alias for consumer services with configurable incoming event queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerService = Service<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
 
 } // namespace corium

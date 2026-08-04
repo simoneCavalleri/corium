@@ -92,6 +92,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_timer_scheduler.cpp
         tests/test_ui_window.cpp
         tests/test_logging.cpp
+        tests/test_no_queue_service.cpp
     )
     find_package(glfw3 QUIET)
     if(glfw3_FOUND)

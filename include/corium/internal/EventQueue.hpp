@@ -89,8 +89,8 @@ public:
     }
 
 private:
-    QueuePolicy _queuePolicy;
-    SignalPolicy _signalPolicy;
+    [[no_unique_address]] QueuePolicy _queuePolicy;
+    [[no_unique_address]] SignalPolicy _signalPolicy;
     [[no_unique_address]] OverflowPolicy _overflowPolicy;
 };
 
