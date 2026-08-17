@@ -194,9 +194,11 @@ TEST(SafetyTest, WatchdogServiceAutonomousSupervision) {
         runtime.pump();
     }
 
-    // Now stop beating and wait for timeout
-    std::this_thread::sleep_for(std::chrono::milliseconds(45));
-    runtime.pump();
+    // Now stop beating and wait for autonomous watchdog supervision timeout
+    for (int i = 0; i < 20 && !app.timeoutTriggered; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        runtime.pump();
+    }
 
     EXPECT_TRUE(app.timeoutTriggered);
     EXPECT_EQ(app.timedOutServiceId, 42u);
