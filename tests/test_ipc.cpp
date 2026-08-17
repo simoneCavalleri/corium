@@ -205,6 +205,9 @@ TEST(IpcTest, ConcurrentMultiProducerPush)
 
 TEST(IpcTest, UdsChannelDatagramEventTransmission)
 {
+#if defined(_WIN32) || defined(_WIN64)
+    GTEST_SKIP() << "UNIX Domain Datagram Sockets (AF_UNIX / SOCK_DGRAM) are POSIX-specific.";
+#else
     const std::string serverSock = "/tmp/corium_test_uds_srv.sock";
     const std::string clientSock = "/tmp/corium_test_uds_cli.sock";
 
@@ -236,6 +239,7 @@ TEST(IpcTest, UdsChannelDatagramEventTransmission)
 
     server.close();
     client.close();
+#endif
 }
 
 TEST(IpcTest, RawMemoryBufferDirectBind)
