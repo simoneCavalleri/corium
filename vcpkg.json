@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "corium",
+  "version": "0.4.0",
+  "description": "High-Performance Zero-Heap C++20 MPSC Event Framework for Embedded and Desktop",
+  "homepage": "https://github.com/simoneCavalleri/corium",
+  "license": "MIT",
+  "supports": "cxx20",
+  "features": {
+    "tests": {
+      "description": "Build unit test suite",
+      "dependencies": [
+        "gtest"
+      ]
+    },
+    "benchmarks": {
+      "description": "Build benchmark suite",
+      "dependencies": [
+        "benchmark"
+      ]
+    }
+  }
+}

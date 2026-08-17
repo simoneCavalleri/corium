@@ -1,0 +1,171 @@
+name: Corium CI Matrix & Quality Gate
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Multi-Platform Build & Test Matrix
+  # ---------------------------------------------------------------------------
+  matrix-build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux GCC
+          - name: "Linux GCC-14 (Release)"
+            os: ubuntu-24.04
+            c_compiler: gcc-14
+            cpp_compiler: g++-14
+            build_type: Release
+          - name: "Linux GCC-13 (Release)"
+            os: ubuntu-24.04
+            c_compiler: gcc-13
+            cpp_compiler: g++-13
+            build_type: Release
+
+          # Linux Clang
+          - name: "Linux Clang-18 (Release)"
+            os: ubuntu-24.04
+            c_compiler: clang-18
+            cpp_compiler: clang++-18
+            build_type: Release
+
+          # macOS
+          - name: "macOS AppleClang (Release)"
+            os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+
+          # Windows MSVC
+          - name: "Windows MSVC 2022 (Release)"
+            os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            build_type: Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCORIUM_BUILD_TESTS=ON
+          -DCORIUM_BUILD_BENCHMARKS=ON
+
+      - name: Build All Targets
+        run: cmake --build build --config ${{ matrix.build_type }} -j4
+
+      - name: Execute CTest Suite
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure
+
+  # ---------------------------------------------------------------------------
+  # 2. Clang Sanitizers (ASan + UBSan)
+  # ---------------------------------------------------------------------------
+  address-sanitizers:
+    name: "Clang AddressSanitizer & UBSan"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure with Sanitizers
+        run: >
+          cmake -B build-san
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=clang-18
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCORIUM_BUILD_TESTS=ON
+
+      - name: Build Sanitized Test Suite
+        run: cmake --build build-san -j4
+
+      - name: Run Sanitized Tests
+        env:
+          ASAN_OPTIONS: "alloc_dealloc_mismatch=0:detect_leaks=1"
+        run: ctest --test-dir build-san --output-on-failure
+
+  # ---------------------------------------------------------------------------
+  # 3. ThreadSanitizer (TSan) - Concurrency & Lock-Free Verification
+  # ---------------------------------------------------------------------------
+  thread-sanitizer:
+    name: "Clang ThreadSanitizer (TSan)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure with ThreadSanitizer
+        run: >
+          cmake -B build-tsan
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_C_COMPILER=clang-18
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer"
+          -DCORIUM_BUILD_TESTS=ON
+
+      - name: Build TSan Suite
+        run: cmake --build build-tsan -j4
+
+      - name: Run TSan Concurrency Verification
+        run: ctest --test-dir build-tsan --output-on-failure
+
+  # ---------------------------------------------------------------------------
+  # 4. Single-Header Amalgamation & Bare-Metal Check
+  # ---------------------------------------------------------------------------
+  single-header-verification:
+    name: "Single-Header Synchronization & Bare-Metal Validation"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify Single-Header Synchronization
+        run: python3 tools/amalgamate.py --check
+
+      - name: Test Single-Header Standalone Compilation (-fno-rtti -fno-exceptions)
+        run: |
+          clang++-18 -std=c++20 -Wall -Wextra -Wpedantic -Werror -fno-rtti -fno-exceptions \
+            -Isingle_include samples/01_basic_app/main.cpp -o sample_01_single
+          ./sample_01_single
+
+  # ---------------------------------------------------------------------------
+  # 5. Automated GitHub Release on Git Tag
+  # ---------------------------------------------------------------------------
+  release:
+    name: "Publish GitHub Release"
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [matrix-build, address-sanitizers, thread-sanitizer, single-header-verification]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate Single-Header
+        run: python3 tools/amalgamate.py
+
+      - name: Create Release and Upload Single Header
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            single_include/corium.hpp
+          generate_release_notes: true

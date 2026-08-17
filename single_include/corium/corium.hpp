@@ -1,0 +1,6761 @@
+// =============================================================================
+// Corium - High-Performance Zero-Heap C++20 MPSC Event Framework
+// Single-Header Standalone Amalgamated Distribution
+//
+// Generated automatically by tools/amalgamate.py. DO NOT EDIT DIRECTLY.
+// MIT License - Copyright (c) 2026 Simone Cavalleri
+// =============================================================================
+
+#pragma once
+
+
+// >>> Begin: corium/corium.hpp
+
+/// @file corium.hpp
+/// @brief Umbrella header for the Corium C++20 Header-Only Application Runtime.
+/// Including this file provides access to Runtime, Application, Events, BackgroundServices, and Policies.
+
+
+// >>> Begin: corium/Runtime.hpp
+
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <limits>
+#include <utility>
+
+
+// >>> Begin: corium/Application.hpp
+
+
+// >>> Begin: corium/ApplicationContext.hpp
+
+#include <chrono>
+
+// >>> Begin: corium/EventBus.hpp
+
+
+// >>> Begin: corium/EventSink.hpp
+
+#include <type_traits>
+#include <utility>
+
+// >>> Begin: corium/Events.hpp
+
+#include <cstdint>
+#include <variant>
+
+namespace corium {
+
+/// @brief Application shutdown event.
+struct QuitEvent {};
+
+/// @brief Periodic heartbeat or hardware timer tick event.
+struct TickEvent {
+    uint64_t tick = 0;
+    double deltaTime = 0.0;
+
+    constexpr TickEvent() = default;
+    constexpr explicit TickEvent(double dt, uint64_t t = 0)
+        : tick(t), deltaTime(dt) {}
+};
+
+/// @brief Logical update or execution step event.
+struct UpdateEvent {
+    double deltaTime = 0.0;
+
+    constexpr UpdateEvent() = default;
+    constexpr explicit UpdateEvent(double dt)
+        : deltaTime(dt) {}
+};
+
+/// @brief System, hardware, or framework error event.
+struct ErrorEvent {
+    uint32_t code = 0;
+    uintptr_t payload = 0;
+
+    constexpr ErrorEvent() = default;
+    constexpr ErrorEvent(uint32_t errCode, uintptr_t data = 0)
+        : code(errCode), payload(data) {}
+};
+
+/// @brief Generic signal or notification trigger event.
+struct SignalEvent {
+    uint32_t id = 0;
+
+    constexpr SignalEvent() = default;
+    constexpr explicit SignalEvent(uint32_t signalId)
+        : id(signalId) {}
+};
+
+/// @brief Default variant list of core Corium events.
+using DefaultEvents = std::variant<
+    QuitEvent,
+    TickEvent,
+    UpdateEvent,
+    ErrorEvent,
+    SignalEvent
+>;
+
+/// @brief Alias for DefaultEvents.
+using Event = DefaultEvents;
+
+} // namespace corium
+
+// <<< End: corium/Events.hpp
+
+// >>> Begin: corium/policies/QueuePolicies.hpp
+
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <queue>
+#include <type_traits>
+#include <utility>
+
+
+// >>> Begin: corium/internal/MpscRingBuffer.hpp
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <new>
+#include <utility>
+
+namespace corium {
+
+/// @brief Lock-free Multiple-Producer, Single-Consumer (MPSC) RingBuffer.
+/// Implements Dmitry Vyukov's algorithm with zero heap allocations (uses std::array).
+/// Cache-line aligned (alignas(64)) to eliminate false sharing.
+/// @tparam T Event element type stored in ring cells.
+/// @tparam Capacity Buffer capacity (must be a power of 2).
+template <typename T, size_t Capacity>
+class MpscRingBuffer {
+    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of 2.");
+
+    struct alignas(64) Cell {
+        std::atomic<size_t> sequence;
+        alignas(alignof(T)) std::byte storage[sizeof(T)];
+
+        template <typename... Args>
+        void construct(Args&&... args) {
+            new (static_cast<void*>(storage)) T(std::forward<Args>(args)...);
+        }
+
+        T& value() noexcept {
+            return *std::launder(reinterpret_cast<T*>(storage));
+        }
+
+        const T& value() const noexcept {
+            return *std::launder(reinterpret_cast<const T*>(storage));
+        }
+
+        void destroy() noexcept {
+            value().~T();
+        }
+    };
+
+public:
+    struct PushResult {
+        bool pushed;
+        bool wasEmpty;
+    };
+
+    MpscRingBuffer() {
+        for (size_t i = 0; i < Capacity; ++i) {
+            _buffer[i].sequence.store(i, std::memory_order_relaxed);
+        }
+        _enqueuePos.store(0, std::memory_order_relaxed);
+        _dequeuePos.store(0, std::memory_order_relaxed);
+    }
+
+    ~MpscRingBuffer() {
+        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+        size_t end = _enqueuePos.load(std::memory_order_relaxed);
+        while (pos < end) {
+            _buffer[pos & Mask].destroy();
+            pos++;
+        }
+    }
+
+    MpscRingBuffer(const MpscRingBuffer&) = delete;
+    MpscRingBuffer& operator=(const MpscRingBuffer&) = delete;
+
+    /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers).
+    PushResult tryPush(T&& value) {
+        size_t pos = _enqueuePos.load(std::memory_order_relaxed);
+        Cell* cell;
+        for (;;) {
+            cell = &_buffer[pos & Mask];
+            size_t seq = cell->sequence.load(std::memory_order_acquire);
+            intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+            if (diff == 0) {
+                if (_enqueuePos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                    break;
+                }
+            } else if (diff < 0) {
+                return {false, false};
+            } else {
+                pos = _enqueuePos.load(std::memory_order_relaxed);
+            }
+        }
+
+        // Calculate wasEmpty based on whether the dequeue cell is empty.
+        bool wasEmpty = empty();
+
+        cell->construct(std::move(value));
+        cell->sequence.store(pos + 1, std::memory_order_release);
+
+        return {true, wasEmpty};
+    }
+
+    /// @brief Try to pop an item from the ring buffer (single consumer thread).
+    bool tryPop(T& value) {
+        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+        Cell* cell = &_buffer[pos & Mask];
+        size_t seq = cell->sequence.load(std::memory_order_acquire);
+        intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+
+        if (diff == 0) {
+            value = std::move(cell->value());
+            cell->sequence.store(pos + Mask + 1, std::memory_order_release);
+            _dequeuePos.store(pos + 1, std::memory_order_relaxed);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// @brief Check if ring buffer is empty (safe for single consumer).
+    /// Returns true if the next cell to dequeue is not yet published with a valid sequence.
+    [[nodiscard]] bool empty() const noexcept {
+        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+        const Cell* cell = &_buffer[pos & Mask];
+        size_t seq = cell->sequence.load(std::memory_order_acquire);
+        intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+        return diff != 0;
+    }
+
+private:
+    static constexpr size_t Mask = Capacity - 1;
+
+    alignas(64) std::array<Cell, Capacity> _buffer;
+    alignas(64) std::atomic<size_t> _enqueuePos;
+    alignas(64) std::atomic<size_t> _dequeuePos;
+};
+
+} // namespace corium
+
+// <<< End: corium/internal/MpscRingBuffer.hpp
+
+namespace corium {
+
+/// @brief Event priority levels for multi-priority queue policies.
+enum class EventPriority : uint8_t {
+    High = 0,
+    Normal = 1,
+    Low = 2
+};
+
+/// @brief Queue Policy for fixed-capacity, zero-allocation lock-free MPSC RingBuffer.
+/// @tparam EventVariant The variant type list of supported events.
+/// @tparam Capacity Ring buffer capacity (must be a power of 2).
+template <typename EventVariant = DefaultEvents, size_t Capacity = 1024>
+class BoundedMpscQueuePolicy {
+public:
+    using EventType = EventVariant;
+    static constexpr std::size_t capacity = Capacity; ///< Accessible queue capacity for profiler wiring.
+
+    struct PushResult {
+        bool pushed;
+        bool wasEmpty;
+    };
+
+    /// @brief Try to push an event into the lock-free queue (thread-safe, zero allocations).
+    PushResult tryPush(EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)priority;
+        auto res = _ringBuffer.tryPush(std::move(event));
+        return {res.pushed, res.wasEmpty};
+    }
+
+    /// @brief Try to push an event into the lock-free queue (const lvalue overload).
+    PushResult tryPush(const EventVariant& event, EventPriority priority = EventPriority::Normal)
+    {
+        EventVariant copy = event;
+        return tryPush(std::move(copy), priority);
+    }
+
+    /// @brief Try to pop an event from the lock-free queue (single consumer).
+    bool tryPop(EventVariant& event)
+    {
+        return _ringBuffer.tryPop(event);
+    }
+
+    /// @brief Check if queue is empty.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return _ringBuffer.empty();
+    }
+
+private:
+    MpscRingBuffer<EventVariant, Capacity> _ringBuffer;
+};
+
+/// @brief Queue Policy supporting strict event priorities using separate lock-free MPSC ring buffers.
+/// High priority events are always popped and dispatched before Normal/Low priority events.
+/// @tparam EventVariant The variant type list of supported events.
+/// @tparam HighCapacity Capacity for high-priority ring buffer (power of 2).
+/// @tparam NormalCapacity Capacity for normal-priority ring buffer (power of 2).
+/// @tparam LowCapacity Capacity for low-priority ring buffer (power of 2, 0 to disable).
+template <
+    typename EventVariant = DefaultEvents,
+    size_t HighCapacity = 256,
+    size_t NormalCapacity = 1024,
+    size_t LowCapacity = 0
+>
+class PriorityMpscQueuePolicy {
+public:
+    using EventType = EventVariant;
+    /// @brief Total accessible capacity (high + normal; low is optional).
+    static constexpr std::size_t capacity = HighCapacity + NormalCapacity + (LowCapacity > 0 ? LowCapacity : 0);
+
+    struct PushResult {
+        bool pushed;
+        bool wasEmpty;
+    };
+
+    /// @brief Try to push an event into the priority queue (thread-safe, zero dynamic allocation).
+    PushResult tryPush(EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        bool wasOverallEmpty = empty();
+        bool pushed = false;
+
+        switch (priority) {
+            case EventPriority::High: {
+                auto res = _highRingBuffer.tryPush(std::move(event));
+                pushed = res.pushed;
+                break;
+            }
+            case EventPriority::Normal: {
+                auto res = _normalRingBuffer.tryPush(std::move(event));
+                pushed = res.pushed;
+                break;
+            }
+            case EventPriority::Low: {
+                if constexpr (LowCapacity > 0) {
+                    auto res = _lowRingBuffer.tryPush(std::move(event));
+                    pushed = res.pushed;
+                } else {
+                    auto res = _normalRingBuffer.tryPush(std::move(event));
+                    pushed = res.pushed;
+                }
+                break;
+            }
+        }
+
+        return {pushed, wasOverallEmpty};
+    }
+
+    /// @brief Try to push an event into the priority queue (const lvalue overload).
+    PushResult tryPush(const EventVariant& event, EventPriority priority = EventPriority::Normal)
+    {
+        EventVariant copy = event;
+        return tryPush(std::move(copy), priority);
+    }
+
+    /// @brief Try to pop an event from the priority queue (strict priority order: High -> Normal -> Low).
+    bool tryPop(EventVariant& event)
+    {
+        if (_highRingBuffer.tryPop(event)) {
+            return true;
+        }
+        if (_normalRingBuffer.tryPop(event)) {
+            return true;
+        }
+        if constexpr (LowCapacity > 0) {
+            if (_lowRingBuffer.tryPop(event)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @brief Check if all priority queues are empty.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        bool isEmpty = _highRingBuffer.empty() && _normalRingBuffer.empty();
+        if constexpr (LowCapacity > 0) {
+            isEmpty = isEmpty && _lowRingBuffer.empty();
+        }
+        return isEmpty;
+    }
+
+private:
+    MpscRingBuffer<EventVariant, HighCapacity> _highRingBuffer;
+    MpscRingBuffer<EventVariant, NormalCapacity> _normalRingBuffer;
+    [[no_unique_address]] std::conditional_t<(LowCapacity > 0),
+        MpscRingBuffer<EventVariant, (LowCapacity > 0 ? LowCapacity : 1)>,
+        std::monostate
+    > _lowRingBuffer{};
+};
+
+/// @brief Queue Policy for a traditional mutex-protected blocking queue (power saving).
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class BlockingQueuePolicy {
+public:
+    using EventType = EventVariant;
+
+    struct PushResult {
+        bool pushed;
+        bool wasEmpty;
+    };
+
+    /// @brief Try to push an event into the blocking queue.
+    PushResult tryPush(EventVariant event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)priority;
+        std::lock_guard<std::mutex> lock(_mutex);
+        bool wasEmpty = _queue.empty();
+        _queue.push(std::move(event));
+        return {true, wasEmpty};
+    }
+
+    /// @brief Try to pop an event from the blocking queue.
+    bool tryPop(EventVariant& event)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_queue.empty()) {
+            return false;
+        }
+        event = std::move(_queue.front());
+        _queue.pop();
+        return true;
+    }
+
+    /// @brief Check if queue is empty.
+    [[nodiscard]] bool empty() const
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _queue.empty();
+    }
+
+private:
+    std::queue<EventVariant> _queue;
+    mutable std::mutex _mutex;
+};
+
+/// @brief Zero-overhead Queue Policy for services or buses that do not receive or queue incoming events.
+/// Occupies zero storage space when combined with [[no_unique_address]] in container types.
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class NoQueuePolicy {
+public:
+    using EventType = EventVariant;
+
+    struct PushResult {
+        bool pushed = false;
+        bool wasEmpty = false;
+    };
+
+    /// @brief Always fails to push events as queue capacity is 0.
+    PushResult tryPush(EventVariant, EventPriority = EventPriority::Normal) noexcept
+    {
+        return {false, false};
+    }
+
+    /// @brief Always fails to pop events as queue capacity is 0.
+    bool tryPop(EventVariant&) noexcept
+    {
+        return false;
+    }
+
+    /// @brief Always returns true as no events can be queued.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return true;
+    }
+};
+
+} // namespace corium
+
+
+// <<< End: corium/policies/QueuePolicies.hpp
+
+namespace corium {
+
+/// @brief Non-virtual type-erased event sink handle (raw pointer + static function pointer).
+/// Zero dynamic heap allocations, zero vtables/RTTI.
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class BasicEventSink {
+    using PostFn = void (*)(void* sinkPtr, EventVariant&& event, EventPriority priority);
+
+public:
+    using EventVariantType = EventVariant;
+
+    BasicEventSink() = default;
+
+    BasicEventSink(const BasicEventSink&) = default;
+    BasicEventSink& operator=(const BasicEventSink&) = default;
+    BasicEventSink(BasicEventSink&&) noexcept = default;
+    BasicEventSink& operator=(BasicEventSink&&) noexcept = default;
+
+    template <typename ConcreteSink>
+        requires (!std::is_same_v<std::decay_t<ConcreteSink>, BasicEventSink>)
+    explicit BasicEventSink(ConcreteSink& sink)
+        : _sinkPtr(&sink),
+          _postFn([](void* ptr, EventVariant&& evt, EventPriority prio) {
+              static_cast<ConcreteSink*>(ptr)->post(std::move(evt), prio);
+          })
+    {}
+
+    /// @brief Post an event into the event sink with priority (rvalue overload).
+    void post(EventVariant&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_postFn && _sinkPtr) {
+            _postFn(_sinkPtr, std::move(event), priority);
+        }
+    }
+
+    /// @brief Post an event into the event sink with priority (const lvalue overload).
+    void post(const EventVariant& event, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_postFn && _sinkPtr) {
+            EventVariant copy = event;
+            _postFn(_sinkPtr, std::move(copy), priority);
+        }
+    }
+
+    /// @brief Convenience helper for posting high-priority events (e.g. from ISR handlers).
+    template <typename Event>
+    void postHighPriority(Event&& event) const
+    {
+        post(EventVariant(std::forward<Event>(event)), EventPriority::High);
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return _sinkPtr != nullptr && _postFn != nullptr;
+    }
+
+private:
+    void* _sinkPtr = nullptr;
+    PostFn _postFn = nullptr;
+};
+
+/// @brief Default EventSink alias using DefaultEvents.
+using EventSink = BasicEventSink<DefaultEvents>;
+
+/// @brief Templated EventSink alias for custom event variant list.
+template <typename EventVariant = DefaultEvents>
+using EventSinkT = BasicEventSink<EventVariant>;
+
+} // namespace corium
+
+// <<< End: corium/EventSink.hpp
+
+// >>> Begin: corium/internal/CallableTraits.hpp
+
+#include <type_traits>
+
+namespace corium {
+
+template <typename T>
+struct callable_event_type;
+
+// Const member function operator() (const lambda)
+template <typename C, typename R, typename EventType>
+struct callable_event_type<R(C::*)(const EventType&) const> {
+    using type = std::decay_t<EventType>;
+};
+
+// Non-const member function operator() (mutable lambda)
+template <typename C, typename R, typename EventType>
+struct callable_event_type<R(C::*)(const EventType&)> {
+    using type = std::decay_t<EventType>;
+};
+
+// Value parameter const operator()
+template <typename C, typename R, typename EventType>
+struct callable_event_type<R(C::*)(EventType) const> {
+    using type = std::decay_t<EventType>;
+};
+
+// Value parameter non-const operator()
+template <typename C, typename R, typename EventType>
+struct callable_event_type<R(C::*)(EventType)> {
+    using type = std::decay_t<EventType>;
+};
+
+// Free function pointer (const ref)
+template <typename R, typename EventType>
+struct callable_event_type<R(*)(const EventType&)> {
+    using type = std::decay_t<EventType>;
+};
+
+// Free function pointer (value)
+template <typename R, typename EventType>
+struct callable_event_type<R(*)(EventType)> {
+    using type = std::decay_t<EventType>;
+};
+
+template <typename Callable, typename = void>
+struct get_callable_event_type;
+
+template <typename Callable>
+struct get_callable_event_type<Callable, std::void_t<decltype(&std::decay_t<Callable>::operator())>> {
+    using type = typename callable_event_type<decltype(&std::decay_t<Callable>::operator())>::type;
+};
+
+template <typename R, typename EventType>
+struct get_callable_event_type<R(*)(const EventType&)> {
+    using type = std::decay_t<EventType>;
+};
+
+template <typename R, typename EventType>
+struct get_callable_event_type<R(*)(EventType)> {
+    using type = std::decay_t<EventType>;
+};
+
+/// @brief Helper trait to deduce the concrete EventType argument from a callable (lambda, function pointer, or functor).
+template <typename Callable>
+using callable_event_type_t = typename get_callable_event_type<Callable>::type;
+
+} // namespace corium
+
+// <<< End: corium/internal/CallableTraits.hpp
+
+// >>> Begin: corium/internal/EventQueue.hpp
+
+#include <optional>
+#include <utility>
+
+
+// >>> Begin: corium/policies/Policies.hpp
+
+/// @file Policies.hpp
+/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
+
+
+// >>> Begin: corium/policies/SignalPolicies.hpp
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
+#include <thread>
+#include <utility>
+
+#ifdef __linux__
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#endif
+
+namespace corium {
+
+/// @brief Lightweight non-allocating static callback wrapper (function pointer + optional context argument).
+struct StaticCallback {
+    using SimpleFn = void (*)();
+    using ContextFn = void (*)(void* arg);
+
+    ContextFn fn = nullptr;
+    void* arg = nullptr;
+
+    StaticCallback() = default;
+
+    /* implicit */ StaticCallback(SimpleFn simpleFn)
+        : fn(reinterpret_cast<ContextFn>(simpleFn)), arg(nullptr)
+    {
+        if (simpleFn) {
+            // Helper trampoline for parameterless function pointers
+            fn = [](void* context) {
+                reinterpret_cast<SimpleFn>(context)();
+            };
+            arg = reinterpret_cast<void*>(simpleFn);
+        }
+    }
+
+    StaticCallback(ContextFn contextFn, void* contextArg)
+        : fn(contextFn), arg(contextArg)
+    {}
+
+    void operator()() const {
+        if (fn) {
+            fn(arg);
+        }
+    }
+
+    explicit operator bool() const noexcept {
+        return fn != nullptr;
+    }
+};
+
+/// @brief Signal Policy for busy-spin / polling event loops (sub-microsecond latency, zero signaling cost).
+class NoSignalPolicy {
+public:
+    void setOnQueueNonEmpty(StaticCallback cb) noexcept { (void)cb; }
+    void signal() noexcept {}
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>&) noexcept
+    {
+#if defined(__arm__) || defined(__aarch64__)
+        asm volatile("yield");
+#elif defined(__x86_64__)
+        __builtin_ia32_pause();
+#else
+        // zero-op spin yield
+#endif
+    }
+};
+
+/// @brief Signal Policy invoking an edge-triggered callback on 0->1 transition when queue becomes non-empty.
+class CallbackSignalPolicy {
+public:
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _callback = callback;
+    }
+
+    void signal()
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _hasEvents = true;
+        _cv.notify_one();
+        if (_callback) {
+            _callback();
+        }
+    }
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _cv.wait_for(lock, timeout, [this]() { return _hasEvents; });
+        _hasEvents = false;
+    }
+
+private:
+    StaticCallback _callback;
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _hasEvents = false;
+};
+
+/// @brief Signal Policy using C++20 std::atomic::wait() / notify_one() for zero-mutex futex signaling.
+class AtomicWaitSignalPolicy {
+public:
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        _userCallback = callback;
+    }
+
+    void signal()
+    {
+        _flag.store(true, std::memory_order_release);
+        _flag.notify_one();
+        if (_userCallback) {
+            _userCallback();
+        }
+    }
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (_flag.load(std::memory_order_acquire)) {
+            _flag.store(false, std::memory_order_relaxed);
+            return;
+        }
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!_flag.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return;
+            }
+            std::this_thread::yield();
+        }
+        _flag.store(false, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<bool> _flag{false};
+    StaticCallback _userCallback;
+};
+
+#ifdef __linux__
+/// @brief Signal Policy using Linux eventfd for native epoll event loop integration.
+class EventFdSignalPolicy {
+public:
+    EventFdSignalPolicy()
+    {
+        _fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    }
+
+    ~EventFdSignalPolicy()
+    {
+        if (_fd >= 0) {
+            ::close(_fd);
+        }
+    }
+
+    EventFdSignalPolicy(const EventFdSignalPolicy&) = delete;
+    EventFdSignalPolicy& operator=(const EventFdSignalPolicy&) = delete;
+
+    EventFdSignalPolicy(EventFdSignalPolicy&& rhs) noexcept : _fd(rhs._fd)
+    {
+        rhs._fd = -1;
+    }
+
+    EventFdSignalPolicy& operator=(EventFdSignalPolicy&& rhs) noexcept
+    {
+        if (this != &rhs) {
+            if (_fd >= 0) ::close(_fd);
+            _fd = rhs._fd;
+            rhs._fd = -1;
+        }
+        return *this;
+    }
+
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        _userCallback = callback;
+    }
+
+    void signal()
+    {
+        uint64_t val = 1;
+        [[maybe_unused]] auto res = ::write(_fd, &val, sizeof(val));
+        if (_userCallback) {
+            _userCallback();
+        }
+    }
+
+    template <typename Rep, typename Period>
+    void wait_for(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (_fd < 0) return;
+        struct pollfd pfd;
+        pfd.fd = _fd;
+        pfd.events = POLLIN;
+        int timeoutMs = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
+        int res = ::poll(&pfd, 1, timeoutMs);
+        if (res > 0 && (pfd.revents & POLLIN)) {
+            uint64_t val = 0;
+            [[maybe_unused]] auto bytes = ::read(_fd, &val, sizeof(val));
+        }
+    }
+
+    [[nodiscard]] int nativeHandle() const noexcept
+    {
+        return _fd;
+    }
+
+private:
+    int _fd = -1;
+    StaticCallback _userCallback;
+};
+#endif // __linux__
+
+} // namespace corium
+
+// <<< End: corium/policies/SignalPolicies.hpp
+
+// >>> Begin: corium/policies/StoragePolicies.hpp
+
+#include <cstddef>
+
+namespace corium {
+
+/// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
+/// @tparam MaxHandlers Maximum handlers per event type stored statically.
+/// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).
+template <std::size_t MaxHandlers = 8, std::size_t InlineSize = 32>
+struct FixedStoragePolicy {
+    static constexpr std::size_t max_handlers_per_event = MaxHandlers;
+    static constexpr std::size_t inline_storage_size = InlineSize;
+};
+
+/// @brief Default storage policy (8 handlers per event type, 32 bytes inline delegate storage).
+using DefaultStoragePolicy = FixedStoragePolicy<8, 32>;
+
+/// @brief Footprint-optimized storage policy (4 handlers per event type, 16 bytes inline storage).
+using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
+
+/// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
+using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
+
+/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
+using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
+
+} // namespace corium
+
+// <<< End: corium/policies/StoragePolicies.hpp
+
+// >>> Begin: corium/policies/OverflowPolicies.hpp
+
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <exception>
+#include <utility>
+
+
+namespace corium {
+
+/// @brief Default Overflow Policy: Silently drop incoming new event when queue is full. Zero overhead.
+struct DropNewestOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+        return false;
+    }
+};
+
+/// @brief Overflow Policy: Evict oldest event in queue to make room for the new event.
+/// Ideal for high-frequency telemetry and sensor data where newest reading is critical.
+struct DropOldestOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        typename QueuePolicy::EventType dummy;
+        queue.tryPop(dummy); // Evict oldest event
+        auto res = queue.tryPush(std::forward<EventVariant>(event), priority);
+        return res.pushed;
+    }
+};
+
+/// @brief Overflow Policy: Trigger assertion / panic when queue fills up.
+/// Essential for mission-critical systems where event loss is unacceptable.
+struct PanicOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+#if defined(CORIUM_PANIC_ON_OVERFLOW)
+        std::terminate();
+#else
+        assert(false && "Corium Queue Overflow: Queue capacity exceeded!");
+        return false;
+#endif
+    }
+};
+
+/// @brief Overflow Policy: Audit and count dropped events via atomic counter.
+class AuditOverflowPolicy {
+public:
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+        _droppedCount.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    /// @brief Get total number of dropped events.
+    [[nodiscard]] uint64_t overflowCount() const noexcept
+    {
+        return _droppedCount.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Reset total dropped event counter to 0.
+    void resetOverflowCount() noexcept
+    {
+        _droppedCount.store(0, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<uint64_t> _droppedCount{0};
+};
+
+} // namespace corium
+
+// <<< End: corium/policies/OverflowPolicies.hpp
+
+// >>> Begin: corium/policies/TimerPolicies.hpp
+
+#include <cstddef>
+
+// >>> Begin: corium/timers/ClockPolicies.hpp
+
+#include <chrono>
+#include <cstdint>
+#include <type_traits>
+
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <esp_timer.h>
+#define CORIUM_NATIVE_ESP_TIMER 1
+#endif
+
+#if defined(FREERTOS) || defined(INC_FREERTOS_H)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#define CORIUM_NATIVE_FREERTOS 1
+#endif
+
+namespace corium {
+
+class ChronoClockPolicy;
+
+namespace internal {
+
+template <typename T, typename = void>
+struct get_timer_clock_policy {
+    using type = ChronoClockPolicy;
+};
+
+template <typename T>
+struct get_timer_clock_policy<T, std::void_t<typename T::clock_policy>> {
+    using type = typename T::clock_policy;
+};
+
+} // namespace internal
+
+/// @brief Default host clock policy using std::chrono::steady_clock.
+class ChronoClockPolicy {
+public:
+    using time_point = std::chrono::steady_clock::time_point;
+    using duration = std::chrono::microseconds;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+        return std::chrono::steady_clock::now();
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + std::chrono::duration_cast<std::chrono::steady_clock::duration>(d);
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+};
+
+/// @brief Deterministic, manually-advanced clock policy for unit tests and simulation.
+class ManualClockPolicy {
+public:
+    using time_point = uint64_t;
+    using duration = uint64_t;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+        return _currentTime;
+    }
+
+    static void set(time_point t) noexcept
+    {
+        _currentTime = t;
+    }
+
+    static void advance(duration delta) noexcept
+    {
+        _currentTime += delta;
+    }
+
+    static void reset() noexcept
+    {
+        _currentTime = 0;
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+    }
+
+    [[nodiscard]] static time_point add(time_point tp, duration delta) noexcept
+    {
+        return tp + delta;
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+
+private:
+    static inline time_point _currentTime = 0;
+};
+
+/// @brief Clock policy driven by a custom microsecond tick provider.
+/// @tparam Provider Struct with static `uint64_t nowUs()` method.
+template <typename Provider>
+class MicrosecondTickClockPolicy {
+public:
+    using time_point = uint64_t;
+    using duration = uint64_t;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+        return Provider::nowUs();
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+    }
+
+    [[nodiscard]] static time_point add(time_point tp, duration delta) noexcept
+    {
+        return tp + delta;
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+};
+
+/// @brief Clock policy driven by a custom millisecond tick provider (e.g. millis(), HAL_GetTick()).
+/// @tparam Provider Struct with static `uint32_t nowMs()` method.
+template <typename Provider>
+class MillisecondTickClockPolicy {
+public:
+    using time_point = uint32_t;
+    using duration = uint32_t;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+        return Provider::nowMs();
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(d).count());
+    }
+
+    [[nodiscard]] static time_point add(time_point tp, duration delta) noexcept
+    {
+        return tp + delta;
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+};
+
+/// @brief Native ESP32 Hardware Timer clock policy using `esp_timer_get_time()` (64-bit microsecond counter).
+class EspTimerClockPolicy {
+public:
+    using time_point = uint64_t;
+    using duration = uint64_t;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+#if defined(CORIUM_NATIVE_ESP_TIMER)
+        int64_t t = esp_timer_get_time();
+        return t > 0 ? static_cast<uint64_t>(t) : 0;
+#else
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count()
+        );
+#endif
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+    }
+
+    [[nodiscard]] static time_point add(time_point tp, duration delta) noexcept
+    {
+        return tp + delta;
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+};
+
+/// @brief FreeRTOS RTOS Tick clock policy using `xTaskGetTickCount()`.
+class FreeRtosClockPolicy {
+public:
+    using time_point = uint32_t;
+    using duration = uint32_t;
+
+    [[nodiscard]] static time_point now() noexcept
+    {
+#if defined(CORIUM_NATIVE_FREERTOS)
+        return static_cast<uint32_t>(xTaskGetTickCount());
+#else
+        return static_cast<uint32_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count()
+        );
+#endif
+    }
+
+    template <typename Rep, typename Period>
+    [[nodiscard]] static time_point add(time_point tp, const std::chrono::duration<Rep, Period>& d) noexcept
+    {
+        return tp + static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(d).count());
+    }
+
+    [[nodiscard]] static time_point add(time_point tp, duration delta) noexcept
+    {
+        return tp + delta;
+    }
+
+    [[nodiscard]] static bool isDue(time_point now, time_point expiry) noexcept
+    {
+        return now >= expiry;
+    }
+};
+
+} // namespace corium
+
+// <<< End: corium/timers/ClockPolicies.hpp
+
+// >>> Begin: corium/timers/TimerScheduler.hpp
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
+#include <utility>
+
+
+namespace corium {
+
+using TimerId = uint32_t;
+constexpr TimerId INVALID_TIMER_ID = 0;
+
+/// @brief Zero-heap Timer Scheduler storing timers in a fixed-capacity static array.
+/// Supports single-shot delayed events and recurring periodic events with compile-time clock policy.
+/// @tparam EventVariant Supported event variant list type.
+/// @tparam MaxTimers Maximum number of concurrent active timers (static array capacity).
+/// @tparam ClockPolicy Policy governing time acquisition and arithmetic (ChronoClockPolicy default).
+template <
+    typename EventVariant = DefaultEvents,
+    size_t MaxTimers = 64,
+    typename ClockPolicy = ChronoClockPolicy
+>
+class TimerScheduler {
+public:
+    using Clock = ClockPolicy;
+    using time_point = typename ClockPolicy::time_point;
+    using duration = typename ClockPolicy::duration;
+
+    struct TimerEntry {
+        TimerId id = INVALID_TIMER_ID;
+        EventVariant event{};
+        time_point expiryTime{};
+        duration interval{};
+        EventPriority priority = EventPriority::Normal;
+        bool isPeriodic = false;
+        bool active = false;
+    };
+
+    TimerScheduler() = default;
+
+    /// @brief Schedule a single-shot delayed event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
+    {
+        time_point now = ClockPolicy::now();
+        time_point expiry = ClockPolicy::add(now, delay);
+        duration zeroInterval{};
+        return allocateTimer(std::move(event), expiry, zeroInterval, priority, false);
+    }
+
+    /// @brief Schedule a single-shot delayed event with native clock duration.
+    TimerId scheduleDelayed(EventVariant event, duration delay, EventPriority priority = EventPriority::Normal)
+        requires (!std::is_same_v<duration, std::chrono::microseconds> && !std::is_same_v<duration, std::chrono::milliseconds>)
+    {
+        time_point now = ClockPolicy::now();
+        time_point expiry = ClockPolicy::add(now, delay);
+        duration zeroInterval{};
+        return allocateTimer(std::move(event), expiry, zeroInterval, priority, false);
+    }
+
+    /// @brief Schedule a recurring periodic event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
+    {
+        time_point now = ClockPolicy::now();
+        time_point expiry = ClockPolicy::add(now, interval);
+        if constexpr (std::is_same_v<duration, std::chrono::microseconds>) {
+            return allocateTimer(std::move(event), expiry, std::chrono::duration_cast<std::chrono::microseconds>(interval), priority, true);
+        } else if constexpr (std::is_same_v<duration, std::chrono::milliseconds>) {
+            return allocateTimer(std::move(event), expiry, std::chrono::duration_cast<std::chrono::milliseconds>(interval), priority, true);
+        } else {
+            duration nativeInterval = static_cast<duration>(std::chrono::duration_cast<std::chrono::microseconds>(interval).count());
+            return allocateTimer(std::move(event), expiry, nativeInterval, priority, true);
+        }
+    }
+
+    /// @brief Schedule a recurring periodic event with native clock duration.
+    TimerId schedulePeriodic(EventVariant event, duration interval, EventPriority priority = EventPriority::Normal)
+        requires (!std::is_same_v<duration, std::chrono::microseconds> && !std::is_same_v<duration, std::chrono::milliseconds>)
+    {
+        time_point now = ClockPolicy::now();
+        time_point expiry = ClockPolicy::add(now, interval);
+        return allocateTimer(std::move(event), expiry, interval, priority, true);
+    }
+
+    /// @brief Cancel an active timer by its TimerId handle.
+    /// @param id Handle of the timer to cancel.
+    /// @return true if timer was found and cancelled; false if handle was invalid/inactive.
+    bool cancelTimer(TimerId id) noexcept
+    {
+        if (id == INVALID_TIMER_ID) {
+            return false;
+        }
+
+        for (auto& entry : _timers) {
+            if (entry.active && entry.id == id) {
+                entry.active = false;
+                entry.id = INVALID_TIMER_ID;
+                if (_activeCount > 0) {
+                    _activeCount--;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @brief Process all due timers and post their events into target event bus or sink.
+    /// @tparam TargetEventSink Target event sink type (e.g. BasicEventBus or EventSink).
+    /// @param sink Target sink receiving due timer events.
+    /// @param now Current time point (defaults to ClockPolicy::now()).
+    /// @return Number of events posted during this check.
+    template <typename EventSink>
+    std::size_t processDueTimers(EventSink& sink, time_point now = ClockPolicy::now())
+    {
+        if (_activeCount == 0) {
+            return 0;
+        }
+
+        std::size_t posted = 0;
+        for (auto& entry : _timers) {
+            if (!entry.active) {
+                continue;
+            }
+
+            if (ClockPolicy::isDue(now, entry.expiryTime)) {
+                sink.post(entry.event, entry.priority);
+                posted++;
+
+                if (entry.isPeriodic) {
+                    entry.expiryTime = ClockPolicy::add(now, entry.interval);
+                } else {
+                    entry.active = false;
+                    entry.id = INVALID_TIMER_ID;
+                    if (_activeCount > 0) {
+                        _activeCount--;
+                    }
+                }
+            }
+        }
+        return posted;
+    }
+
+    /// @brief Get current number of active timers.
+    [[nodiscard]] size_t activeCount() const noexcept
+    {
+        return _activeCount;
+    }
+
+    /// @brief Get maximum timer capacity.
+    [[nodiscard]] constexpr size_t capacity() const noexcept
+    {
+        return MaxTimers;
+    }
+
+private:
+    TimerId allocateTimer(EventVariant event, time_point expiryTime, duration interval, EventPriority priority, bool isPeriodic)
+    {
+        for (auto& entry : _timers) {
+            if (!entry.active) {
+                entry.id = _nextId++;
+                if (_nextId == INVALID_TIMER_ID) {
+                    _nextId = 1;
+                }
+                entry.event = std::move(event);
+                entry.expiryTime = expiryTime;
+                entry.interval = interval;
+                entry.priority = priority;
+                entry.isPeriodic = isPeriodic;
+                entry.active = true;
+                _activeCount++;
+                return entry.id;
+            }
+        }
+
+        return INVALID_TIMER_ID; // Capacity exceeded
+    }
+
+    std::array<TimerEntry, MaxTimers> _timers{};
+    size_t _activeCount = 0;
+    TimerId _nextId = 1;
+};
+
+} // namespace corium
+
+// <<< End: corium/timers/TimerScheduler.hpp
+
+namespace corium {
+
+/// @brief Compile-time policy configuring TimerScheduler capacity and clock source.
+/// @tparam MaxTimers Maximum number of concurrent timers allowed (default: 64).
+/// @tparam ClockPolicy Time source and arithmetic policy (default: ChronoClockPolicy).
+template <size_t MaxTimers = 64, typename ClockPolicy = ChronoClockPolicy>
+struct FixedTimerStoragePolicy {
+    static constexpr size_t max_timers = MaxTimers;
+    using clock_policy = ClockPolicy;
+};
+
+using DefaultTimerStoragePolicy = FixedTimerStoragePolicy<64, ChronoClockPolicy>;
+using CompactTimerStoragePolicy = FixedTimerStoragePolicy<16, ChronoClockPolicy>;
+using LargeTimerStoragePolicy = FixedTimerStoragePolicy<256, ChronoClockPolicy>;
+
+} // namespace corium
+
+// <<< End: corium/policies/TimerPolicies.hpp
+
+// <<< End: corium/policies/Policies.hpp
+
+namespace corium {
+
+/// @brief Event queue composing QueuePolicy, SignalPolicy, and OverflowPolicy strategy types.
+/// @tparam QueuePolicy Queueing policy strategy.
+/// @tparam SignalPolicy Signaling policy strategy.
+/// @tparam OverflowPolicy Strategy for handling queue overflow when capacity is exceeded.
+template <
+    typename QueuePolicy = BoundedMpscQueuePolicy<DefaultEvents, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
+>
+class EventQueue {
+public:
+    using EventVariant = typename QueuePolicy::EventType;
+
+    EventQueue() = default;
+
+    /// @brief Push an event into the queue and trigger signal policy on 0->1 transition (rvalue overload).
+    bool pushEvent(EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        auto res = _queuePolicy.tryPush(std::move(event), priority);
+        if (!res.pushed) {
+            return _overflowPolicy.handleOverflow(_queuePolicy, std::move(event), priority);
+        }
+
+        if (res.wasEmpty) {
+            _signalPolicy.signal();
+        }
+
+        return true;
+    }
+
+    /// @brief Push an event into the queue (const lvalue overload).
+    bool pushEvent(const EventVariant& event, EventPriority priority = EventPriority::Normal)
+    {
+        EventVariant copy = event;
+        return pushEvent(std::move(copy), priority);
+    }
+
+    /// @brief Pop an event directly into output reference without intermediate optional.
+    bool tryPopEvent(EventVariant& event)
+    {
+        return _queuePolicy.tryPop(event);
+    }
+
+    /// @brief Pop an event from the queue.
+    /// @return Optional containing popped event, or std::nullopt if empty.
+    std::optional<EventVariant> tryPopEvent()
+    {
+        EventVariant event;
+        if (_queuePolicy.tryPop(event)) {
+            return event;
+        }
+        return std::nullopt;
+    }
+
+    /// @brief Check if event queue is empty.
+    [[nodiscard]] bool empty() const
+    {
+        return _queuePolicy.empty();
+    }
+
+    /// @brief Set non-allocating static callback triggered when queue transitions from empty to non-empty.
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        _signalPolicy.setOnQueueNonEmpty(callback);
+    }
+
+    /// @brief Access reference to signal policy.
+    SignalPolicy& signalPolicy() noexcept
+    {
+        return _signalPolicy;
+    }
+
+    /// @brief Access const reference to signal policy.
+    const SignalPolicy& signalPolicy() const noexcept
+    {
+        return _signalPolicy;
+    }
+
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _overflowPolicy;
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _overflowPolicy;
+    }
+
+private:
+    [[no_unique_address]] QueuePolicy _queuePolicy;
+    [[no_unique_address]] SignalPolicy _signalPolicy;
+    [[no_unique_address]] OverflowPolicy _overflowPolicy;
+};
+
+} // namespace corium
+
+// <<< End: corium/internal/EventQueue.hpp
+
+// >>> Begin: corium/internal/Reactor.hpp
+
+#include <array>
+#include <cassert>
+#include <cstddef>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+// >>> Begin: corium/internal/FastDelegate.hpp
+
+#include <cassert>
+#include <cstddef>
+#include <new>
+#include <type_traits>
+#include <utility>
+
+namespace corium {
+
+/// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
+/// Eliminates std::function heap allocations and virtual table overhead for event handlers.
+/// @tparam EventType The concrete event type invoked by this delegate.
+template <typename EventType, std::size_t InlineSize = 32>
+class EventHandlerDelegate {
+    using StubFn = void (*)(void* instance, const EventType& event);
+    using DestroyFn = void (*)(void* instance) noexcept;
+    using MoveFn = void (*)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept;
+
+public:
+    EventHandlerDelegate() noexcept = default;
+
+    /// @brief Construct delegate wrapping a callable object (lambda, function pointer, or functor).
+    /// @tparam Handler Callable type.
+    /// @param handler Callable instance.
+    template <
+        typename Handler,
+        typename Decayed = std::decay_t<Handler>,
+        typename = std::enable_if_t<
+            !std::is_same_v<Decayed, EventHandlerDelegate> &&
+            std::is_invocable_r_v<void, Decayed&, const EventType&>
+        >
+    >
+    explicit EventHandlerDelegate(Handler&& handler)
+    {
+        static_assert(
+            std::is_nothrow_destructible_v<Decayed>,
+            "Handler destructor must be noexcept"
+        );
+        static_assert(
+            sizeof(Decayed) <= InlineSize,
+            "Handler size exceeds FastDelegate inline storage size! Reduce captured state or increase InlineSize."
+        );
+        static_assert(
+            alignof(Decayed) <= alignof(std::max_align_t),
+            "Handler alignment requirement exceeds inline storage alignment."
+        );
+        static_assert(
+            std::is_nothrow_move_constructible_v<Decayed>,
+            "Handler must be nothrow move constructible."
+        );
+
+        void* storage = static_cast<void*>(_inlineStorage);
+        ::new (storage) Decayed(std::forward<Handler>(handler));
+        _instance = storage;
+
+        _destroy = [](void* instance) noexcept {
+            reinterpret_cast<Decayed*>(instance)->~Decayed();
+        };
+
+        _move = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
+            auto* src = reinterpret_cast<Decayed*>(srcInstance);
+            ::new (destStorage) Decayed(std::move(*src));
+            src->~Decayed();
+            destInstance = destStorage;
+            srcInstance = nullptr;
+        };
+
+        _stub = [](void* instance, const EventType& event) {
+            (*reinterpret_cast<Decayed*>(instance))(event);
+        };
+    }
+
+    ~EventHandlerDelegate()
+    {
+        reset();
+    }
+
+    EventHandlerDelegate(EventHandlerDelegate&& rhs) noexcept
+    {
+        moveFrom(std::move(rhs));
+    }
+
+    EventHandlerDelegate& operator=(EventHandlerDelegate&& rhs) noexcept
+    {
+        if (this != &rhs) {
+            reset();
+            moveFrom(std::move(rhs));
+        }
+
+        return *this;
+    }
+
+    EventHandlerDelegate(const EventHandlerDelegate&) = delete;
+    EventHandlerDelegate& operator=(const EventHandlerDelegate&) = delete;
+
+    /// @brief Invoke wrapped handler directly with concrete event.
+    /// @param event Event instance to pass to handler.
+    void invoke(const EventType& event) const
+    {
+        assert(_stub && "Invoking an empty EventHandlerDelegate");
+
+        if (!_stub) {
+            return;
+        }
+
+        _stub(_instance, event);
+    }
+
+    /// @brief Check if delegate wraps a valid handler.
+    explicit operator bool() const noexcept
+    {
+        return _stub != nullptr;
+    }
+
+    /// @brief Reset delegate to empty state.
+    void reset() noexcept
+    {
+        if (_destroy) {
+            _destroy(_instance);
+        }
+
+        _instance = nullptr;
+        _stub = nullptr;
+        _destroy = nullptr;
+        _move = nullptr;
+    }
+
+private:
+    void moveFrom(EventHandlerDelegate&& rhs) noexcept
+    {
+        _stub = rhs._stub;
+        _destroy = rhs._destroy;
+        _move = rhs._move;
+
+        if (_move) {
+            _move(
+                static_cast<void*>(_inlineStorage),
+                _instance,
+                rhs._instance
+            );
+        } else {
+            _instance = nullptr;
+        }
+
+        rhs._stub = nullptr;
+        rhs._destroy = nullptr;
+        rhs._move = nullptr;
+    }
+
+private:
+    alignas(std::max_align_t) std::byte _inlineStorage[InlineSize > 0 ? InlineSize : 1]{};
+
+    void* _instance = nullptr;
+    StubFn _stub = nullptr;
+    DestroyFn _destroy = nullptr;
+    MoveFn _move = nullptr;
+};
+
+} // namespace corium
+// <<< End: corium/internal/FastDelegate.hpp
+
+// >>> Begin: corium/internal/VariantIndex.hpp
+
+#include <type_traits>
+#include <variant>
+
+namespace corium {
+
+template <typename T, typename... Types>
+constexpr std::size_t get_variant_index_impl() {
+    constexpr bool matches[] = { std::is_same_v<T, Types>... };
+    
+    for (std::size_t i = 0; i < sizeof...(Types); ++i) {
+        if (matches[i]) return i;
+    }
+    
+    return static_cast<std::size_t>(-1); 
+}
+
+/// @brief Helper trait to compute index of type T inside std::variant<Types...> at compile time.
+template <typename T, typename Variant>
+struct variant_index;
+
+template <typename T, typename... Types>
+struct variant_index<T, std::variant<Types...>> {
+    static constexpr std::size_t value = get_variant_index_impl<T, Types...>();
+    
+    static_assert(value != static_cast<std::size_t>(-1), 
+                  "ERROR: The requested Event type is not part of the std::variant!");
+};
+
+/// @brief Compile-time constant of type T's index in Variant.
+template <typename T, typename Variant>
+inline constexpr std::size_t variant_index_v = variant_index<T, Variant>::value;
+
+/// @brief Helper trait to check if type T exists inside std::variant<Types...> at compile time.
+template <typename T, typename Variant>
+struct has_variant_type;
+
+template <typename T, typename... Types>
+struct has_variant_type<T, std::variant<Types...>> {
+    static constexpr bool value = (std::is_same_v<T, Types> || ...);
+};
+
+/// @brief Compile-time boolean indicating if type T exists in Variant.
+template <typename T, typename Variant>
+inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
+
+namespace internal {
+
+template <typename T>
+struct TypeId {
+    static inline const char id = 0;
+};
+
+using TypeIdPtr = const void*;
+
+/// @brief Get static unique address for type T without dynamic allocations or RTTI.
+template <typename T>
+inline TypeIdPtr getTypeId() noexcept {
+    return &TypeId<T>::id;
+}
+
+} // namespace internal
+
+} // namespace corium
+
+
+// <<< End: corium/internal/VariantIndex.hpp
+
+namespace corium {
+
+/// @brief Fixed-capacity stack-allocated list of event handlers for a single event type.
+/// @tparam EventType Event type handled.
+/// @tparam MaxHandlers Maximum number of handlers allowed for this event type.
+/// @tparam InlineSize Max payload size in bytes for handler inline storage.
+template <typename EventType, size_t MaxHandlers, size_t InlineSize>
+class FixedHandlerList {
+public:
+    FixedHandlerList() = default;
+
+    template <typename Handler>
+    bool registerHandler(Handler&& handler) {
+        if (_count >= MaxHandlers) {
+            return false;
+        }
+        _handlers[_count] = EventHandlerDelegate<EventType, InlineSize>(std::forward<Handler>(handler));
+        _count++;
+        return true;
+    }
+
+    void dispatch(const EventType& event) const {
+        for (size_t i = 0; i < _count; ++i) {
+            _handlers[i].invoke(event);
+        }
+    }
+
+    [[nodiscard]] size_t size() const noexcept {
+        return _count;
+    }
+
+private:
+    std::array<EventHandlerDelegate<EventType, InlineSize>, MaxHandlers> _handlers{};
+    size_t _count = 0;
+};
+
+/// @brief Primary template declaration for BasicReactor.
+template <typename EventVariant = DefaultEvents, typename StoragePolicy = DefaultStoragePolicy>
+class BasicReactor;
+
+/// @brief Static Event Reactor providing compile-time zero-heap dispatching.
+/// @tparam Events Supported event types in std::variant.
+/// @tparam StoragePolicy Configuration policy for handler capacity and inline storage size.
+template <typename... Events, typename StoragePolicy>
+class BasicReactor<std::variant<Events...>, StoragePolicy> {
+    static constexpr size_t MaxHandlersPerEvent = StoragePolicy::max_handlers_per_event;
+    static constexpr size_t InlineSize = StoragePolicy::inline_storage_size;
+
+public:
+    using EventVariant = std::variant<Events...>;
+
+    BasicReactor() = default;
+    ~BasicReactor() = default;
+
+    BasicReactor(const BasicReactor&) = delete;
+    BasicReactor& operator=(const BasicReactor&) = delete;
+
+    BasicReactor(BasicReactor&&) noexcept = default;
+    BasicReactor& operator=(BasicReactor&&) noexcept = default;
+
+    /// @brief Register event handler for concrete event type with explicit type parameter.
+    /// @tparam EventType Event type to handle.
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event is dispatched.
+    /// @note Must be called before runtime.initialize() seals the reactor.
+    template <typename EventType, typename Handler>
+    bool registerHandler(Handler&& handler) {
+        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
+        auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+        return list.registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register event handler with automatic event type deduction from handler parameter signature.
+    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
+    /// @param handler Callback to invoke when event is dispatched.
+    /// @note Must be called before runtime.initialize() seals the reactor.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler) {
+        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        using EventType = callable_event_type_t<Handler>;
+        return registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Dispatch event via std::visit to concrete static handler array.
+    /// @param event Event instance to dispatch.
+    void dispatch(const EventVariant& event) const {
+        std::visit([this](const auto& concreteEvent) {
+            using EventType = std::decay_t<decltype(concreteEvent)>;
+            const auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+            list.dispatch(concreteEvent);
+        }, event);
+    }
+
+    /// @brief Seal reactor handlers.
+    void seal() noexcept {
+        _sealed = true;
+    }
+
+    /// @brief Check if reactor has been sealed.
+    [[nodiscard]] bool sealed() const noexcept {
+        return _sealed;
+    }
+
+private:
+    std::tuple<FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
+    bool _sealed = false;
+};
+
+/// @brief Default Reactor alias using DefaultEvents and DefaultStoragePolicy.
+using Reactor = BasicReactor<DefaultEvents>;
+
+/// @brief Templated Reactor alias for custom event variant and storage policy.
+template <typename EventVariant = DefaultEvents, typename StoragePolicy = DefaultStoragePolicy>
+using ReactorT = BasicReactor<EventVariant, StoragePolicy>;
+
+} // namespace corium
+
+// <<< End: corium/internal/Reactor.hpp
+
+// >>> Begin: corium/profiler/ProfilerPolicies.hpp
+
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <ostream>
+
+
+// >>> Begin: corium/profiler/FlightRecorder.hpp
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <ostream>
+
+namespace corium::profiler {
+
+/// @brief Timestamp clock used by the profiler (steady clock in nanoseconds).
+using ProfilerClock = std::chrono::steady_clock;
+
+/// @brief Represents a single traced event record in the circular flight recorder.
+struct alignas(32) FlightRecord {
+    std::size_t eventTypeId{0};
+    const char* eventName{nullptr};
+    uint64_t postTimestampNs{0};
+    uint64_t dispatchTimestampNs{0};
+    uint64_t finishTimestampNs{0};
+    uint8_t priority{0};
+
+    /// @brief Calculate latency spent waiting in queue before dispatch in microseconds.
+    [[nodiscard]] double queueLatencyUs() const noexcept
+    {
+        if (dispatchTimestampNs < postTimestampNs) return 0.0;
+        return static_cast<double>(dispatchTimestampNs - postTimestampNs) / 1000.0;
+    }
+
+    /// @brief Calculate duration of handler execution in microseconds.
+    [[nodiscard]] double executionDurationUs() const noexcept
+    {
+        if (finishTimestampNs < dispatchTimestampNs) return 0.0;
+        return static_cast<double>(finishTimestampNs - dispatchTimestampNs) / 1000.0;
+    }
+
+    /// @brief Calculate total turnaround time from post to finish in microseconds.
+    [[nodiscard]] double totalDurationUs() const noexcept
+    {
+        if (finishTimestampNs < postTimestampNs) return 0.0;
+        return static_cast<double>(finishTimestampNs - postTimestampNs) / 1000.0;
+    }
+};
+
+/// @brief Zero-heap circular flight recorder storing the last N event telemetry records.
+/// Thread-safe for multiple producers and concurrent reader/dumping.
+/// @tparam Capacity Number of flight records (power of 2).
+template <std::size_t Capacity = 256>
+class FlightRecorder {
+    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of 2.");
+    static constexpr std::size_t Mask = Capacity - 1;
+
+public:
+    FlightRecorder() = default;
+
+    /// @brief Record a completed event execution into the circular buffer.
+    void record(
+        std::size_t eventTypeId,
+        const char* eventName,
+        uint64_t postTimeNs,
+        uint64_t dispatchTimeNs,
+        uint64_t finishTimeNs,
+        uint8_t priority
+    ) noexcept
+    {
+        const std::size_t idx = _writeIndex.fetch_add(1, std::memory_order_relaxed);
+        FlightRecord& entry = _records[idx & Mask];
+        entry.eventTypeId = eventTypeId;
+        entry.eventName = eventName ? eventName : "UnknownEvent";
+        entry.postTimestampNs = postTimeNs;
+        entry.dispatchTimestampNs = dispatchTimeNs;
+        entry.finishTimestampNs = finishTimeNs;
+        entry.priority = priority;
+    }
+
+    /// @brief Get total number of recorded events since creation.
+    [[nodiscard]] uint64_t totalRecorded() const noexcept
+    {
+        return _writeIndex.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Get buffer capacity.
+    [[nodiscard]] constexpr std::size_t capacity() const noexcept
+    {
+        return Capacity;
+    }
+
+    /// @brief Read a record by logical historical index (0 is oldest available in current window).
+    [[nodiscard]] FlightRecord recordAt(std::size_t index) const noexcept
+    {
+        return _records[index & Mask];
+    }
+
+    /// @brief Iterate through available historical records in chronological order.
+    template <typename Callback>
+    void forEach(Callback&& cb) const
+    {
+        const uint64_t current = _writeIndex.load(std::memory_order_acquire);
+        const std::size_t count = current < Capacity ? static_cast<std::size_t>(current) : Capacity;
+        const uint64_t start = current < Capacity ? 0 : current - Capacity;
+
+        for (std::size_t i = 0; i < count; ++i) {
+            cb(_records[(start + i) & Mask]);
+        }
+    }
+
+    /// @brief Export recorded flight logs in Chrome Tracing JSON format (supported by chrome://tracing and Perfetto UI).
+    void exportChromeTracingJson(std::ostream& os) const
+    {
+        os << "[\n";
+        bool first = true;
+
+        forEach([&](const FlightRecord& rec) {
+            if (!first) os << ",\n";
+            first = false;
+
+            // 1. Queue wait event (phase "X" complete event)
+            const double postUs = static_cast<double>(rec.postTimestampNs) / 1000.0;
+            const double queueDurationUs = rec.queueLatencyUs();
+            const double dispatchUs = static_cast<double>(rec.dispatchTimestampNs) / 1000.0;
+            const double execDurationUs = rec.executionDurationUs();
+
+            os << "  {\"name\": \"QueueWait[" << (rec.eventName ? rec.eventName : "Event")
+               << "]\", \"cat\": \"corium\", \"ph\": \"X\", \"ts\": " << postUs
+               << ", \"dur\": " << queueDurationUs << ", \"pid\": 1, \"tid\": 1, \"args\": {\"prio\": "
+               << static_cast<int>(rec.priority) << "}},\n";
+
+            // 2. Dispatch / Handler execution event
+            os << "  {\"name\": \"Dispatch[" << (rec.eventName ? rec.eventName : "Event")
+               << "]\", \"cat\": \"corium\", \"ph\": \"X\", \"ts\": " << dispatchUs
+               << ", \"dur\": " << execDurationUs << ", \"pid\": 1, \"tid\": 1, \"args\": {\"type_id\": "
+               << rec.eventTypeId << "}}";
+        });
+
+        os << "\n]\n";
+    }
+
+private:
+    std::atomic<uint64_t> _writeIndex{0};
+    std::array<FlightRecord, Capacity> _records{};
+};
+
+} // namespace corium::profiler
+
+// <<< End: corium/profiler/FlightRecorder.hpp
+
+namespace corium::profiler {
+
+/// @brief Default Profiler Policy: Zero-overhead, completely compiled out by inline empty functions.
+struct NullProfiler {
+    constexpr NullProfiler() noexcept = default;
+
+    template <typename EventVariant>
+    void onEventPosted(const EventVariant&, uint8_t) noexcept {}
+
+    template <typename EventVariant>
+    void onEventDispatched(
+        const EventVariant&,
+        uint8_t,
+        uint64_t /*postTimeNs*/,
+        uint64_t /*dispatchTimeNs*/,
+        uint64_t /*finishTimeNs*/
+    ) noexcept {}
+
+    [[nodiscard]] static constexpr uint64_t nowNs() noexcept { return 0; }
+
+    /// @brief No-op: NullProfiler does not track post timestamps.
+    void recordPostTime(uint64_t) noexcept {}
+
+    /// @brief No-op: always returns 0 (NullProfiler has no timestamps).
+    [[nodiscard]] uint64_t takePostTime() noexcept { return 0; }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal: parallel timestamp ring buffer for tracking per-event post times.
+//
+// Uses a separate MpscRingBuffer<uint64_t, Capacity> that is pushed in lockstep
+// with the main event queue. Because the event bus is MPSC and dispatch is
+// single-consumer (same thread that calls pump()), timestamps arrive and are
+// consumed in FIFO order, so the i-th timestamp always belongs to the i-th event.
+//
+// Zero-overhead when used with NullProfiler (the entire type is not instantiated).
+// ─────────────────────────────────────────────────────────────────────────────
+template <std::size_t Capacity = 1024>
+class PostTimestampQueue {
+public:
+    /// @brief Record the post timestamp for an event being pushed into the event queue.
+    void recordPostTime(uint64_t postNs) noexcept
+    {
+        // Best-effort: if the timestamp queue is full (e.g. profiler not being read),
+        // drop the timestamp rather than blocking or corrupting the event queue.
+        _timestamps.tryPush(std::move(postNs));
+    }
+
+    /// @brief Pop and return the oldest recorded post timestamp (called at dispatch time).
+    /// @return The post timestamp, or 0 if the queue is empty (should not happen in steady state).
+    [[nodiscard]] uint64_t takePostTime() noexcept
+    {
+        uint64_t ts = 0;
+        _timestamps.tryPop(ts);
+        return ts;
+    }
+
+private:
+    MpscRingBuffer<uint64_t, Capacity> _timestamps;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// @brief Real-time event latency and performance statistics tracker.
+/// Zero dynamic memory allocation. Tracks min, max, total queue latency and handler duration.
+/// @tparam QueueCapacity Capacity of the parallel post-timestamp ring buffer (must match
+///         the event queue capacity for accurate per-event latency tracking).
+template <std::size_t QueueCapacity = 1024>
+class LatencyTracker {
+public:
+    LatencyTracker() noexcept = default;
+
+    [[nodiscard]] static uint64_t nowNs() noexcept
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                ProfilerClock::now().time_since_epoch()
+            ).count()
+        );
+    }
+
+    template <typename EventVariant>
+    void onEventPosted(const EventVariant&, uint8_t) noexcept
+    {
+        _totalPosted.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// @brief Record the wall-clock post timestamp for the event being pushed now.
+    /// Called by EventBus::post() immediately after the event enters the queue.
+    void recordPostTime(uint64_t postNs) noexcept
+    {
+        _postTimestamps.recordPostTime(postNs);
+    }
+
+    /// @brief Pop and return the oldest post timestamp (called at dispatch time by EventBus).
+    [[nodiscard]] uint64_t takePostTime() noexcept
+    {
+        return _postTimestamps.takePostTime();
+    }
+
+    template <typename EventVariant>
+    void onEventDispatched(
+        const EventVariant&,
+        uint8_t,
+        uint64_t postTimeNs,
+        uint64_t dispatchTimeNs,
+        uint64_t finishTimeNs
+    ) noexcept
+    {
+        const uint64_t queueLatencyNs = (dispatchTimeNs > postTimeNs) ? (dispatchTimeNs - postTimeNs) : 0;
+        const uint64_t execDurationNs = (finishTimeNs > dispatchTimeNs) ? (finishTimeNs - dispatchTimeNs) : 0;
+
+        _totalDispatched.fetch_add(1, std::memory_order_relaxed);
+        _totalQueueLatencyNs.fetch_add(queueLatencyNs, std::memory_order_relaxed);
+        _totalExecDurationNs.fetch_add(execDurationNs, std::memory_order_relaxed);
+
+        // Update Max Latency
+        uint64_t currentMaxLat = _maxQueueLatencyNs.load(std::memory_order_relaxed);
+        while (queueLatencyNs > currentMaxLat &&
+               !_maxQueueLatencyNs.compare_exchange_weak(currentMaxLat, queueLatencyNs, std::memory_order_relaxed)) {}
+
+        // Update Min Latency
+        uint64_t currentMinLat = _minQueueLatencyNs.load(std::memory_order_relaxed);
+        while (queueLatencyNs < currentMinLat &&
+               !_minQueueLatencyNs.compare_exchange_weak(currentMinLat, queueLatencyNs, std::memory_order_relaxed)) {}
+
+        // Update Max Execution Duration
+        uint64_t currentMaxExec = _maxExecDurationNs.load(std::memory_order_relaxed);
+        while (execDurationNs > currentMaxExec &&
+               !_maxExecDurationNs.compare_exchange_weak(currentMaxExec, execDurationNs, std::memory_order_relaxed)) {}
+    }
+
+    /// @brief Total count of posted events.
+    [[nodiscard]] uint64_t totalPosted() const noexcept
+    {
+        return _totalPosted.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Total count of dispatched events.
+    [[nodiscard]] uint64_t totalDispatched() const noexcept
+    {
+        return _totalDispatched.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Minimum queue latency in microseconds.
+    [[nodiscard]] double minQueueLatencyUs() const noexcept
+    {
+        const uint64_t val = _minQueueLatencyNs.load(std::memory_order_relaxed);
+        return val == UINT64_MAX ? 0.0 : static_cast<double>(val) / 1000.0;
+    }
+
+    /// @brief Maximum queue latency in microseconds.
+    [[nodiscard]] double maxQueueLatencyUs() const noexcept
+    {
+        return static_cast<double>(_maxQueueLatencyNs.load(std::memory_order_relaxed)) / 1000.0;
+    }
+
+    /// @brief Average queue latency in microseconds.
+    [[nodiscard]] double averageQueueLatencyUs() const noexcept
+    {
+        const uint64_t count = _totalDispatched.load(std::memory_order_relaxed);
+        if (count == 0) return 0.0;
+        return static_cast<double>(_totalQueueLatencyNs.load(std::memory_order_relaxed)) / (static_cast<double>(count) * 1000.0);
+    }
+
+    /// @brief Maximum handler execution duration in microseconds.
+    [[nodiscard]] double maxExecutionDurationUs() const noexcept
+    {
+        return static_cast<double>(_maxExecDurationNs.load(std::memory_order_relaxed)) / 1000.0;
+    }
+
+    /// @brief Average handler execution duration in microseconds.
+    [[nodiscard]] double averageExecutionDurationUs() const noexcept
+    {
+        const uint64_t count = _totalDispatched.load(std::memory_order_relaxed);
+        if (count == 0) return 0.0;
+        return static_cast<double>(_totalExecDurationNs.load(std::memory_order_relaxed)) / (static_cast<double>(count) * 1000.0);
+    }
+
+    /// @brief Reset all accumulated statistics.
+    void resetStats() noexcept
+    {
+        _totalPosted.store(0, std::memory_order_relaxed);
+        _totalDispatched.store(0, std::memory_order_relaxed);
+        _totalQueueLatencyNs.store(0, std::memory_order_relaxed);
+        _totalExecDurationNs.store(0, std::memory_order_relaxed);
+        _maxQueueLatencyNs.store(0, std::memory_order_relaxed);
+        _minQueueLatencyNs.store(UINT64_MAX, std::memory_order_relaxed);
+        _maxExecDurationNs.store(0, std::memory_order_relaxed);
+    }
+
+private:
+    PostTimestampQueue<QueueCapacity> _postTimestamps;
+
+    std::atomic<uint64_t> _totalPosted{0};
+    std::atomic<uint64_t> _totalDispatched{0};
+    std::atomic<uint64_t> _totalQueueLatencyNs{0};
+    std::atomic<uint64_t> _totalExecDurationNs{0};
+    std::atomic<uint64_t> _maxQueueLatencyNs{0};
+    std::atomic<uint64_t> _minQueueLatencyNs{UINT64_MAX};
+    std::atomic<uint64_t> _maxExecDurationNs{0};
+};
+
+/// @brief Combined Flight Recorder and Latency Tracker Profiler.
+/// Records historical event traces into a circular in-memory buffer with zero heap allocations.
+/// @tparam BufferCapacity Capacity of circular flight recorder (power of 2, e.g. 128, 256, 1024).
+/// @tparam QueueCapacity  Capacity of the parallel post-timestamp ring buffer (should match the
+///         event queue capacity for accurate latency measurement; default 1024).
+template <std::size_t BufferCapacity = 256, std::size_t QueueCapacity = 1024>
+class FlightRecorderProfiler : public LatencyTracker<QueueCapacity> {
+public:
+    FlightRecorderProfiler() = default;
+
+    template <typename EventVariant>
+    void onEventDispatched(
+        const EventVariant& event,
+        uint8_t priority,
+        uint64_t postTimeNs,
+        uint64_t dispatchTimeNs,
+        uint64_t finishTimeNs
+    ) noexcept
+    {
+        LatencyTracker<QueueCapacity>::onEventDispatched(event, priority, postTimeNs, dispatchTimeNs, finishTimeNs);
+
+        const std::size_t typeIndex = event.index();
+        const char* name = "Event";
+
+        _flightRecorder.record(typeIndex, name, postTimeNs, dispatchTimeNs, finishTimeNs, priority);
+    }
+
+    /// @brief Access reference to underlying circular flight recorder.
+    [[nodiscard]] const FlightRecorder<BufferCapacity>& flightRecorder() const noexcept
+    {
+        return _flightRecorder;
+    }
+
+    /// @brief Export flight recorder traces to Chrome Tracing JSON.
+    void exportChromeTracingJson(std::ostream& os) const
+    {
+        _flightRecorder.exportChromeTracingJson(os);
+    }
+
+private:
+    FlightRecorder<BufferCapacity> _flightRecorder;
+};
+
+} // namespace corium::profiler
+
+// <<< End: corium/profiler/ProfilerPolicies.hpp
+
+#include <utility>
+
+namespace corium {
+
+/// @brief Policy-configurable non-virtual event bus implementation.
+/// @tparam EventVariantType The variant type list of supported events.
+/// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (NoSignalPolicy by default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
+/// @tparam ProfilerPolicy Strategy for latency telemetry and trace recording (NullProfiler by default).
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename ProfilerPolicy = profiler::NullProfiler
+>
+class BasicEventBus {
+public:
+    using EventVariant = EventVariantType;
+    using ReactorType = BasicReactor<EventVariant, StoragePolicy>;
+    using ProfilerPolicyType = ProfilerPolicy;
+
+    BasicEventBus() = default;
+
+    /// @brief Post an event into the queue with optional priority (rvalue overload).
+    void post(EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
+        _profilerPolicy.recordPostTime(_profilerPolicy.nowNs());
+        _eventQueue.pushEvent(std::move(event), priority);
+    }
+
+    /// @brief Post an event into the queue with optional priority (const lvalue overload).
+    void post(const EventVariant& event, EventPriority priority = EventPriority::Normal)
+    {
+        _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
+        _profilerPolicy.recordPostTime(_profilerPolicy.nowNs());
+        _eventQueue.pushEvent(event, priority);
+    }
+
+    /// @brief Convenience helper for posting high-priority events.
+    template <typename Event>
+    void postHighPriority(Event&& event)
+    {
+        post(EventVariant(std::forward<Event>(event)), EventPriority::High);
+    }
+
+    /// @brief Process a single event from the queue.
+    /// @return true if an event was popped and dispatched; false if queue was empty.
+    bool processOne()
+    {
+        EventVariant event;
+        if (!_eventQueue.tryPopEvent(event)) {
+            return false;
+        }
+        const uint64_t postTime     = _profilerPolicy.takePostTime();
+        const uint64_t dispatchTime = _profilerPolicy.nowNs();
+        _reactor.dispatch(event);
+        const uint64_t finishTime = _profilerPolicy.nowNs();
+        _profilerPolicy.onEventDispatched(event, 0, postTime, dispatchTime, finishTime);
+        return true;
+    }
+
+    /// @brief Process up to maxBatch events consecutively from the queue.
+    /// @param maxBatch Maximum number of events to process in this batch.
+    /// @return Number of events successfully popped and dispatched.
+    std::size_t processBatch(std::size_t maxBatch)
+    {
+        std::size_t count = 0;
+        EventVariant event;
+        while (count < maxBatch) {
+            if (!_eventQueue.tryPopEvent(event)) {
+                break;
+            }
+            const uint64_t postTime     = _profilerPolicy.takePostTime();
+            const uint64_t dispatchTime = _profilerPolicy.nowNs();
+            _reactor.dispatch(event);
+            const uint64_t finishTime = _profilerPolicy.nowNs();
+            _profilerPolicy.onEventDispatched(event, 0, postTime, dispatchTime, finishTime);
+            count++;
+        }
+        return count;
+    }
+
+    /// @brief Drain and dispatch all currently enqueued events.
+    /// @return Total number of events processed.
+    std::size_t drain()
+    {
+        std::size_t total = 0;
+        while (processOne()) {
+            total++;
+        }
+        return total;
+    }
+
+    /// @brief Access reference to profiler policy.
+    ProfilerPolicy& profiler() noexcept
+    {
+        return _profilerPolicy;
+    }
+
+    /// @brief Access const reference to profiler policy.
+    const ProfilerPolicy& profiler() const noexcept
+    {
+        return _profilerPolicy;
+    }
+
+    /// @brief Check if event queue is empty.
+    [[nodiscard]] bool empty() const
+    {
+        return _eventQueue.empty();
+    }
+
+    /// @brief Seal reactor handlers.
+    void seal()
+    {
+        _reactor.seal();
+    }
+
+    /// @brief Set static callback for event availability when queue transitions to non-empty.
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        _eventQueue.setOnQueueNonEmpty(callback);
+    }
+
+    /// @brief Register an event handler with explicit event type parameter.
+    /// @tparam EventType Event type to handle.
+    /// @tparam Handler Callable handler type.
+    /// @param handler Callback to invoke when event occurs.
+    template <typename EventType, typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        return _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler with automatic event type deduction.
+    /// @tparam Handler Callable handler type (lambda, function pointer, or functor).
+    /// @param handler Callback to invoke when event occurs.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        using EventType = callable_event_type_t<Handler>;
+        return _reactor.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Access reference to signal policy.
+    SignalPolicy& signalPolicy() noexcept
+    {
+        return _eventQueue.signalPolicy();
+    }
+
+    /// @brief Access const reference to signal policy.
+    const SignalPolicy& signalPolicy() const noexcept
+    {
+        return _eventQueue.signalPolicy();
+    }
+
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _eventQueue.overflowPolicy();
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _eventQueue.overflowPolicy();
+    }
+
+    /// @brief Access reference to reactor.
+    ReactorType& reactor() noexcept
+    {
+        return _reactor;
+    }
+
+    /// @brief Get an EventSink handle pointing to this event bus.
+    EventSinkT<EventVariant> sink() noexcept
+    {
+        return EventSinkT<EventVariant>(*this);
+    }
+
+private:
+    EventQueue<QueuePolicy, SignalPolicy, OverflowPolicy> _eventQueue;
+    ReactorType _reactor;
+    ProfilerPolicy _profilerPolicy{};
+};
+
+/// @brief Default EventBus alias using DefaultEvents and NoSignalPolicy.
+using EventBus = BasicEventBus<DefaultEvents>;
+
+/// @brief Templated EventBus alias for custom event variant and policies.
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename ProfilerPolicy = profiler::NullProfiler
+>
+using EventBusT = BasicEventBus<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, ProfilerPolicy>;
+
+} // namespace corium
+
+// <<< End: corium/EventBus.hpp
+
+namespace corium {
+
+/// @brief Context object passed to Application providing event bus access, quit requests, and timer scheduling.
+/// @tparam EventBusType Concrete event bus type used by the runtime.
+template <typename EventBusType = EventBus>
+class ApplicationContext {
+public:
+    using EventVariant = typename EventBusType::EventVariant;
+
+    using ScheduleDelayedFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds delay, EventPriority priority);
+    using SchedulePeriodicFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds interval, EventPriority priority);
+    using CancelTimerFn = bool (*)(void* ptr, TimerId id);
+
+    ApplicationContext() = default;
+
+    ApplicationContext(EventBusType& events, StaticCallback quitCallback)
+        : _events(&events), _quitCallback(quitCallback)
+    {
+    }
+
+    template <typename Scheduler>
+    void setTimerScheduler(Scheduler& scheduler) noexcept
+    {
+        _timerSchedulerPtr = &scheduler;
+        _scheduleDelayedFn = [](void* ptr, EventVariant evt, std::chrono::microseconds delay, EventPriority prio) {
+            return static_cast<Scheduler*>(ptr)->scheduleDelayed(std::move(evt), delay, prio);
+        };
+        _schedulePeriodicFn = [](void* ptr, EventVariant evt, std::chrono::microseconds interval, EventPriority prio) {
+            return static_cast<Scheduler*>(ptr)->schedulePeriodic(std::move(evt), interval, prio);
+        };
+        _cancelTimerFn = [](void* ptr, TimerId id) {
+            return static_cast<Scheduler*>(ptr)->cancelTimer(id);
+        };
+    }
+
+    /// @brief Access reference to the event bus.
+    [[nodiscard]] EventBusType& events() const
+    {
+        return *_events;
+    }
+
+    /// @brief Access event sink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() const
+    {
+        return _events->sink();
+    }
+
+    /// @brief Schedule a single-shot delayed event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_scheduleDelayedFn && _timerSchedulerPtr) {
+            return _scheduleDelayedFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+        }
+        return INVALID_TIMER_ID;
+    }
+
+    /// @brief Schedule a recurring periodic event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_schedulePeriodicFn && _timerSchedulerPtr) {
+            return _schedulePeriodicFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+        }
+        return INVALID_TIMER_ID;
+    }
+
+    /// @brief Cancel an active timer.
+    bool cancelTimer(TimerId id) const noexcept
+    {
+        if (_cancelTimerFn && _timerSchedulerPtr) {
+            return _cancelTimerFn(_timerSchedulerPtr, id);
+        }
+        return false;
+    }
+
+    /// @brief Request graceful application exit.
+    void requestQuit() const
+    {
+        if (_quitCallback) {
+            _quitCallback();
+        }
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return _events != nullptr;
+    }
+
+private:
+    EventBusType* _events = nullptr;
+    StaticCallback _quitCallback;
+
+    void* _timerSchedulerPtr = nullptr;
+    ScheduleDelayedFn _scheduleDelayedFn = nullptr;
+    SchedulePeriodicFn _schedulePeriodicFn = nullptr;
+    CancelTimerFn _cancelTimerFn = nullptr;
+};
+
+} // namespace corium
+
+// <<< End: corium/ApplicationContext.hpp
+
+// >>> Begin: corium/ServiceRegistry.hpp
+
+#include <array>
+#include <cstddef>
+#include <stop_token>
+#include <type_traits>
+#include <utility>
+
+
+// >>> Begin: corium/BackgroundService.hpp
+
+
+// >>> Begin: corium/Service.hpp
+
+
+// >>> Begin: corium/ServiceContext.hpp
+
+
+namespace corium {
+
+/// @brief Execution context provided to background services.
+/// Allows services to post events back to the main event queue thread-safely
+/// and communicate with other registered background services.
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+struct BasicServiceContext {
+    using GetServiceFn = void* (*)(void* registryPtr, internal::TypeIdPtr typeId);
+
+    EventSinkT<EventVariant> eventSink;
+    void* registryPtr = nullptr;
+    GetServiceFn getServiceFn = nullptr;
+
+    /// @brief Retrieve another registered service instance by type.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to ServiceType instance or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        if (registryPtr && getServiceFn) {
+            return static_cast<ServiceType*>(getServiceFn(registryPtr, internal::getTypeId<ServiceType>()));
+        }
+        return nullptr;
+    }
+
+    /// @brief Retrieve event sink handle of a target registered service if available.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
+    template <typename ServiceType>
+    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
+    {
+        auto* service = getService<ServiceType>();
+        if (service) {
+            if constexpr (requires { service->sink(); }) {
+                return service->sink();
+            } else if constexpr (requires { service->serviceSink(); }) {
+                return service->serviceSink();
+            }
+        }
+        return EventSinkT<EventVariant>{};
+    }
+
+    /// @brief Post an event directly to a target service.
+    /// @tparam TargetService Target service type to send the event to.
+    /// @tparam EventType Event type to send.
+    /// @param event Event instance to post.
+    /// @param priority Priority level.
+    /// @return true if event was posted to the target service; false if target service was not found or has no sink.
+    template <typename TargetService, typename EventType>
+    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        auto sinkHandle = getServiceSink<TargetService>();
+        if (sinkHandle) {
+            sinkHandle.post(std::forward<EventType>(event), priority);
+            return true;
+        }
+        return false;
+    }
+};
+
+/// @brief Default ServiceContext alias using DefaultEvents.
+using ServiceContext = BasicServiceContext<DefaultEvents>;
+
+/// @brief Templated ServiceContext alias for custom event variant.
+template <typename EventVariant = DefaultEvents>
+using ServiceContextT = BasicServiceContext<EventVariant>;
+
+} // namespace corium
+
+// <<< End: corium/ServiceContext.hpp
+
+#include <chrono>
+#include <cstddef>
+#include <utility>
+
+namespace corium {
+
+/// @brief Non-allocating base class for synchronous or thread-agnostic services.
+/// Provides event producing (posting to main EventBus) and event consuming (receiving events into dedicated incoming bus).
+/// Does NOT own a thread. Zero heap allocations, zero vtables/RTTI.
+/// @tparam EventVariantType Supported event variant type list.
+/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
+>
+class Service {
+public:
+    using EventVariant = EventVariantType;
+    using IncomingBus = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
+
+    Service() = default;
+
+    explicit Service(ServiceContextT<EventVariant> context)
+        : _context(context)
+    {}
+
+    ~Service() = default;
+
+    Service(const Service&) = delete;
+    Service& operator=(const Service&) = delete;
+
+    Service(Service&&) noexcept = default;
+    Service& operator=(Service&&) noexcept = default;
+
+    void setContext(ServiceContextT<EventVariant> context) noexcept
+    {
+        _context = context;
+    }
+
+    /// @brief Get an EventSink handle targeting this service's incoming event queue.
+    [[nodiscard]] EventSinkT<EventVariant> sink() noexcept
+    {
+        return _incomingBus.sink();
+    }
+
+    /// @brief Get an EventSink handle targeting this service's incoming event queue (alias).
+    [[nodiscard]] EventSinkT<EventVariant> serviceSink() noexcept
+    {
+        return _incomingBus.sink();
+    }
+
+    /// @brief Register an event handler for incoming events with explicit event type parameter.
+    template <typename EventType, typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        return _incomingBus.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler for incoming events with automatic event type deduction.
+    template <typename Handler>
+    bool on(Handler&& handler)
+    {
+        return _incomingBus.registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler for incoming events with automatic event type deduction (alias).
+    template <typename Handler>
+    bool handle(Handler&& handler)
+    {
+        return _incomingBus.registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Process a single incoming event from the service queue.
+    /// @return true if an event was popped and dispatched; false if queue was empty.
+    bool processOne()
+    {
+        return _incomingBus.processOne();
+    }
+
+    /// @brief Pump all pending incoming events from the queue until empty.
+    /// @return Number of events processed.
+    std::size_t pump()
+    {
+        std::size_t processed = 0;
+        while (_incomingBus.processOne()) {
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Pump up to maxEvents pending incoming events from the queue.
+    /// @param maxEvents Maximum number of events to process.
+    /// @return Number of events processed.
+    std::size_t pump(std::size_t maxEvents)
+    {
+        std::size_t processed = 0;
+        while (processed < maxEvents && _incomingBus.processOne()) {
+            processed++;
+        }
+        return processed;
+    }
+
+protected:
+    [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
+    [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
+
+    [[nodiscard]] EventSinkT<EventVariant> events() const noexcept { return _context.eventSink; }
+    [[nodiscard]] EventSinkT<EventVariant> mainEventSink() const noexcept { return _context.eventSink; }
+
+    template <typename EventType>
+    void post(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        _context.eventSink.post(std::forward<EventType>(event), priority);
+    }
+
+    template <typename EventType>
+    void postHighPriority(EventType&& event) const
+    {
+        _context.eventSink.postHighPriority(std::forward<EventType>(event));
+    }
+
+    template <typename TargetService, typename EventType>
+    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        return _context.template sendToService<TargetService>(std::forward<EventType>(event), priority);
+    }
+
+    IncomingBus& incomingBus() noexcept { return _incomingBus; }
+    const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
+
+private:
+    ServiceContextT<EventVariant> _context;
+    [[no_unique_address]] IncomingBus _incomingBus;
+};
+
+/// @brief Zero-overhead Service alias for pure producer services (no incoming event queue/reactor allocations).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerService = Service<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief Explicit Service alias for consumer services with configurable incoming event queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerService = Service<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
+
+} // namespace corium
+
+// <<< End: corium/Service.hpp
+
+#include <chrono>
+#include <exception>
+#include <stop_token>
+#include <thread>
+
+namespace corium {
+
+/// @brief Non-allocating base class for background services owning a dedicated C++20 std::jthread.
+/// Extends Service to add thread lifecycle management and thread-safe waitAndPump waiting.
+/// Zero heap allocations, zero vtables/RTTI.
+/// @tparam EventVariantType Supported event variant type list.
+/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
+>
+class BackgroundService : public Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy> {
+public:
+    using Base = Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
+    using EventVariant = typename Base::EventVariant;
+
+    BackgroundService() = default;
+
+    explicit BackgroundService(ServiceContextT<EventVariant> context)
+        : Base(context)
+    {}
+
+    ~BackgroundService()
+    {
+        stop();
+        join();
+    }
+
+    BackgroundService(const BackgroundService&) = delete;
+    BackgroundService& operator=(const BackgroundService&) = delete;
+
+    BackgroundService(BackgroundService&&) noexcept = default;
+    BackgroundService& operator=(BackgroundService&&) noexcept = default;
+
+    /// @brief Wait for incoming events or timeout, then pump all available incoming events.
+    /// Safe for use inside worker thread run(std::stop_token).
+    /// @tparam Rep Duration representation type.
+    /// @tparam Period Duration period type.
+    /// @param stopToken std::stop_token from run(stopToken).
+    /// @param timeout Maximum duration to wait if queue is empty.
+    /// @return Number of events processed.
+    template <typename Rep, typename Period>
+    std::size_t waitAndPump(const std::stop_token& stopToken, const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (this->incomingBus().empty() && !stopToken.stop_requested()) {
+            this->incomingBus().signalPolicy().wait_for(timeout);
+        }
+
+        std::size_t processed = 0;
+        while (!stopToken.stop_requested()) {
+            if (!this->incomingBus().processOne()) {
+                break;
+            }
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Start execution loop on dedicated std::jthread.
+    template <typename Derived>
+    void startThread(Derived* derived)
+    {
+        _thread = std::jthread([this, derived](std::stop_token stopToken) {
+#if __cpp_exceptions
+            using EvVariant = EventVariantType;
+            try {
+                derived->run(stopToken);
+            } catch (const std::exception& e) {
+                if constexpr (requires { derived->onError(std::current_exception()); }) {
+                    derived->onError(std::current_exception());
+                } else if constexpr (requires { derived->onError(e.what()); }) {
+                    derived->onError(e.what());
+                }
+                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
+                    this->postHighPriority(ErrorEvent{1, reinterpret_cast<uintptr_t>(e.what())});
+                }
+            } catch (...) {
+                if constexpr (requires { derived->onError(std::current_exception()); }) {
+                    derived->onError(std::current_exception());
+                }
+                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
+                    this->postHighPriority(ErrorEvent{1, 0});
+                }
+            }
+#else
+            derived->run(stopToken);
+#endif
+        });
+    }
+
+    /// @brief Request graceful stop of the background thread via std::stop_token.
+    void stop() noexcept
+    {
+        _thread.request_stop();
+    }
+
+    /// @brief Join background std::jthread cleanly.
+    void join() noexcept
+    {
+        if (_thread.joinable()) {
+            _thread.join();
+        }
+    }
+
+private:
+    std::jthread _thread;
+};
+
+/// @brief Zero-overhead BackgroundService alias for producer worker threads (zero incoming queue/reactor footprint).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerBackgroundService = BackgroundService<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief BackgroundService alias for consumer worker threads with configurable queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerBackgroundService = BackgroundService<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
+
+} // namespace corium
+
+// <<< End: corium/BackgroundService.hpp
+
+namespace corium {
+
+namespace internal {
+
+template <typename T, typename Context>
+concept HasSetContext = requires(T& t, Context ctx) {
+    t.setContext(ctx);
+};
+
+template <typename T>
+concept HasInitialize = requires(T& t) {
+    t.initialize();
+};
+
+template <typename T>
+concept HasRunToken = requires(T& t, std::stop_token st) {
+    t.run(st);
+};
+
+template <typename T>
+concept HasStart = requires(T& t) {
+    t.start();
+};
+
+template <typename T>
+concept HasStop = requires(T& t) {
+    t.stop();
+};
+
+template <typename T>
+concept HasJoin = requires(T& t) {
+    t.join();
+};
+
+} // namespace internal
+
+/// @brief Non-allocating ServiceRegistry storing service handles in a fixed stack/static array.
+/// Zero heap allocations, zero vtables/RTTI.
+/// @tparam MaxServices Maximum number of background services allowed per registry (default 8).
+/// @tparam EventVariant Supported event variant type list.
+template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
+class BasicServiceRegistry {
+public:
+    using ServiceContextType = ServiceContextT<EventVariant>;
+
+    /// @brief Non-allocating type-erased handle for static background services.
+    struct ServiceHandle {
+        void* instance = nullptr;
+        internal::TypeIdPtr typeId = nullptr;
+        void (*initFn)(void* inst, ServiceContextType ctx) = nullptr;
+        void (*startFn)(void* inst) = nullptr;
+        void (*stopFn)(void* inst) noexcept = nullptr;
+        void (*joinFn)(void* inst) noexcept = nullptr;
+    };
+
+    BasicServiceRegistry() = default;
+
+    /// @brief Register a background service instance by reference.
+    /// @tparam ServiceType Type of the background service.
+    /// @param serviceInstance Reference to service instance.
+    /// @return true if service was registered successfully; false if registry is full.
+    template <typename ServiceType>
+    bool registerService(ServiceType& serviceInstance)
+    {
+        if (_count >= MaxServices) {
+            return false;
+        }
+        _services[_count] = ServiceHandle{
+            &serviceInstance,
+            internal::getTypeId<ServiceType>(),
+            [](void* ptr, ServiceContextType ctx) {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasSetContext<ServiceType, ServiceContextType>) { s->setContext(ctx); }
+                if constexpr (internal::HasInitialize<ServiceType>) { s->initialize(); }
+            },
+            [](void* ptr) {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasRunToken<ServiceType>) {
+                    s->startThread(s);
+                } else if constexpr (internal::HasStart<ServiceType>) {
+                    s->start();
+                }
+            },
+            [](void* ptr) noexcept {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasStop<ServiceType>) { s->stop(); }
+            },
+            [](void* ptr) noexcept {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasJoin<ServiceType>) { s->join(); }
+            }
+        };
+        _count++;
+        return true;
+    }
+
+    /// @brief Retrieve a registered service instance by static type ID.
+    [[nodiscard]] void* getServiceById(internal::TypeIdPtr typeId) const noexcept
+    {
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].typeId == typeId) {
+                return _services[i].instance;
+            }
+        }
+        return nullptr;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not found.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        return static_cast<ServiceType*>(getServiceById(internal::getTypeId<ServiceType>()));
+    }
+
+    /// @brief Retrieve event sink handle of a target registered service if available.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
+    template <typename ServiceType>
+    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
+    {
+        auto* service = getService<ServiceType>();
+        if (service) {
+            if constexpr (requires { service->sink(); }) {
+                return service->sink();
+            } else if constexpr (requires { service->serviceSink(); }) {
+                return service->serviceSink();
+            }
+        }
+        return EventSinkT<EventVariant>{};
+    }
+
+    /// @brief Initialize and launch all registered background service jthreads.
+    void initialize(ServiceContextType ctx)
+    {
+        ctx.registryPtr = const_cast<BasicServiceRegistry*>(this);
+        ctx.getServiceFn = [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
+            return static_cast<BasicServiceRegistry*>(regPtr)->getServiceById(typeId);
+        };
+
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].initFn) {
+                _services[i].initFn(_services[i].instance, ctx);
+            }
+            if (_services[i].startFn) {
+                _services[i].startFn(_services[i].instance);
+            }
+        }
+    }
+
+    /// @brief Stop and join all registered background service threads.
+    void shutdown() noexcept
+    {
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].stopFn) {
+                _services[i].stopFn(_services[i].instance);
+            }
+        }
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].joinFn) {
+                _services[i].joinFn(_services[i].instance);
+            }
+        }
+    }
+
+    /// @brief Access number of registered services.
+    [[nodiscard]] size_t size() const noexcept
+    {
+        return _count;
+    }
+
+private:
+    std::array<ServiceHandle, MaxServices> _services{};
+    size_t _count = 0;
+};
+
+/// @brief Default ServiceRegistry alias using MaxServices=8 and DefaultEvents.
+using ServiceRegistry = BasicServiceRegistry<8, DefaultEvents>;
+
+/// @brief Templated ServiceRegistry alias for custom capacity and event variant.
+template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
+using ServiceRegistryT = BasicServiceRegistry<MaxServices, EventVariant>;
+
+} // namespace corium
+
+// <<< End: corium/ServiceRegistry.hpp
+
+#include <utility>
+
+namespace corium {
+
+/// @brief Static CRTP base class for applications managed by Corium Runtime.
+/// Subclass Application<Derived> or Application<Derived, EventBusType, MaxServices> for zero-vtable compile-time static dispatch.
+/// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
+/// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
+/// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
+template <typename Derived, typename EventBusType = EventBus, std::size_t MaxServices = 8>
+class Application {
+public:
+    using EventVariant = typename EventBusType::EventVariant;
+    using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
+
+    Application() = default;
+
+    Application(const Application&) = delete;
+    Application& operator=(const Application&) = delete;
+
+    Application(Application&&) = delete;
+    Application& operator=(Application&&) = delete;
+
+protected:
+    /// @brief Register event handler with automatic event type deduction from callable signature.
+    template <typename Handler>
+    bool on(Handler&& handler)
+    {
+        return _context.events().registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register event handler with automatic event type deduction (alias for on).
+    template <typename Handler>
+    bool handle(Handler&& handler)
+    {
+        return _context.events().registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Access event bus reference.
+    [[nodiscard]] EventBusType& events()
+    {
+        return _context.events();
+    }
+
+    /// @brief Access event sink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink()
+    {
+        return _context.eventSink();
+    }
+
+    /// @brief Schedule a single-shot delayed event.
+    template <typename Rep, typename Period>
+    TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.scheduleDelayed(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+    }
+
+    /// @brief Schedule a recurring periodic event.
+    template <typename Rep, typename Period>
+    TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.schedulePeriodic(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+    }
+
+    /// @brief Cancel an active timer handle.
+    bool cancelTimer(TimerId id)
+    {
+        return _context.cancelTimer(id);
+    }
+
+    /// @brief Request graceful application shutdown.
+    void requestQuit()
+    {
+        _context.requestQuit();
+    }
+
+public:
+    template <typename Registry>
+    void configureServices(Registry& registry)
+    {
+        if constexpr (requires(Derived& d, Registry& r) { d.onConfigureServices(r); }) {
+            static_cast<Derived*>(this)->onConfigureServices(registry);
+        }
+    }
+
+    void initializeServices(EventSinkT<EventVariant> sink)
+    {
+        configureServices(_serviceRegistry);
+        _serviceRegistry.initialize(BasicServiceContext<EventVariant>{sink});
+    }
+
+    void shutdownServices() noexcept
+    {
+        _serviceRegistry.shutdown();
+    }
+
+    void registerHandlers()
+    {
+        if constexpr (requires(Derived& d) { d.onRegisterHandlers(); }) {
+            static_cast<Derived*>(this)->onRegisterHandlers();
+        }
+    }
+
+    void initialize()
+    {
+        if constexpr (requires(Derived& d) { d.onInitialize(); }) {
+            static_cast<Derived*>(this)->onInitialize();
+        }
+    }
+
+    void shutdown()
+    {
+        if constexpr (requires(Derived& d) { d.onShutdown(); }) {
+            static_cast<Derived*>(this)->onShutdown();
+        }
+    }
+
+    void setContext(ApplicationContext<EventBusType> context)
+    {
+        _context = context;
+        if constexpr (requires(Derived& d, ApplicationContext<EventBusType> c) { d.onSetContext(c); }) {
+            static_cast<Derived*>(this)->onSetContext(context);
+        }
+    }
+
+    /// @brief Access reference to the internal ServiceRegistry.
+    [[nodiscard]] ServiceRegistryType& services() noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Access const reference to the internal ServiceRegistry.
+    [[nodiscard]] const ServiceRegistryType& services() const noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type (const overload).
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] const ServiceType* getService() const noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+private:
+    ApplicationContext<EventBusType> _context;
+    ServiceRegistryType _serviceRegistry;
+};
+
+} // namespace corium
+
+// <<< End: corium/Application.hpp
+
+namespace corium {
+
+/// @brief Corium Application Runtime managing MPSC event loops and static policy execution.
+/// Zero dynamic heap allocations, zero RTTI.
+/// @tparam EventVariant The variant type list of supported events.
+/// @tparam QueuePolicy Policy governing event queueing (Lock-free MPSC).
+/// @tparam SignalPolicy Policy governing notification (NoSignalPolicy default).
+/// @tparam StoragePolicy Policy governing handler capacity and delegate inline storage size.
+/// @tparam OverflowPolicy Policy governing queue overflow handling (DropNewestOverflowPolicy default).
+/// @tparam TimerStoragePolicy Policy governing maximum concurrent timers (DefaultTimerStoragePolicy default: 64).
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename TimerStoragePolicy = DefaultTimerStoragePolicy,
+    typename ProfilerPolicy = profiler::NullProfiler
+>
+class BasicRuntime {
+public:
+    using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, ProfilerPolicy>;
+    using ClockPolicyType = typename internal::get_timer_clock_policy<TimerStoragePolicy>::type;
+    using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
+    using ProfilerPolicyType = ProfilerPolicy;
+
+    /// @brief Application base class specialization matching this Runtime's EventBus type.
+    template <typename Derived, std::size_t MaxServices = 8>
+    using Application = corium::Application<Derived, EventBusType, MaxServices>;
+
+    enum class State {
+        Created,
+        Initializing,
+        Running,
+        Stopping,
+        Terminated
+    };
+
+    BasicRuntime()
+        : _eventBus(),
+          _state(State::Created),
+          _quitRequested(false)
+    {
+    }
+
+    ~BasicRuntime()
+    {
+        shutdown();
+    }
+
+    BasicRuntime(const BasicRuntime&) = delete;
+    BasicRuntime& operator=(const BasicRuntime&) = delete;
+
+    /// @brief Access current lifecycle state of the runtime.
+    [[nodiscard]] State state() const noexcept
+    {
+        return _state.load(std::memory_order_acquire);
+    }
+
+    /// @brief Initialize runtime with target application using static CRTP dispatch.
+    /// @tparam Derived Application core type deriving from Application<Derived, EventBusType, MaxServices>.
+    /// @tparam MaxServices Number of services the application can register (deduced automatically).
+    /// @param application Application instance to initialize.
+    template <typename Derived, std::size_t MaxServices = 8>
+    void initialize(corium::Application<Derived, EventBusType, MaxServices>& application)
+    {
+        _state.store(State::Initializing, std::memory_order_release);
+        _appShutdownCb = StaticCallback{
+            [](void* appPtr) {
+                auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, EventBusType, MaxServices>*>(appPtr));
+                app->shutdownServices();
+                app->shutdown();
+            },
+            &application
+        };
+
+        auto ctx = applicationContext();
+        ctx.setTimerScheduler(_timerScheduler);
+        application.setContext(ctx);
+
+        registerCoreHandlers();
+        application.registerHandlers();
+        _eventBus.seal();
+
+        application.initializeServices(applicationContext().eventSink());
+        application.initialize();
+
+        _state.store(State::Running, std::memory_order_release);
+    }
+
+    /// @brief Pump all pending events in the queue until empty.
+    void pump()
+    {
+        pump(std::numeric_limits<std::size_t>::max());
+    }
+
+    /// @brief Pump up to maxEvents pending events from the queue.
+    /// @param maxEvents Maximum number of events to process in this call.
+    void pump(std::size_t maxEvents)
+    {
+        _timerScheduler.processDueTimers(_eventBus);
+
+        std::size_t processed = 0;
+        while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested && processed < maxEvents) {
+            if (!_eventBus.processOne()) {
+                break;
+            }
+            processed++;
+        }
+    }
+
+    /// @brief Wait for at least one event to become available (or until timeout), then pump all pending events.
+    template <typename Rep, typename Period>
+    std::size_t waitAndPump(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        _timerScheduler.processDueTimers(_eventBus);
+
+        if (_eventBus.empty() && !_quitRequested) {
+            _eventBus.signalPolicy().wait_for(timeout);
+        }
+
+        std::size_t processed = 0;
+        while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested) {
+            if (!_eventBus.processOne()) {
+                break;
+            }
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Pump events in consecutive batches to maximize CPU cache locality.
+    /// @param batchSize Number of events to process per batch (default: 16).
+    /// @param maxTotal Maximum total number of events to process.
+    /// @return Total number of events processed.
+    std::size_t pumpBatch(std::size_t batchSize = 16, std::size_t maxTotal = std::numeric_limits<std::size_t>::max())
+    {
+        _timerScheduler.processDueTimers(_eventBus);
+
+        std::size_t total = 0;
+        while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested && total < maxTotal) {
+            std::size_t toProcess = std::min(batchSize, maxTotal - total);
+            std::size_t processed = _eventBus.processBatch(toProcess);
+            total += processed;
+            if (processed < toProcess) {
+                break;
+            }
+        }
+        return total;
+    }
+
+    /// @brief Drain and dispatch all currently enqueued events immediately.
+    /// @return Total number of events processed.
+    std::size_t drain()
+    {
+        _timerScheduler.processDueTimers(_eventBus);
+        if (_state.load(std::memory_order_relaxed) != State::Running || _quitRequested) {
+            return 0;
+        }
+        return _eventBus.drain();
+    }
+
+    /// @brief Schedule a single-shot delayed event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
+    {
+        return _timerScheduler.scheduleDelayed(std::move(event), delay, priority);
+    }
+
+    /// @brief Schedule a single-shot delayed event with native clock duration.
+    template <typename DurationType>
+    TimerId scheduleDelayed(EventVariant event, DurationType delay, EventPriority priority = EventPriority::Normal)
+        requires (!std::is_same_v<DurationType, std::chrono::microseconds> && !std::is_same_v<DurationType, std::chrono::milliseconds>)
+    {
+        return _timerScheduler.scheduleDelayed(std::move(event), delay, priority);
+    }
+
+    /// @brief Schedule a recurring periodic event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
+    {
+        return _timerScheduler.schedulePeriodic(std::move(event), interval, priority);
+    }
+
+    /// @brief Schedule a recurring periodic event with native clock duration.
+    template <typename DurationType>
+    TimerId schedulePeriodic(EventVariant event, DurationType interval, EventPriority priority = EventPriority::Normal)
+        requires (!std::is_same_v<DurationType, std::chrono::microseconds> && !std::is_same_v<DurationType, std::chrono::milliseconds>)
+    {
+        return _timerScheduler.schedulePeriodic(std::move(event), interval, priority);
+    }
+
+    /// @brief Cancel an active timer handle.
+    bool cancelTimer(TimerId id) noexcept
+    {
+        return _timerScheduler.cancelTimer(id);
+    }
+
+    /// @brief Stop runtime cleanly.
+    void shutdown() noexcept
+    {
+        auto st = _state.load(std::memory_order_acquire);
+        if (st == State::Stopping || st == State::Terminated) {
+            return;
+        }
+
+        _state.store(State::Stopping, std::memory_order_release);
+        if (_appShutdownCb) {
+            _appShutdownCb();
+        }
+        _state.store(State::Terminated, std::memory_order_release);
+    }
+
+    /// @brief Request runtime quit.
+    void requestQuit() noexcept
+    {
+        _quitRequested.store(true, std::memory_order_release);
+    }
+
+    /// @brief Check if runtime quit has been requested.
+    [[nodiscard]] bool quitRequested() const noexcept
+    {
+        auto st = _state.load(std::memory_order_acquire);
+        return _quitRequested.load(std::memory_order_acquire) || st == State::Stopping || st == State::Terminated;
+    }
+
+    /// @brief Set static callback triggered when event queue transitions from empty to non-empty (0 -> 1).
+    void setOnQueueNonEmpty(StaticCallback callback)
+    {
+        _eventBus.setOnQueueNonEmpty(callback);
+    }
+
+    /// @brief Access reference to signal policy.
+    SignalPolicy& signalPolicy() noexcept
+    {
+        return _eventBus.signalPolicy();
+    }
+
+    /// @brief Access const reference to signal policy.
+    const SignalPolicy& signalPolicy() const noexcept
+    {
+        return _eventBus.signalPolicy();
+    }
+
+    /// @brief Access reference to overflow policy.
+    OverflowPolicy& overflowPolicy() noexcept
+    {
+        return _eventBus.overflowPolicy();
+    }
+
+    /// @brief Access const reference to overflow policy.
+    const OverflowPolicy& overflowPolicy() const noexcept
+    {
+        return _eventBus.overflowPolicy();
+    }
+
+    /// @brief Access reference to timer scheduler.
+    TimerSchedulerType& timerScheduler() noexcept
+    {
+        return _timerScheduler;
+    }
+
+    /// @brief Access const reference to timer scheduler.
+    const TimerSchedulerType& timerScheduler() const noexcept
+    {
+        return _timerScheduler;
+    }
+
+    /// @brief Access event sink handle.
+    EventSinkT<EventVariant> eventSink() noexcept
+    {
+        return _eventBus.sink();
+    }
+
+    /// @brief Access reference to internal event bus.
+    EventBusType& eventBus() noexcept
+    {
+        return _eventBus;
+    }
+
+    /// @brief Access reference to profiler policy.
+    ProfilerPolicyType& profiler() noexcept
+    {
+        return _eventBus.profiler();
+    }
+
+    /// @brief Access const reference to profiler policy.
+    const ProfilerPolicyType& profiler() const noexcept
+    {
+        return _eventBus.profiler();
+    }
+
+    /// @brief Create ApplicationContext for application wiring.
+    ApplicationContext<EventBusType> applicationContext()
+    {
+        auto ctx = ApplicationContext<EventBusType>{
+            _eventBus,
+            StaticCallback{
+                [](void* c) { static_cast<BasicRuntime*>(c)->requestQuit(); },
+                this
+            }
+        };
+        ctx.setTimerScheduler(_timerScheduler);
+        return ctx;
+    }
+
+private:
+    void registerCoreHandlers()
+    {
+        if constexpr (has_variant_type_v<QuitEvent, EventVariant>) {
+            _eventBus.template registerHandler<QuitEvent>([this](const QuitEvent&) {
+                _quitRequested.store(true, std::memory_order_release);
+            });
+        }
+    }
+
+    EventBusType _eventBus;
+    TimerSchedulerType _timerScheduler{};
+    StaticCallback _appShutdownCb;
+    std::atomic<State> _state{State::Created};
+    std::atomic<bool> _quitRequested{false};
+};
+
+/// @brief Default Runtime alias using DefaultEvents, NoSignalPolicy, DefaultStoragePolicy, DropNewestOverflowPolicy, DefaultTimerStoragePolicy, and NullProfiler.
+using Runtime = BasicRuntime<DefaultEvents, BoundedMpscQueuePolicy<DefaultEvents, 1024>, NoSignalPolicy, DefaultStoragePolicy, DropNewestOverflowPolicy, DefaultTimerStoragePolicy, profiler::NullProfiler>;
+
+/// @brief Templated Runtime alias for custom policies.
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename TimerStoragePolicy = DefaultTimerStoragePolicy,
+    typename ProfilerPolicy = profiler::NullProfiler
+>
+using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, TimerStoragePolicy, ProfilerPolicy>;
+
+} // namespace corium
+
+
+// >>> Begin: corium/RuntimeBuilder.hpp
+
+#include <cstddef>
+
+namespace corium {
+
+template <
+    typename EventVariant,
+    typename QueuePolicy,
+    typename SignalPolicy,
+    typename StoragePolicy,
+    typename OverflowPolicy,
+    typename TimerStoragePolicy,
+    typename ProfilerPolicy
+>
+class BasicRuntime;
+
+namespace internal {
+
+/// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member.
+/// Falls back to 1024 for policies without a capacity (e.g. NoQueuePolicy).
+template <typename QueuePolicy, typename = void>
+struct queue_capacity_of : std::integral_constant<std::size_t, 1024> {};
+
+template <typename QueuePolicy>
+struct queue_capacity_of<QueuePolicy, std::void_t<decltype(QueuePolicy::capacity)>>
+    : std::integral_constant<std::size_t, QueuePolicy::capacity> {};
+
+template <typename QueuePolicy>
+static constexpr std::size_t queue_capacity_of_v = queue_capacity_of<QueuePolicy>::value;
+
+/// @brief Rebind QueuePolicy EventVariant type parameter while preserving Capacity or Policy structure.
+template <typename QueuePolicy, typename NewEventVariant>
+struct rebind_queue_policy;
+
+template <template <typename, size_t> class QueuePolicy, typename OldEventVariant, size_t Capacity, typename NewEventVariant>
+struct rebind_queue_policy<QueuePolicy<OldEventVariant, Capacity>, NewEventVariant> {
+    using type = QueuePolicy<NewEventVariant, Capacity>;
+};
+
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename OldEventVariant, size_t HighCap, size_t NormalCap, size_t LowCap, typename NewEventVariant>
+struct rebind_queue_policy<QueuePolicy<OldEventVariant, HighCap, NormalCap, LowCap>, NewEventVariant> {
+    using type = QueuePolicy<NewEventVariant, HighCap, NormalCap, LowCap>;
+};
+
+template <template <typename> class QueuePolicy, typename OldEventVariant, typename NewEventVariant>
+struct rebind_queue_policy<QueuePolicy<OldEventVariant>, NewEventVariant> {
+    using type = QueuePolicy<NewEventVariant>;
+};
+
+template <typename QueuePolicy, typename NewEventVariant>
+using rebind_queue_policy_t = typename rebind_queue_policy<QueuePolicy, NewEventVariant>::type;
+
+/// @brief Rebind QueuePolicy Capacity while preserving EventVariant.
+template <typename QueuePolicy, size_t NewCapacity>
+struct rebind_queue_capacity;
+
+template <template <typename, size_t> class QueuePolicy, typename EventVariant, size_t OldCapacity, size_t NewCapacity>
+struct rebind_queue_capacity<QueuePolicy<EventVariant, OldCapacity>, NewCapacity> {
+    using type = QueuePolicy<EventVariant, NewCapacity>;
+};
+
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t OldHigh, size_t OldNormal, size_t OldLow, size_t NewCapacity>
+struct rebind_queue_capacity<QueuePolicy<EventVariant, OldHigh, OldNormal, OldLow>, NewCapacity> {
+    using type = QueuePolicy<EventVariant, OldHigh, NewCapacity, OldLow>;
+};
+
+template <typename QueuePolicy, size_t NewCapacity>
+using rebind_queue_capacity_t = typename rebind_queue_capacity<QueuePolicy, NewCapacity>::type;
+
+} // namespace internal
+
+/// @brief Fluent compile-time builder for configuring BasicRuntime type aliases.
+template <
+    typename EventVariant = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
+    typename SignalPolicy = NoSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy,
+    typename TimerStoragePolicy = DefaultTimerStoragePolicy,
+    typename ProfilerPolicy = profiler::NullProfiler
+>
+struct RuntimeBuilder {
+    /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
+    template <typename NewEventVariant>
+    using WithEvents = RuntimeBuilder<
+        NewEventVariant,
+        internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
+    template <size_t Capacity>
+    using WithCapacity = RuntimeBuilder<
+        EventVariant,
+        internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
+    template <size_t HighCapacity = 256, size_t NormalCapacity = 1024>
+    using WithPriorityQueue = RuntimeBuilder<
+        EventVariant,
+        PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom QueuePolicy.
+    template <typename NewQueuePolicy>
+    using WithQueuePolicy = RuntimeBuilder<
+        EventVariant,
+        NewQueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom SignalPolicy.
+    template <typename NewSignalPolicy>
+    using WithSignalPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        NewSignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom StoragePolicy.
+    template <typename NewStoragePolicy>
+    using WithStoragePolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        NewStoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom OverflowPolicy.
+    template <typename NewOverflowPolicy>
+    using WithOverflowPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        NewOverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify maximum number of concurrent active timers.
+    template <size_t MaxTimers>
+    using WithMaxTimers = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        FixedTimerStoragePolicy<MaxTimers>,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom ClockPolicy (time source strategy).
+    template <typename NewClockPolicy>
+    using WithClockPolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        FixedTimerStoragePolicy<TimerStoragePolicy::max_timers, NewClockPolicy>,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom TimerStoragePolicy.
+    template <typename NewTimerStoragePolicy>
+    using WithTimerStoragePolicy = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        NewTimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
+    template <size_t NewMaxHandlers>
+    using WithMaxHandlersPerEvent = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        FixedStoragePolicy<NewMaxHandlers, StoragePolicy::inline_storage_size>,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
+    template <size_t NewInlineSize>
+    using WithInlineSize = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        FixedStoragePolicy<StoragePolicy::max_handlers_per_event, NewInlineSize>,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        ProfilerPolicy
+    >;
+
+    /// @brief Specify custom ProfilerPolicy strategy.
+    template <typename NewProfilerPolicy>
+    using WithProfiler = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        NewProfilerPolicy
+    >;
+
+    /// @brief Convenience helper: Configure FlightRecorder circular trace logger.
+    /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
+    /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
+    template <std::size_t BufferCapacity = 256>
+    using WithFlightRecorder = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        profiler::FlightRecorderProfiler<BufferCapacity, internal::queue_capacity_of_v<QueuePolicy>>
+    >;
+
+    /// @brief Convenience helper: Configure real-time event latency statistics tracker.
+    /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
+    /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
+    using WithLatencyTracker = RuntimeBuilder<
+        EventVariant,
+        QueuePolicy,
+        SignalPolicy,
+        StoragePolicy,
+        OverflowPolicy,
+        TimerStoragePolicy,
+        profiler::LatencyTracker<internal::queue_capacity_of_v<QueuePolicy>>
+    >;
+
+    /// @brief Complete builder configuration and return BasicRuntime type.
+    using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, TimerStoragePolicy, ProfilerPolicy>;
+};
+
+} // namespace corium
+
+// <<< End: corium/RuntimeBuilder.hpp
+
+// <<< End: corium/Runtime.hpp
+
+// >>> Begin: corium/logging/logging.hpp
+
+/// @file logging.hpp
+/// @brief Umbrella header for the Corium zero-heap logging framework.
+
+
+// >>> Begin: corium/logging/LogLevel.hpp
+
+#include <cstdint>
+
+namespace corium::logging {
+
+/// @brief Logging severity levels.
+enum class LogLevel : uint8_t {
+    Trace = 0,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Critical,
+    Off
+};
+
+/// @brief Convert LogLevel enum to string representation.
+constexpr const char* logLevelToString(LogLevel level) noexcept
+{
+    switch (level) {
+        case LogLevel::Trace:    return "TRACE";
+        case LogLevel::Debug:    return "DEBUG";
+        case LogLevel::Info:     return "INFO";
+        case LogLevel::Warn:     return "WARN";
+        case LogLevel::Error:    return "ERROR";
+        case LogLevel::Critical: return "CRITICAL";
+        case LogLevel::Off:      return "OFF";
+    }
+    return "UNKNOWN";
+}
+
+/// @brief Get ANSI color escape code for LogLevel.
+constexpr const char* logLevelToColor(LogLevel level) noexcept
+{
+    switch (level) {
+        case LogLevel::Trace:    return "\033[36m"; // Cyan
+        case LogLevel::Debug:    return "\033[34m"; // Blue
+        case LogLevel::Info:     return "\033[32m"; // Green
+        case LogLevel::Warn:     return "\033[33m"; // Yellow
+        case LogLevel::Error:    return "\033[31m"; // Red
+        case LogLevel::Critical: return "\033[35m"; // Magenta
+        case LogLevel::Off:      return "\033[0m";  // Reset
+    }
+    return "\033[0m";
+}
+
+/// @brief ANSI reset color escape code.
+constexpr const char* LOG_COLOR_RESET = "\033[0m";
+
+} // namespace corium::logging
+
+// <<< End: corium/logging/LogLevel.hpp
+
+// >>> Begin: corium/logging/LogEvent.hpp
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+
+
+namespace corium::logging {
+
+/// @brief Zero-heap log event carrying fixed-size inline message buffer across MPSC event bus.
+/// @tparam MaxMessageLength Maximum character capacity for inline log message.
+template <std::size_t MaxMessageLength = 256>
+struct LogEventT {
+    LogLevel level = LogLevel::Info;
+    std::array<char, MaxMessageLength> message{};
+    std::size_t length = 0;
+    const char* category = "App";
+    uint64_t timestampNs = 0;
+
+    constexpr LogEventT() = default;
+
+    /// @brief Create log event with inline formatted string.
+    constexpr LogEventT(LogLevel lvl, std::string_view msg, const char* cat = "App", uint64_t ts = 0) noexcept
+        : level(lvl), category(cat ? cat : "App"), timestampNs(ts)
+    {
+        setMessage(msg);
+    }
+
+    /// @brief Set inline message buffer safely up to MaxMessageLength - 1.
+    constexpr void setMessage(std::string_view msg) noexcept
+    {
+        std::size_t copyLen = msg.length() < (MaxMessageLength - 1) ? msg.length() : (MaxMessageLength - 1);
+        for (std::size_t i = 0; i < copyLen; ++i) {
+            message[i] = msg[i];
+        }
+        message[copyLen] = '\0';
+        length = copyLen;
+    }
+
+    /// @brief Access message as std::string_view.
+    [[nodiscard]] constexpr std::string_view view() const noexcept
+    {
+        return std::string_view(message.data(), length);
+    }
+};
+
+/// @brief Default LogEvent alias with 256-byte inline buffer.
+using LogEvent = LogEventT<256>;
+
+} // namespace corium::logging
+
+// <<< End: corium/logging/LogEvent.hpp
+
+// >>> Begin: corium/logging/sinks/ConsoleLogSink.hpp
+
+#include <iostream>
+
+namespace corium::logging::sinks {
+
+/// @brief Standard console output log sink with optional ANSI color codes.
+class ConsoleLogSink {
+public:
+    explicit ConsoleLogSink(bool useColors = true) noexcept
+        : _useColors(useColors)
+    {}
+
+    /// @brief Write log event to std::cout or std::cerr.
+    template <std::size_t N>
+    void write(const LogEventT<N>& event) const
+    {
+        std::ostream& os = (event.level >= LogLevel::Error) ? std::cerr : std::cout;
+
+        if (_useColors) {
+            os << logLevelToColor(event.level)
+               << "[" << logLevelToString(event.level) << "]"
+               << LOG_COLOR_RESET
+               << " [" << event.category << "] "
+               << event.view() << "\n";
+        } else {
+            os << "[" << logLevelToString(event.level) << "]"
+               << " [" << event.category << "] "
+               << event.view() << "\n";
+        }
+        os << std::flush;
+    }
+
+    /// @brief Enable or disable ANSI color formatting.
+    void setColorsEnabled(bool enable) noexcept
+    {
+        _useColors = enable;
+    }
+
+    [[nodiscard]] bool colorsEnabled() const noexcept
+    {
+        return _useColors;
+    }
+
+private:
+    bool _useColors = true;
+};
+
+} // namespace corium::logging::sinks
+
+// <<< End: corium/logging/sinks/ConsoleLogSink.hpp
+
+// >>> Begin: corium/logging/sinks/FileLogSink.hpp
+
+#include <cstdio>
+
+namespace corium::logging::sinks {
+
+/// @brief File log sink appending formatted log entries to a designated file.
+class FileLogSink {
+public:
+    FileLogSink() = default;
+
+    explicit FileLogSink(const char* filePath)
+    {
+        open(filePath);
+    }
+
+    ~FileLogSink()
+    {
+        close();
+    }
+
+    FileLogSink(const FileLogSink&) = delete;
+    FileLogSink& operator=(const FileLogSink&) = delete;
+
+    FileLogSink(FileLogSink&& rhs) noexcept
+    {
+        _file = rhs._file;
+        rhs._file = nullptr;
+    }
+
+    FileLogSink& operator=(FileLogSink&& rhs) noexcept
+    {
+        if (this != &rhs) {
+            close();
+            _file = rhs._file;
+            rhs._file = nullptr;
+        }
+        return *this;
+    }
+
+    /// @brief Open target log file in append mode.
+    bool open(const char* filePath)
+    {
+        close();
+        if (filePath && filePath[0] != '\0') {
+#if defined(_MSC_VER)
+            ::fopen_s(&_file, filePath, "a");
+#else
+            _file = std::fopen(filePath, "a");
+#endif
+        }
+        return _file != nullptr;
+    }
+
+    /// @brief Close target log file.
+    void close() noexcept
+    {
+        if (_file) {
+            std::fclose(_file);
+            _file = nullptr;
+        }
+    }
+
+    /// @brief Write log event entry to file.
+    template <std::size_t N>
+    void write(const LogEventT<N>& event) const
+    {
+        if (_file) {
+            std::fprintf(_file, "[%s] [%s] %.*s\n",
+                         logLevelToString(event.level),
+                         event.category,
+                         static_cast<int>(event.length),
+                         event.message.data());
+            std::fflush(_file);
+        }
+    }
+
+    [[nodiscard]] bool isOpen() const noexcept
+    {
+        return _file != nullptr;
+    }
+
+private:
+    std::FILE* _file = nullptr;
+};
+
+} // namespace corium::logging::sinks
+
+// <<< End: corium/logging/sinks/FileLogSink.hpp
+
+// >>> Begin: corium/logging/sinks/NullLogSink.hpp
+
+
+namespace corium::logging::sinks {
+
+/// @brief No-op log sink for zero-cost logging in benchmarks or production headless mode.
+class NullLogSink {
+public:
+    NullLogSink() = default;
+
+    template <std::size_t N>
+    void write(const LogEventT<N>& event) const noexcept
+    {
+        (void)event;
+    }
+};
+
+} // namespace corium::logging::sinks
+
+// <<< End: corium/logging/sinks/NullLogSink.hpp
+
+// >>> Begin: corium/logging/Logger.hpp
+
+#include <cstdio>
+#include <utility>
+
+
+namespace corium::logging {
+
+/// @brief Static compile-time logger wrapper managing severity level filtering and zero-heap string formatting.
+/// @tparam LogSink Log sink backend handling actual log entry output (e.g. ConsoleLogSink, FileLogSink, NullLogSink).
+/// @tparam MaxMessageSize Maximum character length for formatted log messages.
+template <typename LogSink = sinks::ConsoleLogSink, std::size_t MaxMessageSize = 256>
+class LoggerT {
+public:
+    using EventType = LogEventT<MaxMessageSize>;
+
+    explicit LoggerT(const char* category = "App", LogLevel minLevel = LogLevel::Info, LogSink sink = LogSink{})
+        : _category(category ? category : "App"), _minLevel(minLevel), _sink(std::move(sink))
+    {}
+
+    /// @brief Set minimum log severity level.
+    void setMinLevel(LogLevel level) noexcept
+    {
+        _minLevel = level;
+    }
+
+    /// @brief Get minimum log severity level.
+    [[nodiscard]] LogLevel minLevel() const noexcept
+    {
+        return _minLevel;
+    }
+
+    /// @brief Set category string tag.
+    void setCategory(const char* category) noexcept
+    {
+        _category = category ? category : "App";
+    }
+
+    /// @brief Get category tag.
+    [[nodiscard]] const char* category() const noexcept
+    {
+        return _category;
+    }
+
+    /// @brief Access underlying log sink reference.
+    [[nodiscard]] LogSink& sink() noexcept { return _sink; }
+    [[nodiscard]] const LogSink& sink() const noexcept { return _sink; }
+
+    /// @brief Log formatted message directly to sink if severity level meets minimum threshold.
+    template <typename... Args>
+    void log(LogLevel level, const char* fmt, Args&&... args) const
+    {
+        if (level < _minLevel || _minLevel == LogLevel::Off) {
+            return;
+        }
+
+        EventType event{};
+        event.level = level;
+        event.category = _category;
+
+        if constexpr (sizeof...(Args) == 0) {
+            event.setMessage(fmt);
+        } else {
+            int written = std::snprintf(event.message.data(), MaxMessageSize, fmt, std::forward<Args>(args)...);
+            if (written > 0) {
+                event.length = static_cast<std::size_t>(written) < MaxMessageSize ? static_cast<std::size_t>(written) : (MaxMessageSize - 1);
+            }
+        }
+
+        _sink.write(event);
+    }
+
+    /// @brief Post formatted LogEvent to a target Corium EventSink (lock-free MPSC event bus).
+    template <typename TargetEventSink, typename... Args>
+    void logToSink(TargetEventSink&& targetSink, LogLevel level, const char* fmt, Args&&... args) const
+    {
+        if (level < _minLevel || _minLevel == LogLevel::Off) {
+            return;
+        }
+
+        EventType event{};
+        event.level = level;
+        event.category = _category;
+
+        if constexpr (sizeof...(Args) == 0) {
+            event.setMessage(fmt);
+        } else {
+            int written = std::snprintf(event.message.data(), MaxMessageSize, fmt, std::forward<Args>(args)...);
+            if (written > 0) {
+                event.length = static_cast<std::size_t>(written) < MaxMessageSize ? static_cast<std::size_t>(written) : (MaxMessageSize - 1);
+            }
+        }
+
+        targetSink.post(std::move(event));
+    }
+
+    template <typename... Args>
+    void trace(const char* fmt, Args&&... args) const { log(LogLevel::Trace, fmt, std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    void debug(const char* fmt, Args&&... args) const { log(LogLevel::Debug, fmt, std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    void info(const char* fmt, Args&&... args) const { log(LogLevel::Info, fmt, std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    void warn(const char* fmt, Args&&... args) const { log(LogLevel::Warn, fmt, std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    void error(const char* fmt, Args&&... args) const { log(LogLevel::Error, fmt, std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    void critical(const char* fmt, Args&&... args) const { log(LogLevel::Critical, fmt, std::forward<Args>(args)...); }
+
+private:
+    const char* _category = "App";
+    LogLevel _minLevel = LogLevel::Info;
+    LogSink _sink{};
+};
+
+/// @brief Default Console Logger alias.
+using ConsoleLogger = LoggerT<sinks::ConsoleLogSink>;
+
+/// @brief Default File Logger alias.
+using FileLogger = LoggerT<sinks::FileLogSink>;
+
+/// @brief Default Null Logger alias.
+using NullLogger = LoggerT<sinks::NullLogSink>;
+
+} // namespace corium::logging
+
+// <<< End: corium/logging/Logger.hpp
+
+// >>> Begin: corium/logging/LogBackgroundService.hpp
+
+#include <chrono>
+#include <stop_token>
+#include <thread>
+#include <utility>
+
+
+namespace corium::logging {
+
+/// @brief Asynchronous background logging service executing on a dedicated C++20 std::jthread.
+/// Consumes/flushes log events or periodic status messages asynchronously without blocking the main event loop.
+/// @tparam LogSink Log sink backend type (e.g. ConsoleLogSink, FileLogSink, NullLogSink).
+/// @tparam EventVariant Event variant list supported by the runtime context.
+/// @tparam MaxMessageSize Inline capacity size for log events.
+template <typename LogSink = sinks::ConsoleLogSink, typename EventVariant = DefaultEvents, std::size_t MaxMessageSize = 256>
+class LogBackgroundService : public BackgroundService<EventVariant> {
+public:
+    using LoggerType = LoggerT<LogSink, MaxMessageSize>;
+
+    explicit LogBackgroundService(const char* category = "LogService", LogLevel minLevel = LogLevel::Info, LogSink sink = LogSink{})
+        : _logger(category, minLevel, std::move(sink))
+    {}
+
+    /// @brief Access embedded logger instance.
+    [[nodiscard]] LoggerType& logger() noexcept { return _logger; }
+    [[nodiscard]] const LoggerType& logger() const noexcept { return _logger; }
+
+    /// @brief Log background heartbeat or event message.
+    template <typename... Args>
+    void info(const char* fmt, Args&&... args) const
+    {
+        _logger.info(fmt, std::forward<Args>(args)...);
+    }
+
+    /// @brief Main background execution loop.
+    void run(std::stop_token stopToken)
+    {
+        _logger.info("Asynchronous LogBackgroundService started.");
+        while (!stopToken.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        _logger.info("Asynchronous LogBackgroundService stopping.");
+    }
+
+private:
+    LoggerType _logger;
+};
+
+} // namespace corium::logging
+
+// <<< End: corium/logging/LogBackgroundService.hpp
+
+// <<< End: corium/logging/logging.hpp
+
+// >>> Begin: corium/embedded/embedded.hpp
+
+/// @file embedded.hpp
+/// @brief Umbrella header for Corium embedded microcontrollers and RTOS support.
+
+
+// >>> Begin: corium/embedded/InterruptLock.hpp
+
+#include <cstdint>
+
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+#define CORIUM_HAS_ESP32_CRITICAL 1
+#elif defined(__arm__) || defined(__thumb__)
+#if __has_include(<cmsis_compiler.h>)
+#include <cmsis_compiler.h>
+#define CORIUM_HAS_ARM_CMSIS 1
+#endif
+#endif
+
+namespace corium::embedded {
+
+/// @brief RAII interrupt locking helper disabling interrupts upon construction and restoring them upon destruction.
+class InterruptLock {
+public:
+    InterruptLock() noexcept
+    {
+        lock();
+    }
+
+    ~InterruptLock() noexcept
+    {
+        unlock();
+    }
+
+    InterruptLock(const InterruptLock&) = delete;
+    InterruptLock& operator=(const InterruptLock&) = delete;
+
+    InterruptLock(InterruptLock&&) = delete;
+    InterruptLock& operator=(InterruptLock&&) = delete;
+
+    void lock() noexcept
+    {
+        if (!_locked) {
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+            portENTER_CRITICAL(&_mux);
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+            _primask = __get_PRIMASK();
+            __disable_irq();
+#endif
+            _locked = true;
+        }
+    }
+
+    void unlock() noexcept
+    {
+        if (_locked) {
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+            portEXIT_CRITICAL(&_mux);
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+            __set_PRIMASK(_primask);
+#endif
+            _locked = false;
+        }
+    }
+
+    [[nodiscard]] bool isLocked() const noexcept
+    {
+        return _locked;
+    }
+
+private:
+    bool _locked = false;
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+    static inline portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+    uint32_t _primask = 0;
+#endif
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/InterruptLock.hpp
+
+// >>> Begin: corium/embedded/IsrSink.hpp
+
+#include <utility>
+
+namespace corium::embedded {
+
+/// @brief Lightweight, zero-overhead wrapper around EventSink explicitly tailored for Hardware ISR handlers.
+/// Guarantees zero heap allocation, lock-free execution, and noexcept exception safety.
+/// @tparam EventSinkType Target underlying event sink type.
+template <typename EventSinkType>
+class IsrEventSink {
+public:
+    constexpr IsrEventSink() noexcept = default;
+
+    constexpr explicit IsrEventSink(EventSinkType sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Post an event safely from hardware ISR context.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance to post.
+    /// @param priority Priority level (High, Normal, Low).
+    template <typename Event>
+    void postFromIsr(Event&& event, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+    }
+
+    /// @brief Post a high-priority emergency or hardware interrupt event from ISR context.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance to post.
+    template <typename Event>
+    void postHighPriorityFromIsr(Event&& event) noexcept
+    {
+        _sink.postHighPriority(std::forward<Event>(event));
+    }
+
+    /// @brief Post an event from ISR context.
+    template <typename Event>
+    void tryPostFromIsr(Event&& event, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+    }
+
+    /// @brief Access underlying EventSink handle.
+    [[nodiscard]] constexpr EventSinkType& sink() noexcept
+    {
+        return _sink;
+    }
+
+    [[nodiscard]] constexpr const EventSinkType& sink() const noexcept
+    {
+        return _sink;
+    }
+
+private:
+    EventSinkType _sink{};
+};
+
+/// @brief Helper function to construct an IsrEventSink from an EventSink handle.
+template <typename EventSinkType>
+[[nodiscard]] constexpr auto makeIsrSink(EventSinkType sink) noexcept
+{
+    return IsrEventSink<EventSinkType>(sink);
+}
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/IsrSink.hpp
+
+// >>> Begin: corium/embedded/FreeRtos.hpp
+
+#include <utility>
+
+#if defined(FREERTOS) || defined(INC_FREERTOS_H) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#define CORIUM_HAS_FREERTOS_INCLUDES 1
+#else
+// Mock definitions for host build and desktop testing
+using BaseType_t = long;
+#define pdTRUE 1
+#define pdFALSE 0
+#define portYIELD_FROM_ISR(x) ((void)(x))
+#endif
+
+namespace corium::embedded {
+
+/// @brief FreeRTOS-specialized ISR sink managing RTOS task context switches.
+/// @tparam EventSinkType Target underlying event sink.
+template <typename EventSinkType>
+class FreeRtosIsrSink {
+public:
+    constexpr FreeRtosIsrSink() noexcept = default;
+
+    constexpr explicit FreeRtosIsrSink(EventSinkType sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Post event from FreeRTOS ISR and track if context switch is needed.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance.
+    /// @param pxHigherPriorityTaskWoken Pointer to FreeRTOS task unblocking flag.
+    /// @param priority Event priority level.
+    template <typename Event>
+    void postFromIsr(Event&& event, BaseType_t* pxHigherPriorityTaskWoken = nullptr, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+        if (pxHigherPriorityTaskWoken) {
+            *pxHigherPriorityTaskWoken = pdTRUE;
+        }
+    }
+
+    /// @brief Post high priority event from FreeRTOS ISR and track context switch.
+    template <typename Event>
+    void postHighPriorityFromIsr(Event&& event, BaseType_t* pxHigherPriorityTaskWoken = nullptr) noexcept
+    {
+        _sink.postHighPriority(std::forward<Event>(event));
+        if (pxHigherPriorityTaskWoken) {
+            *pxHigherPriorityTaskWoken = pdTRUE;
+        }
+    }
+
+    /// @brief Yield to higher priority unblocked task if flag was set.
+    static void yieldFromIsr(BaseType_t xHigherPriorityTaskWoken) noexcept
+    {
+        if (xHigherPriorityTaskWoken == pdTRUE) {
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
+    }
+
+    /// @brief Access underlying sink handle.
+    [[nodiscard]] constexpr EventSinkType& sink() noexcept { return _sink; }
+    [[nodiscard]] constexpr const EventSinkType& sink() const noexcept { return _sink; }
+
+private:
+    EventSinkType _sink{};
+};
+
+/// @brief Helper function to construct FreeRtosIsrSink from an event sink handle.
+template <typename EventSinkType>
+[[nodiscard]] constexpr auto makeFreeRtosIsrSink(EventSinkType sink) noexcept
+{
+    return FreeRtosIsrSink<EventSinkType>(sink);
+}
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/FreeRtos.hpp
+
+// <<< End: corium/embedded/embedded.hpp
+
+// >>> Begin: corium/fsm/fsm.hpp
+
+/// @file fsm.hpp
+/// @brief Zero-heap compile-time Finite State Machine (FSM) module for Corium.
+
+
+// >>> Begin: corium/fsm/Transition.hpp
+
+#include <type_traits>
+#include <utility>
+
+namespace corium::fsm {
+
+/// @brief Default always-true guard for state machine transitions.
+struct Always {
+    template <typename... Args>
+    constexpr bool operator()(Args&&...) const noexcept { return true; }
+};
+
+/// @brief Default no-op action for state machine transitions.
+struct NoAction {
+    template <typename... Args>
+    constexpr void operator()(Args&&...) const noexcept {}
+};
+
+/// @brief Compile-time transition rule definition.
+/// @tparam From Source state type.
+/// @tparam Event Trigger event type.
+/// @tparam To Destination state type.
+/// @tparam Guard Callable predicate (FromState&, const Event&) -> bool.
+/// @tparam Action Callable action (FromState&, const Event&, ToState&) -> void.
+template <
+    typename From,
+    typename Event,
+    typename To,
+    typename Guard = Always,
+    typename Action = NoAction
+>
+struct Transition {
+    using FromState = From;
+    using EventType = Event;
+    using ToState = To;
+    using GuardType = Guard;
+    using ActionType = Action;
+
+    [[no_unique_address]] GuardType guard{};
+    [[no_unique_address]] ActionType action{};
+
+    constexpr Transition() = default;
+    constexpr explicit Transition(GuardType g, ActionType a = ActionType{})
+        : guard(std::move(g)), action(std::move(a))
+    {}
+};
+
+/// @brief Compile-time table containing all valid state transitions.
+template <typename... Transitions>
+struct TransitionTable {
+    using TransitionsTuple = std::tuple<Transitions...>;
+};
+
+} // namespace corium::fsm
+
+// <<< End: corium/fsm/Transition.hpp
+
+// >>> Begin: corium/fsm/StateMachine.hpp
+
+#include <concepts>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+namespace corium::fsm {
+
+namespace detail {
+
+template <typename State, typename Event>
+constexpr void call_on_exit(State& s, const Event& e) {
+    if constexpr (requires { s.onExit(e); }) {
+        s.onExit(e);
+    } else if constexpr (requires { s.onExit(); }) {
+        s.onExit();
+    }
+}
+
+template <typename State, typename Event>
+constexpr void call_on_enter(State& s, const Event& e) {
+    if constexpr (requires { s.onEnter(e); }) {
+        s.onEnter(e);
+    } else if constexpr (requires { s.onEnter(); }) {
+        s.onEnter();
+    }
+}
+
+template <typename Guard, typename State, typename Event>
+constexpr bool evaluate_guard(const Guard& guard, const State& s, const Event& e) {
+    if constexpr (std::is_invocable_r_v<bool, Guard, const State&, const Event&>) {
+        return guard(s, e);
+    } else if constexpr (std::is_invocable_r_v<bool, Guard, const Event&>) {
+        return guard(e);
+    } else if constexpr (std::is_invocable_r_v<bool, Guard>) {
+        return guard();
+    } else {
+        return true;
+    }
+}
+
+template <typename Action, typename From, typename Event, typename To>
+constexpr void execute_action(const Action& action, From& from, const Event& e, To& to) {
+    if constexpr (std::is_invocable_v<Action, From&, const Event&, To&>) {
+        action(from, e, to);
+    } else if constexpr (std::is_invocable_v<Action, From&, const Event&>) {
+        action(from, e);
+    } else if constexpr (std::is_invocable_v<Action, const Event&>) {
+        action(e);
+    } else if constexpr (std::is_invocable_v<Action>) {
+        action();
+    }
+}
+
+} // namespace detail
+
+/// @brief Zero-heap, compile-time Finite State Machine.
+/// @tparam Table TransitionTable defining valid state transitions.
+/// @tparam InitialState Default initial active state.
+/// @tparam OtherStates Additional valid states in the FSM state set.
+template <
+    typename Table,
+    typename InitialState,
+    typename... OtherStates
+>
+class StateMachine {
+public:
+    using StateVariant = std::variant<InitialState, OtherStates...>;
+    using TransitionTableType = Table;
+
+    constexpr StateMachine()
+        : _state(InitialState{})
+    {
+        detail::call_on_enter(std::get<InitialState>(_state), int{0});
+    }
+
+    template <typename State>
+        requires (std::is_constructible_v<StateVariant, State>)
+    constexpr explicit StateMachine(State&& initial)
+        : _state(std::forward<State>(initial))
+    {
+        std::visit([](auto& s) {
+            detail::call_on_enter(s, int{0});
+        }, _state);
+    }
+
+    /// @brief Check if current active state matches type State.
+    template <typename State>
+    [[nodiscard]] constexpr bool is() const noexcept {
+        return std::holds_alternative<State>(_state);
+    }
+
+    /// @brief Access reference to current state as type State (throws std::bad_variant_access if mismatch).
+    template <typename State>
+    [[nodiscard]] constexpr State& as() {
+        return std::get<State>(_state);
+    }
+
+    /// @brief Access const reference to current state as type State.
+    template <typename State>
+    [[nodiscard]] constexpr const State& as() const {
+        return std::get<State>(_state);
+    }
+
+    /// @brief Access active state variant.
+    [[nodiscard]] constexpr const StateVariant& state() const noexcept {
+        return _state;
+    }
+
+    /// @brief Access active state variant.
+    [[nodiscard]] constexpr StateVariant& state() noexcept {
+        return _state;
+    }
+
+    /// @brief Process an incoming event through the state machine transition table.
+    /// @tparam Event Trigger event type.
+    /// @param event Event instance to evaluate.
+    /// @return true if a transition was matched and executed; false if no transition applied.
+    template <typename Event>
+    bool process_event(const Event& event) {
+        return std::visit([this, &event](auto& currentState) -> bool {
+            using CurrentStateType = std::decay_t<decltype(currentState)>;
+            return try_transition<CurrentStateType, Event>(currentState, event, Table{});
+        }, _state);
+    }
+
+private:
+    template <typename CurrentState, typename Event, typename... Transitions>
+    bool try_transition(CurrentState& current, const Event& event, TransitionTable<Transitions...>) {
+        return (try_single_transition<CurrentState, Event, Transitions>(current, event, Transitions{}) || ...);
+    }
+
+    template <typename CurrentState, typename Event, typename Trans>
+    bool try_single_transition(CurrentState& current, const Event& event, const Trans& trans) {
+        if constexpr (std::is_same_v<CurrentState, typename Trans::FromState> &&
+                      std::is_same_v<std::decay_t<Event>, typename Trans::EventType>) {
+            if (detail::evaluate_guard(trans.guard, current, event)) {
+                detail::call_on_exit(current, event);
+                typename Trans::ToState nextState{};
+                detail::execute_action(trans.action, current, event, nextState);
+                _state = std::move(nextState);
+                detail::call_on_enter(std::get<typename Trans::ToState>(_state), event);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    StateVariant _state;
+};
+
+} // namespace corium::fsm
+
+// <<< End: corium/fsm/StateMachine.hpp
+
+// <<< End: corium/fsm/fsm.hpp
+
+// >>> Begin: corium/async/async.hpp
+
+/// @file async.hpp
+/// @brief C++20 coroutine Task and awaitable support for Corium.
+
+
+// >>> Begin: corium/async/Task.hpp
+
+#include <coroutine>
+#include <exception>
+#include <utility>
+
+namespace corium::async {
+
+/// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining.
+/// @tparam T Result type returned by the coroutine (defaults to void).
+template <typename T = void>
+class Task {
+public:
+    struct promise_type {
+        std::coroutine_handle<> continuation{nullptr};
+        T value{};
+        std::exception_ptr exception{nullptr};
+
+        Task get_return_object() noexcept {
+            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+
+        auto final_suspend() noexcept {
+            struct FinalAwaiter {
+                bool await_ready() noexcept { return false; }
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                    if (h.promise().continuation) {
+                        return h.promise().continuation;
+                    }
+                    return std::noop_coroutine();
+                }
+                void await_resume() noexcept {}
+            };
+            return FinalAwaiter{};
+        }
+
+        template <typename ValueType>
+            requires (std::is_convertible_v<ValueType, T>)
+        void return_value(ValueType&& val) noexcept(std::is_nothrow_constructible_v<T, ValueType>) {
+            value = std::forward<ValueType>(val);
+        }
+
+        void unhandled_exception() noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    constexpr Task() noexcept = default;
+
+    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Task() {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    Task(Task&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Task& operator=(Task&& other) noexcept {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    /// @brief Check if coroutine has completed execution.
+    [[nodiscard]] bool done() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    /// @brief Resume the coroutine explicitly.
+    void resume() {
+        if (_handle && !_handle.done()) {
+            _handle.resume();
+        }
+    }
+
+    /// @brief Awaiter interface for co_await chaining.
+    bool await_ready() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
+        _handle.promise().continuation = awaiting;
+        return _handle;
+    }
+
+    T await_resume() {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+        if (_handle.promise().exception) {
+            std::rethrow_exception(_handle.promise().exception);
+        }
+#endif
+        return std::move(_handle.promise().value);
+    }
+
+    /// @brief Access raw coroutine handle.
+    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
+        return _handle;
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+/// @brief Specialization of Task for void return type.
+template <>
+class Task<void> {
+public:
+    struct promise_type {
+        std::coroutine_handle<> continuation{nullptr};
+        std::exception_ptr exception{nullptr};
+
+        Task get_return_object() noexcept {
+            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+
+        auto final_suspend() noexcept {
+            struct FinalAwaiter {
+                bool await_ready() noexcept { return false; }
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                    if (h.promise().continuation) {
+                        return h.promise().continuation;
+                    }
+                    return std::noop_coroutine();
+                }
+                void await_resume() noexcept {}
+            };
+            return FinalAwaiter{};
+        }
+
+        void return_void() noexcept {}
+
+        void unhandled_exception() noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    constexpr Task() noexcept = default;
+
+    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Task() {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    Task(Task&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Task& operator=(Task&& other) noexcept {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] bool done() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    void resume() {
+        if (_handle && !_handle.done()) {
+            _handle.resume();
+        }
+    }
+
+    bool await_ready() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
+        _handle.promise().continuation = awaiting;
+        return _handle;
+    }
+
+    void await_resume() {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+        if (_handle.promise().exception) {
+            std::rethrow_exception(_handle.promise().exception);
+        }
+#endif
+    }
+
+    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
+        return _handle;
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/Task.hpp
+
+// >>> Begin: corium/async/Delay.hpp
+
+#include <chrono>
+#include <coroutine>
+#include <thread>
+
+namespace corium::async {
+
+/// @brief Awaitable that yields control back to the caller/event loop once.
+struct YieldAwaiter {
+    constexpr bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) const noexcept {
+        handle.resume();
+    }
+    constexpr void await_resume() const noexcept {}
+};
+
+/// @brief Helper to yield execution in a coroutine.
+[[nodiscard]] inline constexpr YieldAwaiter yield() noexcept {
+    return YieldAwaiter{};
+}
+
+/// @brief Awaitable that pauses the coroutine thread for the specified duration.
+template <typename Rep, typename Period>
+struct DelayAwaiter {
+    std::chrono::duration<Rep, Period> duration;
+
+    constexpr bool await_ready() const noexcept {
+        return duration.count() <= 0;
+    }
+
+    void await_suspend(std::coroutine_handle<> handle) const {
+        std::this_thread::sleep_for(duration);
+        handle.resume();
+    }
+
+    constexpr void await_resume() const noexcept {}
+};
+
+/// @brief Helper to suspend coroutine for a given std::chrono duration.
+template <typename Rep, typename Period>
+[[nodiscard]] inline auto delay(const std::chrono::duration<Rep, Period>& d) noexcept {
+    return DelayAwaiter<Rep, Period>{d};
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/Delay.hpp
+
+// <<< End: corium/async/async.hpp
+
+// >>> Begin: corium/wire/wire.hpp
+
+/// @file wire.hpp
+/// @brief Zero-copy, zero-heap binary wire serialization and packet framing protocol for Corium.
+
+
+// >>> Begin: corium/wire/WirePacket.hpp
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+
+namespace corium::wire {
+
+/// @brief Default magic header identifier for Corium binary wire packets (0xC041).
+inline constexpr uint16_t CORIUM_WIRE_MAGIC = 0xC041;
+
+/// @brief Calculate CRC-16-CCITT checksum over a byte span without lookup tables.
+[[nodiscard]] constexpr uint16_t calculateCrc16(std::span<const uint8_t> data) noexcept {
+    uint16_t crc = 0xFFFF;
+    for (uint8_t byte : data) {
+        crc ^= static_cast<uint16_t>(byte) << 8;
+        for (int i = 0; i < 8; ++i) {
+            if (crc & 0x8000) {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc = crc << 1;
+            }
+        }
+    }
+    return crc;
+}
+
+/// @brief Header structure framing binary wire packets for serial, CAN, SPI, or network transport.
+#pragma pack(push, 1)
+struct WireHeader {
+    uint16_t magic{CORIUM_WIRE_MAGIC};
+    uint8_t typeIndex{0};
+    uint8_t flags{0};
+    uint16_t payloadLength{0};
+    uint16_t checksum{0};
+};
+#pragma pack(pop)
+
+/// @brief Statically-sized zero-heap binary wire packet.
+/// @tparam MaxPayloadSize Maximum payload capacity in bytes (default: 64).
+template <size_t MaxPayloadSize = 64>
+struct WirePacket {
+    WireHeader header{};
+    std::array<uint8_t, MaxPayloadSize> payload{};
+
+    constexpr WirePacket() = default;
+
+    /// @brief Finalize packet header, set payload length and calculate CRC16 checksum.
+    void finalize(uint8_t typeIdx, uint16_t length, uint8_t flags = 0) noexcept {
+        header.magic = CORIUM_WIRE_MAGIC;
+        header.typeIndex = typeIdx;
+        header.flags = flags;
+        header.payloadLength = length > MaxPayloadSize ? static_cast<uint16_t>(MaxPayloadSize) : length;
+        header.checksum = calculateCrc16(std::span<const uint8_t>(payload.data(), header.payloadLength));
+    }
+
+    /// @brief Validate packet magic identifier, payload length bounds, and CRC16 checksum.
+    [[nodiscard]] bool isValid() const noexcept {
+        if (header.magic != CORIUM_WIRE_MAGIC) {
+            return false;
+        }
+        if (header.payloadLength > MaxPayloadSize) {
+            return false;
+        }
+        uint16_t expected = calculateCrc16(std::span<const uint8_t>(payload.data(), header.payloadLength));
+        return header.checksum == expected;
+    }
+
+    /// @brief Total serialized wire size in bytes (header + payload length).
+    [[nodiscard]] constexpr size_t totalWireSize() const noexcept {
+        return sizeof(WireHeader) + header.payloadLength;
+    }
+};
+
+} // namespace corium::wire
+
+// <<< End: corium/wire/WirePacket.hpp
+
+// >>> Begin: corium/wire/Serializer.hpp
+
+#include <cstring>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+namespace corium::wire {
+
+/// @brief Zero-heap type-safe serializer and deserializer for Corium event variants over binary wire streams.
+class WireSerializer {
+public:
+    /// @brief Serialize a trivially-copyable concrete event into a fixed-size binary WirePacket.
+    /// @tparam Event Concrete event type to serialize.
+    /// @tparam EventVariant Target variant list to determine type index.
+    /// @tparam MaxPayload Payload size limit.
+    /// @param event Event instance to serialize.
+    /// @return Serialized and CRC-validated WirePacket.
+    template <
+        typename Event,
+        typename EventVariant,
+        size_t MaxPayload = 64
+    >
+    [[nodiscard]] static WirePacket<MaxPayload> serialize(const Event& event) noexcept {
+        static_assert(std::is_trivially_copyable_v<Event>, "Wire events must be trivially copyable for zero-copy binary transport.");
+        static_assert(sizeof(Event) <= MaxPayload, "Event size exceeds WirePacket MaxPayload capacity.");
+
+        constexpr size_t typeIdx = corium::variant_index_v<Event, EventVariant>;
+        static_assert(typeIdx != static_cast<size_t>(-1), "Event type is not part of the specified EventVariant list.");
+
+        WirePacket<MaxPayload> packet;
+        std::memcpy(packet.payload.data(), &event, sizeof(Event));
+        packet.finalize(static_cast<uint8_t>(typeIdx), static_cast<uint16_t>(sizeof(Event)));
+        return packet;
+    }
+
+    /// @brief Deserialize a validated binary WirePacket directly into an event sink.
+    /// @tparam EventVariant Variant list of all supported events.
+    /// @tparam MaxPayload Payload size limit.
+    /// @tparam Sink Target EventSink or EventBus.
+    /// @param packet Incoming packet to validate and deserialize.
+    /// @param sink Event sink to receive the deserialized event.
+    /// @param priority Priority to assign to the deserialized event.
+    /// @return true if packet was valid and successfully dispatched into sink; false on validation/type error.
+    template <
+        typename EventVariant,
+        size_t MaxPayload = 64,
+        typename Sink
+    >
+    static bool deserializeAndPush(
+        const WirePacket<MaxPayload>& packet,
+        Sink& sink,
+        EventPriority priority = EventPriority::Normal
+    ) noexcept {
+        if (!packet.isValid()) {
+            return false;
+        }
+
+        constexpr size_t numTypes = std::variant_size_v<EventVariant>;
+        if (packet.header.typeIndex >= numTypes) {
+            return false;
+        }
+
+        return deserializeIndex<EventVariant, MaxPayload, Sink>(
+            packet,
+            sink,
+            priority,
+            std::make_index_sequence<numTypes>{}
+        );
+    }
+
+private:
+    template <typename EventVariant, size_t MaxPayload, typename Sink, size_t... Is>
+    static bool deserializeIndex(
+        const WirePacket<MaxPayload>& packet,
+        Sink& sink,
+        EventPriority priority,
+        std::index_sequence<Is...>
+    ) noexcept {
+        bool handled = false;
+        (void)((packet.header.typeIndex == Is ? (handled = deserializeExact<Is, EventVariant, MaxPayload, Sink>(packet, sink, priority), true) : false) || ...);
+        return handled;
+    }
+
+    template <size_t Index, typename EventVariant, size_t MaxPayload, typename Sink>
+    static bool deserializeExact(
+        const WirePacket<MaxPayload>& packet,
+        Sink& sink,
+        EventPriority priority
+    ) noexcept {
+        using TargetEvent = std::variant_alternative_t<Index, EventVariant>;
+        if (packet.header.payloadLength != sizeof(TargetEvent)) {
+            return false;
+        }
+
+        TargetEvent evt{};
+        std::memcpy(&evt, packet.payload.data(), sizeof(TargetEvent));
+        sink.post(EventVariant{std::move(evt)}, priority);
+        return true;
+    }
+};
+
+} // namespace corium::wire
+
+// <<< End: corium/wire/Serializer.hpp
+
+// <<< End: corium/wire/wire.hpp
+
+// >>> Begin: corium/profiler/profiler.hpp
+
+
+// <<< End: corium/profiler/profiler.hpp
+
+// >>> Begin: corium/safety/safety.hpp
+
+
+// >>> Begin: corium/safety/CircuitBreaker.hpp
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+
+namespace corium::safety {
+
+/// @brief Circuit Breaker operational state.
+enum class CircuitState : uint8_t {
+    Closed,   ///< Normal operation: all calls execute.
+    Open,     ///< Tripped/Faulty: calls are fast-failed without execution.
+    HalfOpen  ///< Recovery probing: allowing a single canary call to verify health.
+};
+
+/// @brief Zero-allocation Circuit Breaker pattern for isolating faulty handlers or peripheral links.
+/// Thread-safe lock-free state transitions.
+/// @tparam FailureThreshold Consecutive failures before tripping open (default: 3).
+/// @tparam RecoveryTimeoutMs Cooldown duration in milliseconds before moving to HalfOpen (default: 500ms).
+template <
+    uint32_t FailureThreshold = 3,
+    uint32_t RecoveryTimeoutMs = 500
+>
+class CircuitBreaker {
+public:
+    CircuitBreaker() noexcept = default;
+
+    /// @brief Check if execution is permitted under current circuit state.
+    /// Automatically transitions from Open to HalfOpen if recovery cooldown has elapsed.
+    [[nodiscard]] bool allowExecution() noexcept
+    {
+        const CircuitState currentState = _state.load(std::memory_order_acquire);
+
+        if (currentState == CircuitState::Closed) {
+            return true;
+        }
+
+        if (currentState == CircuitState::Open) {
+            const uint64_t now = nowMs();
+            const uint64_t trippedAt = _trippedAtMs.load(std::memory_order_acquire);
+            if (now >= trippedAt && (now - trippedAt) >= RecoveryTimeoutMs) {
+                // Attempt transition to HalfOpen
+                CircuitState expected = CircuitState::Open;
+                if (_state.compare_exchange_strong(expected, CircuitState::HalfOpen, std::memory_order_acq_rel)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // HalfOpen: allow execution for probing
+        return true;
+    }
+
+    /// @brief Record a successful operation execution.
+    /// Resets consecutive failure counter and restores Closed state from HalfOpen.
+    void recordSuccess() noexcept
+    {
+        _failureCount.store(0, std::memory_order_relaxed);
+        _state.store(CircuitState::Closed, std::memory_order_release);
+    }
+
+    /// @brief Record a failed operation.
+    /// Increments failure counter and trips circuit Open if threshold is reached.
+    void recordFailure() noexcept
+    {
+        const uint32_t count = _failureCount.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (count >= FailureThreshold) {
+            _trippedAtMs.store(nowMs(), std::memory_order_release);
+            _state.store(CircuitState::Open, std::memory_order_release);
+        }
+    }
+
+    /// @brief Manually reset the circuit breaker to normal Closed state.
+    void reset() noexcept
+    {
+        _failureCount.store(0, std::memory_order_relaxed);
+        _trippedAtMs.store(0, std::memory_order_relaxed);
+        _state.store(CircuitState::Closed, std::memory_order_release);
+    }
+
+    /// @brief Manually trip the circuit breaker open.
+    void trip() noexcept
+    {
+        _trippedAtMs.store(nowMs(), std::memory_order_release);
+        _state.store(CircuitState::Open, std::memory_order_release);
+    }
+
+    /// @brief Current state of the circuit breaker.
+    [[nodiscard]] CircuitState state() const noexcept
+    {
+        const CircuitState s = _state.load(std::memory_order_acquire);
+        if (s == CircuitState::Open) {
+            const uint64_t now = nowMs();
+            const uint64_t tripped = _trippedAtMs.load(std::memory_order_acquire);
+            if (now >= tripped && (now - tripped) >= RecoveryTimeoutMs) {
+                return CircuitState::HalfOpen;
+            }
+        }
+        return s;
+    }
+
+    /// @brief Current consecutive failure count.
+    [[nodiscard]] uint32_t failureCount() const noexcept
+    {
+        return _failureCount.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Execute a protected callable through the circuit breaker.
+    /// @tparam Callable Function or lambda returning bool (true = success, false = failure).
+    /// @param fn Callable to invoke if circuit is not open.
+    /// @return true if executed and succeeded, false if rejected or failed.
+    template <typename Callable>
+    bool execute(Callable&& fn)
+    {
+        if (!allowExecution()) {
+            return false;
+        }
+
+        bool ok = false;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+        try {
+            ok = fn();
+        } catch (...) {
+            ok = false;
+        }
+#else
+        ok = fn();
+#endif
+
+        if (ok) {
+            recordSuccess();
+        } else {
+            recordFailure();
+        }
+
+        return ok;
+    }
+
+private:
+    [[nodiscard]] static uint64_t nowMs() noexcept
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count()
+        );
+    }
+
+    std::atomic<CircuitState> _state{CircuitState::Closed};
+    std::atomic<uint32_t> _failureCount{0};
+    std::atomic<uint64_t> _trippedAtMs{0};
+};
+
+} // namespace corium::safety
+
+// <<< End: corium/safety/CircuitBreaker.hpp
+
+// >>> Begin: corium/safety/HeartbeatMonitor.hpp
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+
+namespace corium::safety {
+
+/// @brief Zero-heap multi-service heartbeat tracker for safety-critical execution.
+/// Thread-safe for concurrent heartbeat signals and supervisory health checks.
+/// @tparam MaxServices Maximum number of monitored services (default: 16).
+template <std::size_t MaxServices = 16>
+class HeartbeatMonitor {
+public:
+    struct alignas(32) ServiceEntry {
+        uint32_t serviceId{0};
+        uint64_t timeoutNs{0};
+        std::atomic<uint64_t> lastHeartbeatNs{0};
+        std::atomic<bool> active{false};
+    };
+
+    HeartbeatMonitor() = default;
+
+    /// @brief Register a service for heartbeat monitoring with a specified timeout.
+    /// @param serviceId Unique numeric identifier for the service.
+    /// @param timeoutNs Maximum allowed duration between heartbeats in nanoseconds.
+    /// @param initialTimestampNs Initial timestamp to baseline the service.
+    /// @return true if successfully registered, false if capacity exceeded.
+    bool registerService(uint32_t serviceId, uint64_t timeoutNs, uint64_t initialTimestampNs = 0) noexcept
+    {
+        for (std::size_t i = 0; i < MaxServices; ++i) {
+            bool expected = false;
+            if (_services[i].active.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+                _services[i].serviceId = serviceId;
+                _services[i].timeoutNs = timeoutNs;
+                _services[i].lastHeartbeatNs.store(initialTimestampNs, std::memory_order_release);
+                return true;
+            }
+            if (_services[i].serviceId == serviceId && expected) {
+                // Already registered; update timeout and baseline
+                _services[i].timeoutNs = timeoutNs;
+                _services[i].lastHeartbeatNs.store(initialTimestampNs, std::memory_order_release);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @brief Record a heartbeat for a given service.
+    /// @param serviceId Unique service identifier.
+    /// @param nowNs Current timestamp in nanoseconds.
+    void beat(uint32_t serviceId, uint64_t nowNs) noexcept
+    {
+        for (std::size_t i = 0; i < MaxServices; ++i) {
+            if (_services[i].active.load(std::memory_order_relaxed) && _services[i].serviceId == serviceId) {
+                _services[i].lastHeartbeatNs.store(nowNs, std::memory_order_release);
+                return;
+            }
+        }
+    }
+
+    /// @brief Unregister a service from active monitoring.
+    void unregisterService(uint32_t serviceId) noexcept
+    {
+        for (std::size_t i = 0; i < MaxServices; ++i) {
+            if (_services[i].serviceId == serviceId) {
+                _services[i].active.store(false, std::memory_order_release);
+                return;
+            }
+        }
+    }
+
+    /// @brief Check health status of all registered active services.
+    /// @param nowNs Current timestamp in nanoseconds.
+    /// @param outTimedOutServiceId Populated with the ID of the first failing service if unhealthy.
+    /// @param outLastHeartbeatNs Populated with the timestamp of the last received heartbeat if unhealthy.
+    /// @param outTimeoutBudgetNs Populated with the allowed timeout budget if unhealthy.
+    /// @return true if all services are within their heartbeat SLA; false otherwise.
+    [[nodiscard]] bool checkHealth(
+        uint64_t nowNs,
+        uint32_t& outTimedOutServiceId,
+        uint64_t& outLastHeartbeatNs,
+        uint64_t& outTimeoutBudgetNs
+    ) const noexcept
+    {
+        for (std::size_t i = 0; i < MaxServices; ++i) {
+            if (_services[i].active.load(std::memory_order_acquire)) {
+                const uint64_t last = _services[i].lastHeartbeatNs.load(std::memory_order_acquire);
+                const uint64_t limit = _services[i].timeoutNs;
+                if (nowNs > last && (nowNs - last) > limit) {
+                    outTimedOutServiceId = _services[i].serviceId;
+                    outLastHeartbeatNs = last;
+                    outTimeoutBudgetNs = limit;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /// @brief Get maximum capacity of monitored services.
+    [[nodiscard]] constexpr std::size_t maxServices() const noexcept
+    {
+        return MaxServices;
+    }
+
+private:
+    std::array<ServiceEntry, MaxServices> _services{};
+};
+
+} // namespace corium::safety
+
+// <<< End: corium/safety/HeartbeatMonitor.hpp
+
+// >>> Begin: corium/safety/SafetyEvents.hpp
+
+#include <cstddef>
+#include <cstdint>
+
+namespace corium::safety {
+
+/// @brief Dispatched when a monitored service fails to deliver its heartbeat within its timeout window.
+struct WatchdogTimeoutEvent {
+    uint32_t serviceId{0};
+    uint64_t lastHeartbeatNs{0};
+    uint64_t timeoutBudgetNs{0};
+};
+
+/// @brief Dispatched when an event handler or task misses its real-time deadline budget.
+struct DeadlineMissedEvent {
+    std::size_t eventTypeId{0};
+    const char* eventName{nullptr};
+    double actualDurationUs{0.0};
+    double maxAllowedDurationUs{0.0};
+};
+
+/// @brief Dispatched when a CircuitBreaker detects repeated failures and trips open.
+struct CircuitBreakerTrippedEvent {
+    uint32_t componentId{0};
+    uint32_t failureCount{0};
+    uint64_t recoveryCooldownMs{0};
+};
+
+} // namespace corium::safety
+
+// <<< End: corium/safety/SafetyEvents.hpp
+
+// >>> Begin: corium/safety/WatchdogSupervisor.hpp
+
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
+
+
+namespace corium::safety {
+
+/// @brief Dedicated safety supervisor monitoring subsystem heartbeats and controlling watchdog refresh.
+/// Compatible with hardware IWDG (STM32, ESP32, nRF), RTOS Task Watchdogs, and POSIX watchdogs.
+/// Zero dynamic heap allocations, zero threading overhead.
+/// @tparam MaxServices Maximum number of monitored services.
+/// @tparam ClockPolicy Time source policy (defaults to ChronoClockPolicy).
+template <
+    std::size_t MaxServices = 16,
+    typename ClockPolicy = ChronoClockPolicy
+>
+class WatchdogSupervisor {
+public:
+    using KickCallbackFn = void (*)(void* userData);
+
+    WatchdogSupervisor() = default;
+
+    /// @brief Configure the physical hardware/software watchdog kick callback.
+    /// @param kickFn Function called to refresh the watchdog timer.
+    /// @param userData Pointer passed to the kick function.
+    void setWatchdogKickCallback(KickCallbackFn kickFn, void* userData = nullptr) noexcept
+    {
+        _kickFn = kickFn;
+        _userData = userData;
+    }
+
+    /// @brief Access reference to the internal HeartbeatMonitor.
+    [[nodiscard]] HeartbeatMonitor<MaxServices>& heartbeatMonitor() noexcept
+    {
+        return _monitor;
+    }
+
+    /// @brief Access const reference to the internal HeartbeatMonitor.
+    [[nodiscard]] const HeartbeatMonitor<MaxServices>& heartbeatMonitor() const noexcept
+    {
+        return _monitor;
+    }
+
+    /// @brief Register a service for supervision.
+    bool registerService(uint32_t serviceId, uint64_t timeoutNs) noexcept
+    {
+        const uint64_t now = nowNs();
+        return _monitor.registerService(serviceId, timeoutNs, now);
+    }
+
+    /// @brief Submit a heartbeat for a monitored service.
+    void beat(uint32_t serviceId) noexcept
+    {
+        _monitor.beat(serviceId, nowNs());
+    }
+
+    /// @brief Perform a supervisor check iteration.
+    /// Kicks the hardware watchdog if healthy; suppresses the kick and dispatches WatchdogTimeoutEvent if failed.
+    /// @tparam EventSinkType Event sink type to post failure events.
+    /// @param sink Event sink handle to dispatch emergency events.
+    /// @return true if all services were healthy and watchdog was kicked; false if watchdog was suppressed.
+    template <typename EventSinkType>
+    bool supervise(const EventSinkType& sink) noexcept
+    {
+        const uint64_t now = nowNs();
+        uint32_t timedOutId = 0;
+        uint64_t lastBeat = 0;
+        uint64_t budget = 0;
+
+        if (_monitor.checkHealth(now, timedOutId, lastBeat, budget)) {
+            // System is healthy: feed the watchdog
+            if (_kickFn) {
+                _kickFn(_userData);
+            }
+            _kicksCount.fetch_add(1, std::memory_order_relaxed);
+            _lastHealthyTimeNs.store(now, std::memory_order_release);
+            return true;
+        }
+
+        // Failure detected: suppress watchdog kick and post emergency event
+        _suppressionsCount.fetch_add(1, std::memory_order_relaxed);
+        sink.postHighPriority(WatchdogTimeoutEvent{timedOutId, lastBeat, budget});
+        return false;
+    }
+
+    /// @brief Get total number of successful watchdog kicks.
+    [[nodiscard]] uint64_t totalKicks() const noexcept
+    {
+        return _kicksCount.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Get total number of watchdog kick suppressions due to health violations.
+    [[nodiscard]] uint64_t totalSuppressions() const noexcept
+    {
+        return _suppressionsCount.load(std::memory_order_relaxed);
+    }
+
+private:
+    [[nodiscard]] static uint64_t nowNs() noexcept
+    {
+        if constexpr (std::is_integral_v<typename ClockPolicy::time_point>) {
+            return static_cast<uint64_t>(ClockPolicy::now());
+        } else {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    ClockPolicy::now().time_since_epoch()
+                ).count()
+            );
+        }
+    }
+
+    HeartbeatMonitor<MaxServices> _monitor{};
+    KickCallbackFn _kickFn{nullptr};
+    void* _userData{nullptr};
+    std::atomic<uint64_t> _kicksCount{0};
+    std::atomic<uint64_t> _suppressionsCount{0};
+    std::atomic<uint64_t> _lastHealthyTimeNs{0};
+};
+
+} // namespace corium::safety
+
+// <<< End: corium/safety/WatchdogSupervisor.hpp
+
+// <<< End: corium/safety/safety.hpp
+
+// >>> Begin: corium/ipc/ipc.hpp
+
+
+// >>> Begin: corium/ipc/DomainSocket.hpp
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <utility>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <afunix.h>
+#else
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
+namespace corium::ipc {
+
+/// @brief Low-level RAII abstraction for UNIX Domain Datagram Sockets (AF_UNIX / SOCK_DGRAM).
+/// Provides discrete, boundary-preserving, zero-fragmentation message passing.
+class DomainSocket {
+public:
+    DomainSocket() noexcept = default;
+
+    ~DomainSocket()
+    {
+        close();
+    }
+
+    DomainSocket(const DomainSocket&) = delete;
+    DomainSocket& operator=(const DomainSocket&) = delete;
+
+    DomainSocket(DomainSocket&& other) noexcept
+        : _fd(other._fd),
+          _boundPath(std::move(other._boundPath)),
+          _isBound(other._isBound)
+    {
+        other._fd = -1;
+        other._isBound = false;
+    }
+
+    DomainSocket& operator=(DomainSocket&& other) noexcept
+    {
+        if (this != &other) {
+            close();
+            _fd = other._fd;
+            _boundPath = std::move(other._boundPath);
+            _isBound = other._isBound;
+            other._fd = -1;
+            other._isBound = false;
+        }
+        return *this;
+    }
+
+    /// @brief Bind socket to a filesystem path as a receiving server.
+    /// @param socketPath Filesystem path for the socket (e.g. "/tmp/corium_daemon.sock").
+    /// @return true on success, false otherwise.
+    bool bind(const std::string& socketPath) noexcept
+    {
+        close();
+
+#if !defined(_WIN32) && !defined(_WIN64)
+        ::unlink(socketPath.c_str());
+
+        _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (_fd < 0) {
+            return false;
+        }
+
+        struct sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
+
+        if (::bind(_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+            ::close(_fd);
+            _fd = -1;
+            return false;
+        }
+
+        _boundPath = socketPath;
+        _isBound = true;
+        return true;
+#else
+        (void)socketPath;
+        return false;
+#endif
+    }
+
+    /// @brief Connect to a destination socket as a client.
+    /// @param socketPath Filesystem path of the target server socket.
+    /// @param clientPath Optional path to bind this client for bidirectional responses.
+    /// @return true on success, false otherwise.
+    bool connect(const std::string& socketPath, const std::string& clientPath = "") noexcept
+    {
+        close();
+
+#if !defined(_WIN32) && !defined(_WIN64)
+        _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (_fd < 0) {
+            return false;
+        }
+
+        if (!clientPath.empty()) {
+            ::unlink(clientPath.c_str());
+            struct sockaddr_un localAddr{};
+            localAddr.sun_family = AF_UNIX;
+            std::strncpy(localAddr.sun_path, clientPath.c_str(), sizeof(localAddr.sun_path) - 1);
+
+            if (::bind(_fd, reinterpret_cast<struct sockaddr*>(&localAddr), sizeof(localAddr)) != 0) {
+                ::close(_fd);
+                _fd = -1;
+                return false;
+            }
+            _boundPath = clientPath;
+            _isBound = true;
+        }
+
+        struct sockaddr_un remoteAddr{};
+        remoteAddr.sun_family = AF_UNIX;
+        std::strncpy(remoteAddr.sun_path, socketPath.c_str(), sizeof(remoteAddr.sun_path) - 1);
+
+        if (::connect(_fd, reinterpret_cast<struct sockaddr*>(&remoteAddr), sizeof(remoteAddr)) != 0) {
+            close();
+            return false;
+        }
+        return true;
+#else
+        (void)socketPath;
+        (void)clientPath;
+        return false;
+#endif
+    }
+
+    /// @brief Set socket non-blocking mode.
+    void setNonBlocking(bool nonBlocking) noexcept
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        if (_fd >= 0) {
+            int flags = ::fcntl(_fd, F_GETFL, 0);
+            if (flags >= 0) {
+                if (nonBlocking) {
+                    flags |= O_NONBLOCK;
+                } else {
+                    flags &= ~O_NONBLOCK;
+                }
+                ::fcntl(_fd, F_SETFL, flags);
+            }
+        }
+#else
+        (void)nonBlocking;
+#endif
+    }
+
+    /// @brief Send datagram packet over the connected socket.
+    /// @param buffer Pointer to payload.
+    /// @param length Payload length in bytes.
+    /// @return Number of bytes sent, or -1 on error.
+    int send(const void* buffer, std::size_t length) noexcept
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        if (_fd < 0) return -1;
+        return static_cast<int>(::send(_fd, buffer, length, 0));
+#else
+        (void)buffer;
+        (void)length;
+        return -1;
+#endif
+    }
+
+    /// @brief Receive datagram packet from socket.
+    /// @param buffer Destination buffer.
+    /// @param maxLength Maximum bytes to receive.
+    /// @return Number of bytes received, or -1 on error/EWOULDBLOCK.
+    int receive(void* buffer, std::size_t maxLength) noexcept
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        if (_fd < 0) return -1;
+        return static_cast<int>(::recv(_fd, buffer, maxLength, 0));
+#else
+        (void)buffer;
+        (void)maxLength;
+        return -1;
+#endif
+    }
+
+    /// @brief Close socket and unlink bound file if server.
+    void close() noexcept
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        if (_fd >= 0) {
+            ::close(_fd);
+            _fd = -1;
+        }
+        if (_isBound && !_boundPath.empty()) {
+            ::unlink(_boundPath.c_str());
+            _isBound = false;
+            _boundPath.clear();
+        }
+#endif
+    }
+
+    /// @brief Check if socket descriptor is open.
+    [[nodiscard]] bool isOpen() const noexcept { return _fd >= 0; }
+
+    /// @brief Access underlying OS file descriptor.
+    [[nodiscard]] int nativeHandle() const noexcept { return _fd; }
+
+private:
+    int _fd{-1};
+    std::string _boundPath;
+    bool _isBound{false};
+};
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/DomainSocket.hpp
+
+// >>> Begin: corium/ipc/IpcChannel.hpp
+
+#include <cstddef>
+#include <string>
+#include <utility>
+
+
+// >>> Begin: corium/ipc/SharedMemory.hpp
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <utility>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+namespace corium::ipc {
+
+/// @brief Cross-platform zero-copy shared memory region wrapper.
+/// Manages OS-level shared memory allocation, memory mapping, and cleanup.
+class SharedMemory {
+public:
+    enum class AccessMode {
+        CreateOrOpen,
+        OpenReadOnly,
+        OpenReadWrite
+    };
+
+    SharedMemory() noexcept = default;
+
+    ~SharedMemory()
+    {
+        close();
+    }
+
+    SharedMemory(const SharedMemory&) = delete;
+    SharedMemory& operator=(const SharedMemory&) = delete;
+
+    SharedMemory(SharedMemory&& other) noexcept
+        : _name(std::move(other._name)),
+          _address(other._address),
+          _size(other._size),
+          _isCreator(other._isCreator)
+#if defined(_WIN32) || defined(_WIN64)
+        , _handle(other._handle)
+#else
+        , _fd(other._fd)
+#endif
+    {
+        other._address = nullptr;
+        other._size = 0;
+        other._isCreator = false;
+#if defined(_WIN32) || defined(_WIN64)
+        other._handle = nullptr;
+#else
+        other._fd = -1;
+#endif
+    }
+
+    SharedMemory& operator=(SharedMemory&& other) noexcept
+    {
+        if (this != &other) {
+            close();
+            _name = std::move(other._name);
+            _address = other._address;
+            _size = other._size;
+            _isCreator = other._isCreator;
+#if defined(_WIN32) || defined(_WIN64)
+            _handle = other._handle;
+            other._handle = nullptr;
+#else
+            _fd = other._fd;
+            other._fd = -1;
+#endif
+            other._address = nullptr;
+            other._size = 0;
+            other._isCreator = false;
+        }
+        return *this;
+    }
+
+    /// @brief Create or attach to a shared memory region.
+    /// @param name Unique system identifier (e.g., "/corium_telemetry_shm").
+    /// @param size Required memory segment capacity in bytes.
+    /// @param mode Allocation/Access mode.
+    /// @return true on success, false otherwise.
+    bool open(const std::string& name, std::size_t size, AccessMode mode = AccessMode::CreateOrOpen) noexcept
+    {
+        close();
+        _name = normalizeName(name);
+        _size = size;
+
+#if defined(_WIN32) || defined(_WIN64)
+        DWORD protect = (mode == AccessMode::OpenReadOnly) ? PAGE_READONLY : PAGE_READWRITE;
+        DWORD desiredAccess = (mode == AccessMode::OpenReadOnly) ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS;
+
+        if (mode == AccessMode::CreateOrOpen) {
+            _handle = CreateFileMappingA(
+                INVALID_HANDLE_VALUE,
+                nullptr,
+                protect,
+                static_cast<DWORD>(size >> 32),
+                static_cast<DWORD>(size & 0xFFFFFFFF),
+                _name.c_str()
+            );
+            if (_handle) {
+                _isCreator = (GetLastError() != ERROR_ALREADY_EXISTS);
+            }
+        } else {
+            _handle = OpenFileMappingA(desiredAccess, FALSE, _name.c_str());
+            _isCreator = false;
+        }
+
+        if (!_handle) {
+            return false;
+        }
+
+        _address = MapViewOfFile(_handle, desiredAccess, 0, 0, size);
+        if (!_address) {
+            CloseHandle(_handle);
+            _handle = nullptr;
+            return false;
+        }
+        return true;
+#else
+        int oflag = 0;
+        mode_t permissions = 0666;
+
+        if (mode == AccessMode::CreateOrOpen) {
+            oflag = O_CREAT | O_RDWR;
+        } else if (mode == AccessMode::OpenReadOnly) {
+            oflag = O_RDONLY;
+        } else {
+            oflag = O_RDWR;
+        }
+
+        _fd = ::shm_open(_name.c_str(), oflag, permissions);
+        if (_fd < 0) {
+            return false;
+        }
+
+        if (mode == AccessMode::CreateOrOpen) {
+            struct stat sb{};
+            if (::fstat(_fd, &sb) == 0 && sb.st_size < static_cast<off_t>(size)) {
+                if (::ftruncate(_fd, static_cast<off_t>(size)) != 0) {
+                    ::close(_fd);
+                    _fd = -1;
+                    return false;
+                }
+                _isCreator = true;
+            }
+        }
+
+        int prot = (mode == AccessMode::OpenReadOnly) ? PROT_READ : (PROT_READ | PROT_WRITE);
+        _address = ::mmap(nullptr, size, prot, MAP_SHARED, _fd, 0);
+        if (_address == MAP_FAILED) {
+            _address = nullptr;
+            ::close(_fd);
+            _fd = -1;
+            return false;
+        }
+        return true;
+#endif
+    }
+
+    /// @brief Close and unmap the shared memory segment.
+    void close() noexcept
+    {
+        if (_address) {
+#if defined(_WIN32) || defined(_WIN64)
+            UnmapViewOfFile(_address);
+            if (_handle) {
+                CloseHandle(_handle);
+                _handle = nullptr;
+            }
+#else
+            ::munmap(_address, _size);
+            if (_fd >= 0) {
+                ::close(_fd);
+                _fd = -1;
+            }
+#endif
+            _address = nullptr;
+            _size = 0;
+            _isCreator = false;
+        }
+    }
+
+    /// @brief Remove shared memory identifier from OS namespace (POSIX shm_unlink).
+    static void unlink(const std::string& name) noexcept
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        std::string n = normalizeName(name);
+        ::shm_unlink(n.c_str());
+#else
+        (void)name;
+#endif
+    }
+
+    /// @brief Raw pointer to mapped shared memory buffer.
+    [[nodiscard]] void* data() noexcept { return _address; }
+    [[nodiscard]] const void* data() const noexcept { return _address; }
+
+    /// @brief Size of mapped shared memory buffer.
+    [[nodiscard]] std::size_t size() const noexcept { return _size; }
+
+    /// @brief Check if mapped region is valid.
+    [[nodiscard]] bool isValid() const noexcept { return _address != nullptr; }
+
+    /// @brief Check if this process created the memory segment (useful for initialization).
+    [[nodiscard]] bool isCreator() const noexcept { return _isCreator; }
+
+    /// @brief Name identifier of shared memory.
+    [[nodiscard]] const std::string& name() const noexcept { return _name; }
+
+private:
+    static std::string normalizeName(const std::string& name)
+    {
+#if !defined(_WIN32) && !defined(_WIN64)
+        if (name.empty() || name[0] != '/') {
+            return "/" + name;
+        }
+#endif
+        return name;
+    }
+
+    std::string _name;
+    void* _address{nullptr};
+    std::size_t _size{0};
+    bool _isCreator{false};
+
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE _handle{nullptr};
+#else
+    int _fd{-1};
+#endif
+};
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/SharedMemory.hpp
+
+// >>> Begin: corium/ipc/ShmMpscQueue.hpp
+
+#include <atomic>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <new>
+#include <type_traits>
+#include <utility>
+
+namespace corium::ipc {
+
+constexpr uint32_t CORIUM_SHM_MAGIC = 0x434F5249; // "CORI"
+constexpr uint32_t CORIUM_SHM_VERSION = 1;
+
+/// @brief Lock-free, zero-allocation multi-producer single-consumer ring buffer layout for shared memory.
+/// Compatible with POD and trivially copyable types (or serialized payloads).
+/// @tparam T Value type stored in each ring cell.
+/// @tparam Capacity Number of slots (must be a power of 2).
+template <typename T, std::size_t Capacity = 256>
+class ShmMpscQueue {
+    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of 2");
+    static_assert(Capacity >= 2, "Capacity must be at least 2");
+    static_assert(std::is_trivially_copyable_v<T>, "ShmMpscQueue value type T must be trivially copyable for shared memory safety.");
+
+public:
+    static constexpr std::size_t BufferCapacity = Capacity;
+    static constexpr std::size_t BufferMask = Capacity - 1;
+
+    struct Cell {
+        alignas(64) std::atomic<std::size_t> sequence{0};
+        alignas(alignof(T)) uint8_t storage[sizeof(T)]{};
+
+        [[nodiscard]] T* ptr() noexcept
+        {
+            return reinterpret_cast<T*>(storage);
+        }
+
+        [[nodiscard]] const T* ptr() const noexcept
+        {
+            return reinterpret_cast<const T*>(storage);
+        }
+    };
+
+    struct Layout {
+        uint32_t magic{CORIUM_SHM_MAGIC};
+        uint32_t version{CORIUM_SHM_VERSION};
+        uint32_t capacity{Capacity};
+        uint32_t elementSize{sizeof(T)};
+
+        alignas(64) std::atomic<std::size_t> enqueuePos{0};
+        alignas(64) std::atomic<std::size_t> dequeuePos{0};
+
+        Cell cells[Capacity];
+    };
+
+    ShmMpscQueue() = default;
+
+    /// @brief Construct queue bound to a mapped shared memory address.
+    explicit ShmMpscQueue(void* mappedAddress, bool initializeMemory = false) noexcept
+    {
+        bind(mappedAddress, initializeMemory);
+    }
+
+    /// @brief Bind to a mapped shared memory region.
+    /// @param mappedAddress Pointer to shared memory.
+    /// @param initializeMemory If true, resets header and cell sequences (creator process).
+    void bind(void* mappedAddress, bool initializeMemory = false) noexcept
+    {
+        _layout = static_cast<Layout*>(mappedAddress);
+        if (_layout && initializeMemory) {
+            _layout->magic = CORIUM_SHM_MAGIC;
+            _layout->version = CORIUM_SHM_VERSION;
+            _layout->capacity = Capacity;
+            _layout->elementSize = sizeof(T);
+            _layout->enqueuePos.store(0, std::memory_order_relaxed);
+            _layout->dequeuePos.store(0, std::memory_order_relaxed);
+
+            for (std::size_t i = 0; i < Capacity; ++i) {
+                _layout->cells[i].sequence.store(i, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    /// @brief Required byte size of the shared memory layout.
+    [[nodiscard]] static constexpr std::size_t requiredMemorySize() noexcept
+    {
+        return sizeof(Layout);
+    }
+
+    /// @brief Validate that the mapped shared memory contains a compatible ShmMpscQueue header.
+    [[nodiscard]] bool isValid() const noexcept
+    {
+        if (!_layout) {
+            return false;
+        }
+        return _layout->magic == CORIUM_SHM_MAGIC &&
+               _layout->version == CORIUM_SHM_VERSION &&
+               _layout->capacity == Capacity &&
+               _layout->elementSize == sizeof(T);
+    }
+
+    /// @brief Lock-free push into shared memory queue (multi-producer safe).
+    /// @param item Value to push.
+    /// @return true if pushed, false if queue is full.
+    template <typename U>
+    bool tryPush(U&& item) noexcept
+    {
+        if (!_layout) {
+            return false;
+        }
+
+        Cell* cell = nullptr;
+        std::size_t pos = _layout->enqueuePos.load(std::memory_order_relaxed);
+
+        for (;;) {
+            cell = &_layout->cells[pos & BufferMask];
+            const std::size_t seq = cell->sequence.load(std::memory_order_acquire);
+            const intptr_t dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+
+            if (dif == 0) {
+                if (_layout->enqueuePos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                    break;
+                }
+            } else if (dif < 0) {
+                // Buffer is full
+                return false;
+            } else {
+                pos = _layout->enqueuePos.load(std::memory_order_relaxed);
+            }
+        }
+
+        // Construct / copy item into cell storage
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(cell->storage, &item, sizeof(T));
+        } else {
+            new (cell->storage) T(std::forward<U>(item));
+        }
+
+        cell->sequence.store(pos + 1, std::memory_order_release);
+        return true;
+    }
+
+    /// @brief Lock-free pop from shared memory queue (single-consumer safe).
+    /// @param outItem Reference populated with popped value.
+    /// @return true if popped, false if queue is empty.
+    bool tryPop(T& outItem) noexcept
+    {
+        if (!_layout) {
+            return false;
+        }
+
+        std::size_t pos = _layout->dequeuePos.load(std::memory_order_relaxed);
+        Cell* cell = &_layout->cells[pos & BufferMask];
+        const std::size_t seq = cell->sequence.load(std::memory_order_acquire);
+        const intptr_t dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+
+        if (dif < 0) {
+            // Buffer is empty
+            return false;
+        }
+
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(&outItem, cell->storage, sizeof(T));
+        } else {
+            outItem = std::move(*cell->ptr());
+            cell->ptr()->~T();
+        }
+
+        cell->sequence.store(pos + Capacity, std::memory_order_release);
+        _layout->dequeuePos.store(pos + 1, std::memory_order_relaxed);
+        return true;
+    }
+
+    /// @brief Check if queue is currently empty.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        if (!_layout) return true;
+        const std::size_t pos = _layout->dequeuePos.load(std::memory_order_relaxed);
+        const Cell* cell = &_layout->cells[pos & BufferMask];
+        const std::size_t seq = cell->sequence.load(std::memory_order_acquire);
+        return static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1) < 0;
+    }
+
+    /// @brief Get configured capacity of the queue.
+    [[nodiscard]] constexpr std::size_t capacity() const noexcept
+    {
+        return Capacity;
+    }
+
+private:
+    Layout* _layout{nullptr};
+};
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/ShmMpscQueue.hpp
+
+namespace corium::ipc {
+
+/// @brief High-level typed inter-process communication channel for Corium events.
+/// Encapsulates OS shared memory allocation and lock-free event dispatching.
+/// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).
+/// @tparam Capacity Ring buffer capacity (power of 2, default 256).
+template <
+    typename EventVariant = DefaultEvents,
+    std::size_t Capacity = 256
+>
+class IpcChannel {
+    static_assert(std::is_trivially_copyable_v<EventVariant>,
+        "IpcChannel EventVariant must be trivially copyable for zero-copy shared memory IPC.");
+
+public:
+    using QueueType = ShmMpscQueue<EventVariant, Capacity>;
+
+    IpcChannel() = default;
+
+    /// @brief Create a new shared memory channel as the host/creator process.
+    /// @param channelName Unique system name (e.g. "/corium_robot_telemetry").
+    /// @return true on success, false otherwise.
+    bool create(const std::string& channelName) noexcept
+    {
+        if (!_shm.open(channelName, QueueType::requiredMemorySize(), SharedMemory::AccessMode::CreateOrOpen)) {
+            return false;
+        }
+        _queue.bind(_shm.data(), true);
+        return _queue.isValid();
+    }
+
+    /// @brief Attach to an existing shared memory channel as a client process.
+    /// @param channelName Unique system name.
+    /// @return true on success, false otherwise.
+    bool attach(const std::string& channelName) noexcept
+    {
+        if (!_shm.open(channelName, QueueType::requiredMemorySize(), SharedMemory::AccessMode::OpenReadWrite)) {
+            return false;
+        }
+        _queue.bind(_shm.data(), false);
+        return _queue.isValid();
+    }
+
+    /// @brief Post an event into the shared memory queue for remote processes.
+    /// Lock-free, zero-allocation, multi-producer safe.
+    /// @tparam EventType Strongly-typed event type.
+    /// @param event Event payload.
+    /// @return true if pushed, false if shared queue is full.
+    template <typename EventType>
+    bool post(EventType&& event) noexcept
+    {
+        return _queue.tryPush(EventVariant{std::forward<EventType>(event)});
+    }
+
+    /// @brief Pop one event from the shared queue.
+    /// Single-consumer safe.
+    /// @param outEvent Reference populated with popped event variant.
+    /// @return true if an event was popped, false if queue is empty.
+    bool tryPop(EventVariant& outEvent) noexcept
+    {
+        return _queue.tryPop(outEvent);
+    }
+
+    /// @brief Drain incoming shared memory events into a target event sink.
+    /// @tparam SinkType Target EventSink or compatible sink.
+    /// @param sink Target sink instance.
+    /// @param maxEvents Maximum events to drain (0 = drain all pending).
+    /// @return Number of events successfully transferred into local runtime.
+    template <typename SinkType>
+    std::size_t pumpInto(const SinkType& sink, std::size_t maxEvents = 0)
+    {
+        std::size_t count = 0;
+        EventVariant ev;
+        while (_queue.tryPop(ev)) {
+            std::visit([&sink](auto&& typedEvent) {
+                sink.post(std::forward<decltype(typedEvent)>(typedEvent));
+            }, ev);
+
+            count++;
+            if (maxEvents > 0 && count >= maxEvents) {
+                break;
+            }
+        }
+        return count;
+    }
+
+    /// @brief Destroy the channel and remove shared memory from OS.
+    void unlink() noexcept
+    {
+        if (_shm.isValid()) {
+            std::string name = _shm.name();
+            _shm.close();
+            SharedMemory::unlink(name);
+        }
+    }
+
+    /// @brief Check if channel is open and valid.
+    [[nodiscard]] bool isValid() const noexcept
+    {
+        return _shm.isValid() && _queue.isValid();
+    }
+
+    /// @brief Check if channel is empty.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return _queue.empty();
+    }
+
+    /// @brief Configured capacity of the channel.
+    [[nodiscard]] constexpr std::size_t capacity() const noexcept
+    {
+        return Capacity;
+    }
+
+private:
+    SharedMemory _shm;
+    QueueType _queue;
+};
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/IpcChannel.hpp
+
+// >>> Begin: corium/ipc/UdsChannel.hpp
+
+#include <cstddef>
+#include <cstring>
+#include <string>
+#include <utility>
+#include <variant>
+
+
+namespace corium::ipc {
+
+/// @brief Typed IPC channel operating over UNIX Domain Datagram Sockets.
+/// Provides boundary-preserving, discrete event transmission with zero packet fragmentation.
+/// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).
+/// @tparam MaxPacketSize Maximum serialized datagram packet buffer size (default 512 bytes).
+template <
+    typename EventVariant = DefaultEvents,
+    std::size_t MaxPacketSize = 512
+>
+class UdsChannel {
+    static_assert(sizeof(EventVariant) <= MaxPacketSize, "EventVariant size exceeds MaxPacketSize");
+    static_assert(std::is_trivially_copyable_v<EventVariant>,
+        "UdsChannel EventVariant must be trivially copyable for datagram socket transmission.");
+
+public:
+    UdsChannel() = default;
+
+    /// @brief Start listening as an IPC server on a filesystem socket path.
+    /// @param socketPath Filesystem path (e.g. "/tmp/corium_control.sock").
+    /// @param nonBlocking If true, enables non-blocking mode for non-waiting event loop polling.
+    /// @return true on success, false otherwise.
+    bool listen(const std::string& socketPath, bool nonBlocking = true) noexcept
+    {
+        if (!_socket.bind(socketPath)) {
+            return false;
+        }
+        if (nonBlocking) {
+            _socket.setNonBlocking(true);
+        }
+        return true;
+    }
+
+    /// @brief Connect as a client to a server socket path.
+    /// @param serverPath Server destination socket path.
+    /// @param clientPath Optional client socket path for bidirectional reply.
+    /// @return true on success, false otherwise.
+    bool connect(const std::string& serverPath, const std::string& clientPath = "") noexcept
+    {
+        return _socket.connect(serverPath, clientPath);
+    }
+
+    /// @brief Post a typed event over the socket to the remote receiver.
+    /// @tparam EventType Event type.
+    /// @param event Event payload.
+    /// @return true if datagram sent, false on socket error.
+    template <typename EventType>
+    bool post(EventType&& event) noexcept
+    {
+        EventVariant ev{std::forward<EventType>(event)};
+        const int bytesSent = _socket.send(&ev, sizeof(EventVariant));
+        return bytesSent == static_cast<int>(sizeof(EventVariant));
+    }
+
+    /// @brief Try popping one pending datagram event from the socket (non-blocking).
+    /// @param outEvent Reference populated with received event variant.
+    /// @return true if an event was received, false if socket has no pending datagrams.
+    bool tryPop(EventVariant& outEvent) noexcept
+    {
+        const int bytesReceived = _socket.receive(&outEvent, sizeof(EventVariant));
+        return bytesReceived == static_cast<int>(sizeof(EventVariant));
+    }
+
+    /// @brief Drain incoming UNIX domain socket events into a target event sink.
+    /// @tparam SinkType Target EventSink or compatible sink.
+    /// @param sink Target sink instance.
+    /// @param maxEvents Maximum events to drain (0 = drain all pending).
+    /// @return Number of events successfully transferred into local runtime.
+    template <typename SinkType>
+    std::size_t pumpInto(const SinkType& sink, std::size_t maxEvents = 0)
+    {
+        std::size_t count = 0;
+        EventVariant ev;
+        while (tryPop(ev)) {
+            std::visit([&sink](auto&& typedEvent) {
+                sink.post(std::forward<decltype(typedEvent)>(typedEvent));
+            }, ev);
+
+            count++;
+            if (maxEvents > 0 && count >= maxEvents) {
+                break;
+            }
+        }
+        return count;
+    }
+
+    /// @brief Close the socket connection and unlink socket file if server.
+    void close() noexcept
+    {
+        _socket.close();
+    }
+
+    /// @brief Check if socket is open.
+    [[nodiscard]] bool isOpen() const noexcept
+    {
+        return _socket.isOpen();
+    }
+
+    /// @brief Access underlying DomainSocket instance.
+    [[nodiscard]] DomainSocket& socket() noexcept
+    {
+        return _socket;
+    }
+
+private:
+    DomainSocket _socket;
+};
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/UdsChannel.hpp
+
+// <<< End: corium/ipc/ipc.hpp
+
+// <<< End: corium/corium.hpp
