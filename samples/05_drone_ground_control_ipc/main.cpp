@@ -53,7 +53,7 @@ using AvionicsRuntime = corium::RuntimeBuilder<>
 // -----------------------------------------------------------------------------
 // 2. Flight Control Core Application
 // -----------------------------------------------------------------------------
-class FlightCoreApp : public AvionicsRuntime::Application<FlightCoreApp> {
+class FlightCoreApp : public corium::Application<FlightCoreApp, AvionicsEvents> {
 public:
     uint32_t telemetryReceived = 0;
     uint32_t commandsExecuted = 0;

@@ -93,7 +93,7 @@ public:
 // -----------------------------------------------------------------------------
 // 3. Application Core (Lifecycle, Handlers, and C++20 Coroutine Async Tasks)
 // -----------------------------------------------------------------------------
-class SmartGridSubstationApp : public SmartGridRuntime::Application<SmartGridSubstationApp, 4> {
+class SmartGridSubstationApp : public corium::Application<SmartGridSubstationApp, SmartGridEvents> {
 public:
     SubstationMeteringService meteringService;
     uint32_t telemetrySamplesCount = 0;

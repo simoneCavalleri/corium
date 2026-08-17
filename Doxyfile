@@ -2,16 +2,21 @@
 
 PROJECT_NAME           = "Corium"
 PROJECT_NUMBER         = "1.0.0"
-PROJECT_BRIEF          = "High-Performance Zero-Heap C++20 Application Runtime"
+PROJECT_BRIEF          = "High-Performance Zero-Heap C++20 MPSC Application Runtime"
 OUTPUT_DIRECTORY       = "docs"
 CREATE_SUBDIRS         = NO
 OUTPUT_LANGUAGE        = English
 
-# Inputs
-INPUT                  = include/ README.md
+# Inputs & Markdown
+INPUT                  = include/ docs/ README.md
 RECURSIVE              = YES
-FILE_PATTERNS          = *.hpp *.h *.md
+FILE_PATTERNS          = *.hpp *.h *.md *.dox
 USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MULTILINE_CPP_IS_BRIEF = YES
 
 # C++20 & Extraction settings
 OPTIMIZE_OUTPUT_FOR_C  = NO
@@ -23,6 +28,9 @@ HIDE_UNDOC_MEMBERS     = NO
 HIDE_UNDOC_CLASSES     = NO
 INHERIT_DOCS           = YES
 INLINE_INHERITED_MEMB  = YES
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+DISTRIBUTE_GROUP_DOC   = YES
 
 # Preprocessor & Macros
 ENABLE_PREPROCESSING   = YES
@@ -37,12 +45,34 @@ HTML_FILE_EXTENSION    = .html
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
 FULL_SIDEBAR           = YES
-HTML_COLORSTYLE_HUE    = 220
-HTML_COLORSTYLE_SAT    = 100
-HTML_COLORSTYLE_GAMMA  = 80
+HTML_DYNAMIC_MENUS     = YES
+HTML_DYNAMIC_SECTIONS  = YES
 
-# Exclude LaTeX/RTF/XML
+# Modern Custom Theme & Mermaid.js Integration
+HTML_EXTRA_STYLESHEET  = docs/custom.css
+HTML_EXTRA_FILES       = docs/mermaid_init.js docs/custom.css
+HTML_EXTRA_SCRIPTS     = docs/mermaid_init.js
+
+# Graphviz / Dot settings
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = YES
+TEMPLATE_RELATIONS     = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DIRECTORY_GRAPH        = YES
+DOT_GRAPH_MAX_NODES    = 50
+MAX_DOT_GRAPH_DEPTH    = 0
+
+# Exclude unused formats
 GENERATE_LATEX         = NO
 GENERATE_RTF           = NO
 GENERATE_MAN           = NO
 GENERATE_XML           = NO
+GENERATE_DOCBOOK       = NO

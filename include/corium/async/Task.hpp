@@ -6,6 +6,7 @@
 
 namespace corium::async {
 
+/// @ingroup async
 /// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining.
 /// @tparam T Result type returned by the coroutine (defaults to void).
 template <typename T = void>

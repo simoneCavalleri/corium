@@ -85,11 +85,15 @@ public:
 // -----------------------------------------------------------------------------
 // 3. Central ECU Application Core
 // -----------------------------------------------------------------------------
-class AutomotiveEcuApp : public AutomotiveRuntime::Application<AutomotiveEcuApp, 4> {
+class AutomotiveEcuApp : public corium::Application<AutomotiveEcuApp, AutomotiveEvents> {
 public:
+    static constexpr uint32_t MaxMonitoredTasks = 4;
+    static constexpr uint32_t FaultTripThreshold = 2;
+    static constexpr uint32_t RecoveryCooldownMs = 100;
+
     BrakeActuatorService actuatorService;
-    corium::safety::WatchdogSupervisor<4> watchdog;
-    corium::safety::CircuitBreaker<2, 100> circuitBreaker; // Trip after 2 faults
+    corium::safety::WatchdogSupervisor<MaxMonitoredTasks> watchdog;
+    corium::safety::CircuitBreaker<FaultTripThreshold, RecoveryCooldownMs> circuitBreaker;
 
     uint32_t torqueCommandsProcessed = 0;
     bool emergencyFallbackActivated = false;

@@ -139,8 +139,8 @@ jobs:
       - name: Test Single-Header Standalone Compilation (-fno-rtti -fno-exceptions)
         run: |
           clang++-18 -std=c++20 -Wall -Wextra -Wpedantic -Werror -fno-rtti -fno-exceptions \
-            -Isingle_include samples/01_basic_app/main.cpp -o sample_01_single
-          ./sample_01_single
+            -Isingle_include samples/02_aerospace_flight_controller/main.cpp -o sample_02_single
+          ./sample_02_single
 
   # ---------------------------------------------------------------------------
   # 5. Automated GitHub Release on Git Tag

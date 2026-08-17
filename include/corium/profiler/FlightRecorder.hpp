@@ -43,6 +43,7 @@ struct alignas(32) FlightRecord {
     }
 };
 
+/// @ingroup profiler
 /// @brief Zero-heap circular flight recorder storing the last N event telemetry records.
 /// Thread-safe for multiple producers and concurrent reader/dumping.
 /// @tparam Capacity Number of flight records (power of 2).

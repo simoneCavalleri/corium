@@ -67,6 +67,7 @@ class BasicReactor<std::variant<Events...>, StoragePolicy> {
 
 public:
     using EventVariant = std::variant<Events...>;
+    using StoragePolicyType = StoragePolicy;
 
     BasicReactor() = default;
     ~BasicReactor() = default;

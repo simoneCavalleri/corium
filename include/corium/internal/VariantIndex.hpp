@@ -60,6 +60,19 @@ inline TypeIdPtr getTypeId() noexcept {
     return &TypeId<T>::id;
 }
 
+template <typename T, typename = void>
+struct extract_event_variant {
+    using type = T;
+};
+
+template <typename T>
+struct extract_event_variant<T, std::void_t<typename T::EventVariant>> {
+    using type = typename T::EventVariant;
+};
+
+template <typename T>
+using extract_event_variant_t = typename extract_event_variant<T>::type;
+
 } // namespace internal
 
 } // namespace corium

@@ -58,6 +58,7 @@ constexpr void execute_action(const Action& action, From& from, const Event& e, 
 
 } // namespace detail
 
+/// @ingroup fsm
 /// @brief Zero-heap, compile-time Finite State Machine.
 /// @tparam Table TransitionTable defining valid state transitions.
 /// @tparam InitialState Default initial active state.
@@ -124,7 +125,7 @@ public:
     bool process_event(const Event& event) {
         return std::visit([this, &event](auto& currentState) -> bool {
             using CurrentStateType = std::decay_t<decltype(currentState)>;
-            return try_transition<CurrentStateType, Event>(currentState, event, Table{});
+            return this->try_transition<CurrentStateType, Event>(currentState, event, Table{});
         }, _state);
     }
 

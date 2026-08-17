@@ -191,7 +191,7 @@ public:
     }
 };
 
-class FaultyApp : public Runtime::Application<FaultyApp, 4> {
+class FaultyApp : public corium::Application<FaultyApp, DefaultEvents, 4> {
 public:
     FaultyBackgroundService service;
     bool errorHandled = false;

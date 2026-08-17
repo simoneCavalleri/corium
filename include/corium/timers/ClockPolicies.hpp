@@ -33,6 +33,7 @@ struct get_timer_clock_policy<T, std::void_t<typename T::clock_policy>> {
 
 } // namespace internal
 
+/// @ingroup timers
 /// @brief Default host clock policy using std::chrono::steady_clock.
 class ChronoClockPolicy {
 public:
@@ -56,6 +57,7 @@ public:
     }
 };
 
+/// @ingroup timers
 /// @brief Deterministic, manually-advanced clock policy for unit tests and simulation.
 class ManualClockPolicy {
 public:

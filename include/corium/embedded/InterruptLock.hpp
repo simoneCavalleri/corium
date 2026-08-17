@@ -15,6 +15,7 @@
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief RAII interrupt locking helper disabling interrupts upon construction and restoring them upon destruction.
 class InterruptLock {
 public:

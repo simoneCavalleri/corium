@@ -1,9 +1,9 @@
 #pragma once
 
 #include "corium/ApplicationContext.hpp"
-#include "corium/EventBus.hpp"
 #include "corium/EventSink.hpp"
 #include "corium/ServiceRegistry.hpp"
+#include "corium/internal/VariantIndex.hpp"
 
 #include <utility>
 
@@ -21,17 +21,19 @@ template <
 >
 class BasicRuntime;
 
+/// @ingroup core
 /// @brief Static CRTP base class for applications managed by Corium Runtime.
-/// Subclass Application<Derived> or Application<Derived, EventBusType, MaxServices> for zero-vtable compile-time static dispatch.
+/// Subclass Application<Derived> or Application<Derived, EventVariant, MaxServices> for zero-vtable compile-time static dispatch.
 /// All framework operations and handlers are protected for clean encapsulation within the derived application.
 /// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
-/// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
+/// @tparam EventVariantOrBus Event variant type list or EventBus type (defaults to DefaultEvents).
 /// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
-template <typename Derived, typename EventBusType = EventBus, std::size_t MaxServices = 8>
+template <typename Derived, typename EventVariantOrBus = DefaultEvents, std::size_t MaxServices = 8>
 class Application {
 public:
-    using EventVariant = typename EventBusType::EventVariant;
+    using EventVariant = internal::extract_event_variant_t<EventVariantOrBus>;
     using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
+    using ContextType = ApplicationContext<EventVariant>;
 
     Application() = default;
     ~Application() = default;
@@ -60,60 +62,57 @@ protected:
     template <typename Rep, typename Period>
     TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
     {
-        return _context.scheduleDelayed(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+        return _context.scheduleDelayed(std::move(event), delay, priority);
     }
 
     /// @brief Schedule a recurring periodic event.
     template <typename Rep, typename Period>
     TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
     {
-        return _context.schedulePeriodic(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+        return _context.schedulePeriodic(std::move(event), interval, priority);
     }
 
-    /// @brief Cancel an active timer handle.
-    bool cancelTimer(TimerId id)
+    /// @brief Cancel an active timer.
+    bool cancelTimer(TimerId id) noexcept
     {
         return _context.cancelTimer(id);
     }
 
-    /// @brief Request graceful application shutdown.
+    /// @brief Request graceful runtime shutdown.
     void requestQuit()
     {
         _context.requestQuit();
     }
 
-    /// @brief Access reference to the internal ServiceRegistry.
+    /// @brief Access background service registry.
     [[nodiscard]] ServiceRegistryType& services() noexcept
     {
         return _serviceRegistry;
     }
 
-    /// @brief Access const reference to the internal ServiceRegistry.
+    /// @brief Access const background service registry.
     [[nodiscard]] const ServiceRegistryType& services() const noexcept
     {
         return _serviceRegistry;
     }
 
-    /// @brief Retrieve a registered service instance by concrete type.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    /// @brief Retrieve registered background service by concrete type.
     template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type (const overload).
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] const ServiceType* getService() const noexcept
+    [[nodiscard]] ServiceType* getService() const noexcept
     {
         return _serviceRegistry.template getService<ServiceType>();
     }
 
 private:
-    template <typename, typename, typename, typename, typename, typename, typename>
+    template <
+        typename EV,
+        typename QP,
+        typename SP,
+        typename STP,
+        typename OP,
+        typename TP,
+        typename PP
+    >
     friend class BasicRuntime;
 
     template <typename Registry>
@@ -156,15 +155,15 @@ private:
         }
     }
 
-    void setContext(ApplicationContext<EventBusType> context)
+    void setContext(ApplicationContext<EventVariant> context)
     {
         _context = context;
-        if constexpr (requires(Derived& d, ApplicationContext<EventBusType> c) { d.onSetContext(c); }) {
+        if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
             static_cast<Derived*>(this)->onSetContext(context);
         }
     }
 
-    ApplicationContext<EventBusType> _context;
+    ApplicationContext<EventVariant> _context;
     ServiceRegistryType _serviceRegistry;
 };
 

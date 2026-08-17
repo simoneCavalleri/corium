@@ -12,6 +12,7 @@
 
 namespace corium::ipc {
 
+/// @ingroup ipc
 /// @brief Typed IPC channel operating over UNIX Domain Datagram Sockets.
 /// Provides boundary-preserving, discrete event transmission with zero packet fragmentation.
 /// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).

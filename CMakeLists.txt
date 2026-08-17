@@ -100,3 +100,15 @@ if(CORIUM_BUILD_BENCHMARKS)
     )
     target_link_libraries(corium_benchmarks PRIVATE corium benchmark::benchmark)
 endif()
+
+# Doxygen Documentation Target
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating Doxygen HTML documentation with Mermaid.js support..."
+        VERBATIM
+    )
+endif()
+

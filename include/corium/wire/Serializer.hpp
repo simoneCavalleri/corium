@@ -11,6 +11,7 @@
 
 namespace corium::wire {
 
+/// @ingroup wire
 /// @brief Zero-heap type-safe serializer and deserializer for Corium event variants over binary wire streams.
 class WireSerializer {
 public:

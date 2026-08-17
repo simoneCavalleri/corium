@@ -19,6 +19,7 @@ enum class EventPriority : uint8_t {
     Low = 2
 };
 
+/// @ingroup policies
 /// @brief Queue Policy for fixed-capacity, zero-allocation lock-free MPSC RingBuffer.
 /// @tparam EventVariant The variant type list of supported events.
 /// @tparam Capacity Ring buffer capacity (must be a power of 2).

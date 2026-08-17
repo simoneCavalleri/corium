@@ -1,0 +1,182 @@
+/**
+ * Custom modern styling for Corium Doxygen documentation
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+    --corium-primary: #2563eb;
+    --corium-primary-hover: #1d4ed8;
+    --corium-accent: #0ea5e9;
+    --corium-bg: #ffffff;
+    --corium-surface: #f8fafc;
+    --corium-border: #e2e8f0;
+    --corium-text: #0f172a;
+    --corium-text-muted: #64748b;
+    --corium-code-bg: #0f172a;
+    --corium-code-text: #f8fafc;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --corium-primary: #3b82f6;
+        --corium-primary-hover: #60a5fa;
+        --corium-accent: #38bdf8;
+        --corium-bg: #090d16;
+        --corium-surface: #0f172a;
+        --corium-border: #1e293b;
+        --corium-text: #f1f5f9;
+        --corium-text-muted: #94a3b8;
+        --corium-code-bg: #020617;
+        --corium-code-text: #f8fafc;
+    }
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif !important;
+    background-color: var(--corium-bg) !important;
+    color: var(--corium-text) !important;
+    line-height: 1.6 !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+#titlearea {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+    border-bottom: 2px solid var(--corium-primary) !important;
+    padding: 1rem 1.5rem !important;
+}
+
+#projectname {
+    font-weight: 700 !important;
+    font-size: 1.5rem !important;
+    color: #ffffff !important;
+    letter-spacing: -0.025em;
+}
+
+#projectbrief {
+    color: #94a3b8 !important;
+    font-size: 0.875rem !important;
+}
+
+#projectnumber {
+    background: var(--corium-primary) !important;
+    color: #ffffff !important;
+    padding: 0.15rem 0.5rem !important;
+    border-radius: 9999px !important;
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+}
+
+/* Navigation Tree and Sidebar */
+#nav-tree {
+    background-color: var(--corium-surface) !important;
+    border-right: 1px solid var(--corium-border) !important;
+    font-size: 0.875rem !important;
+}
+
+.item a {
+    color: var(--corium-text) !important;
+    transition: color 0.15s ease;
+}
+
+.item a:hover {
+    color: var(--corium-primary) !important;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600 !important;
+    color: var(--corium-text) !important;
+    letter-spacing: -0.02em !important;
+}
+
+h1.glow, .header .title {
+    font-size: 1.75rem !important;
+    font-weight: 700 !important;
+    border-bottom: 2px solid var(--corium-border) !important;
+    padding-bottom: 0.5rem !important;
+    margin-bottom: 1.5rem !important;
+}
+
+h2.groupheader {
+    border-bottom: 1px solid var(--corium-border) !important;
+    color: var(--corium-primary) !important;
+    font-size: 1.25rem !important;
+    margin-top: 2rem !important;
+    padding-bottom: 0.25rem !important;
+}
+
+/* Code & Preformatted Blocks */
+pre, code, tt {
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace !important;
+    font-size: 0.875rem !important;
+}
+
+div.fragment, pre.fragment {
+    background-color: var(--corium-code-bg) !important;
+    color: var(--corium-code-text) !important;
+    border: 1px solid var(--corium-border) !important;
+    border-radius: 0.5rem !important;
+    padding: 1rem !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Tables */
+table.doxtable, table.markdownTable {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    margin: 1.5rem 0 !important;
+    border: 1px solid var(--corium-border) !important;
+    border-radius: 0.5rem !important;
+    overflow: hidden;
+}
+
+table.doxtable th, table.markdownTable th {
+    background-color: var(--corium-surface) !important;
+    color: var(--corium-text) !important;
+    font-weight: 600 !important;
+    text-align: left !important;
+    padding: 0.75rem 1rem !important;
+    border-bottom: 2px solid var(--corium-border) !important;
+}
+
+table.doxtable td, table.markdownTable td {
+    padding: 0.75rem 1rem !important;
+    border-bottom: 1px solid var(--corium-border) !important;
+}
+
+/* Member Declarations & Doc Cards */
+.memitem {
+    background-color: var(--corium-surface) !important;
+    border: 1px solid var(--corium-border) !important;
+    border-radius: 0.5rem !important;
+    margin-bottom: 1.5rem !important;
+    overflow: hidden;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.memproto {
+    background-color: var(--corium-surface) !important;
+    border-bottom: 1px solid var(--corium-border) !important;
+    padding: 0.75rem 1rem !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-weight: 600 !important;
+    color: var(--corium-primary) !important;
+}
+
+.memdoc {
+    background-color: var(--corium-bg) !important;
+    padding: 1rem !important;
+}
+
+/* Mermaid Diagram Center Container */
+pre.mermaid {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    background: var(--corium-surface) !important;
+    border: 1px solid var(--corium-border) !important;
+    border-radius: 0.5rem !important;
+    padding: 1.5rem !important;
+    margin: 1.5rem 0 !important;
+}

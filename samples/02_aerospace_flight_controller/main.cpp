@@ -13,11 +13,7 @@
 #include <optional>
 #include <variant>
 
-#include "corium/Application.hpp"
-#include "corium/Runtime.hpp"
-#include "corium/embedded/IsrSink.hpp"
-#include "corium/fsm/StateMachine.hpp"
-#include "corium/fsm/Transition.hpp"
+#include <corium/corium.hpp>
 
 // -----------------------------------------------------------------------------
 // 1. UAV Flight Controller Event Definitions (Trivially Copyable PODs)
@@ -114,7 +110,7 @@ static void SIMULATED_CRITICAL_FAULT_IRQHandler(FlightIsrSink& isrSink, uint8_t 
 // -----------------------------------------------------------------------------
 // 4. Flight Controller Application Core
 // -----------------------------------------------------------------------------
-class UavFlightControllerApp : public FlightRuntime::Application<UavFlightControllerApp> {
+class UavFlightControllerApp : public corium::Application<UavFlightControllerApp, FlightEvents> {
 public:
     corium::fsm::StateMachine<FlightTransitionTable, StateDisarmed, StateInFlight, StateFailsafeRth> fsm;
     uint32_t imuPacketsProcessed = 0;

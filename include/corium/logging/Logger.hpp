@@ -10,6 +10,7 @@
 
 namespace corium::logging {
 
+/// @ingroup logging
 /// @brief Static compile-time logger wrapper managing severity level filtering and zero-heap string formatting.
 /// @tparam LogSink Log sink backend handling actual log entry output (e.g. ConsoleLogSink, FileLogSink, NullLogSink).
 /// @tparam MaxMessageSize Maximum character length for formatted log messages.

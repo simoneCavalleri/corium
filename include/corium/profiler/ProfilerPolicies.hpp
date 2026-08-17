@@ -72,6 +72,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// @ingroup profiler
 /// @brief Real-time event latency and performance statistics tracker.
 /// Zero dynamic memory allocation. Tracks min, max, total queue latency and handler duration.
 /// @tparam QueueCapacity Capacity of the parallel post-timestamp ring buffer (must match

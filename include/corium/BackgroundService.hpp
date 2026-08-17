@@ -10,8 +10,9 @@
 
 namespace corium {
 
-/// @brief Non-allocating base class for background services owning a dedicated C++20 std::jthread.
-/// Extends Service to add thread lifecycle management and thread-safe waitAndPump waiting.
+/// @ingroup core
+/// @brief Multi-threaded background worker service owning a dedicated std::jthread.
+/// Integrates incoming event queue with background worker execution and cooperative shutdown via std::stop_token.
 /// Zero heap allocations, zero vtables/RTTI.
 /// @tparam EventVariantType Supported event variant type list.
 /// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).

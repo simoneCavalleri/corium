@@ -7,6 +7,7 @@
 
 namespace corium::safety {
 
+/// @ingroup safety
 /// @brief Zero-heap multi-service heartbeat tracker for safety-critical execution.
 /// Thread-safe for concurrent heartbeat signals and supervisory health checks.
 /// @tparam MaxServices Maximum number of monitored services (default: 16).

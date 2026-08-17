@@ -38,6 +38,7 @@ struct WireHeader {
 };
 #pragma pack(pop)
 
+/// @ingroup wire
 /// @brief Statically-sized zero-heap binary wire packet.
 /// @tparam MaxPayloadSize Maximum payload capacity in bytes (default: 64).
 template <size_t MaxPayloadSize = 64>

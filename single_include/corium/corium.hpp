@@ -30,16 +30,14 @@
 
 // >>> Begin: corium/ApplicationContext.hpp
 
+#include <array>
 #include <chrono>
-#include <utility>
-
-// >>> Begin: corium/EventBus.hpp
-
-
-// >>> Begin: corium/EventSink.hpp
-
+#include <cstddef>
+#include <new>
 #include <type_traits>
 #include <utility>
+#include <variant>
+
 
 // >>> Begin: corium/Events.hpp
 
@@ -104,6 +102,11 @@ using Event = DefaultEvents;
 } // namespace corium
 
 // <<< End: corium/Events.hpp
+
+// >>> Begin: corium/EventSink.hpp
+
+#include <type_traits>
+#include <utility>
 
 // >>> Begin: corium/policies/QueuePolicies.hpp
 
@@ -259,6 +262,7 @@ enum class EventPriority : uint8_t {
     Low = 2
 };
 
+/// @ingroup policies
 /// @brief Queue Policy for fixed-capacity, zero-allocation lock-free MPSC RingBuffer.
 /// @tparam EventVariant The variant type list of supported events.
 /// @tparam Capacity Ring buffer capacity (must be a power of 2).
@@ -487,6 +491,7 @@ public:
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Non-virtual type-erased event sink handle (raw pointer + static function pointer).
 /// Zero dynamic heap allocations, zero vtables/RTTI.
 /// @tparam EventVariant The variant type list of supported events.
@@ -629,17 +634,266 @@ using callable_event_type_t = typename get_callable_event_type<Callable>::type;
 
 // <<< End: corium/internal/CallableTraits.hpp
 
-// >>> Begin: corium/internal/EventQueue.hpp
+// >>> Begin: corium/internal/FastDelegate.hpp
 
-#include <optional>
+#include <cassert>
+#include <cstddef>
+#include <new>
+#include <type_traits>
 #include <utility>
 
+namespace corium {
 
-// >>> Begin: corium/policies/Policies.hpp
+/// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
+/// Eliminates std::function heap allocations and virtual table overhead for event handlers.
+/// @tparam EventType The concrete event type invoked by this delegate.
+template <typename EventType, std::size_t InlineSize = 32>
+class EventHandlerDelegate {
+    using StubFn = void (*)(void* instance, const EventType& event);
+    using DestroyFn = void (*)(void* instance) noexcept;
+    using MoveFn = void (*)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept;
 
-/// @file Policies.hpp
-/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
+public:
+    EventHandlerDelegate() noexcept = default;
 
+    /// @brief Construct delegate wrapping a callable object (lambda, function pointer, or functor).
+    /// @tparam Handler Callable type.
+    /// @param handler Callable instance.
+    template <
+        typename Handler,
+        typename Decayed = std::decay_t<Handler>,
+        typename = std::enable_if_t<
+            !std::is_same_v<Decayed, EventHandlerDelegate> &&
+            std::is_invocable_r_v<void, Decayed&, const EventType&>
+        >
+    >
+    explicit EventHandlerDelegate(Handler&& handler)
+    {
+        static_assert(
+            std::is_nothrow_destructible_v<Decayed>,
+            "Handler destructor must be noexcept"
+        );
+        static_assert(
+            sizeof(Decayed) <= InlineSize,
+            "Handler size exceeds FastDelegate inline storage size! Reduce captured state or increase InlineSize."
+        );
+        static_assert(
+            alignof(Decayed) <= alignof(std::max_align_t),
+            "Handler alignment requirement exceeds inline storage alignment."
+        );
+        static_assert(
+            std::is_nothrow_move_constructible_v<Decayed>,
+            "Handler must be nothrow move constructible."
+        );
+
+        void* storage = static_cast<void*>(_inlineStorage);
+        ::new (storage) Decayed(std::forward<Handler>(handler));
+        _instance = storage;
+
+        _destroy = [](void* instance) noexcept {
+            reinterpret_cast<Decayed*>(instance)->~Decayed();
+        };
+
+        _move = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
+            auto* src = reinterpret_cast<Decayed*>(srcInstance);
+            ::new (destStorage) Decayed(std::move(*src));
+            src->~Decayed();
+            destInstance = destStorage;
+            srcInstance = nullptr;
+        };
+
+        _stub = [](void* instance, const EventType& event) {
+            (*reinterpret_cast<Decayed*>(instance))(event);
+        };
+    }
+
+    /// @brief Construct delegate from type-erased thunk operations.
+    EventHandlerDelegate(
+        void* srcObj,
+        void (*stub)(void* instance, const EventType& event),
+        void (*moveFn)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept,
+        void (*destroyFn)(void* instance) noexcept
+    ) noexcept
+    {
+        void* storage = static_cast<void*>(_inlineStorage);
+        _destroy = destroyFn;
+        _move = moveFn;
+        _stub = stub;
+        if (_move) {
+            _move(storage, _instance, srcObj);
+        }
+    }
+
+    ~EventHandlerDelegate()
+    {
+        reset();
+    }
+
+    EventHandlerDelegate(EventHandlerDelegate&& rhs) noexcept
+    {
+        moveFrom(std::move(rhs));
+    }
+
+    EventHandlerDelegate& operator=(EventHandlerDelegate&& rhs) noexcept
+    {
+        if (this != &rhs) {
+            reset();
+            moveFrom(std::move(rhs));
+        }
+
+        return *this;
+    }
+
+    EventHandlerDelegate(const EventHandlerDelegate&) = delete;
+    EventHandlerDelegate& operator=(const EventHandlerDelegate&) = delete;
+
+    /// @brief Invoke wrapped handler directly with concrete event.
+    /// @param event Event instance to pass to handler.
+    void invoke(const EventType& event) const
+    {
+        assert(_stub && "Invoking an empty EventHandlerDelegate");
+
+        if (!_stub) {
+            return;
+        }
+
+        _stub(_instance, event);
+    }
+
+    /// @brief Check if delegate wraps a valid handler.
+    explicit operator bool() const noexcept
+    {
+        return _stub != nullptr;
+    }
+
+    /// @brief Reset delegate to empty state.
+    void reset() noexcept
+    {
+        if (_destroy) {
+            _destroy(_instance);
+        }
+
+        _instance = nullptr;
+        _stub = nullptr;
+        _destroy = nullptr;
+        _move = nullptr;
+    }
+
+private:
+    void moveFrom(EventHandlerDelegate&& rhs) noexcept
+    {
+        _stub = rhs._stub;
+        _destroy = rhs._destroy;
+        _move = rhs._move;
+
+        if (_move) {
+            _move(
+                static_cast<void*>(_inlineStorage),
+                _instance,
+                rhs._instance
+            );
+        } else {
+            _instance = nullptr;
+        }
+
+        rhs._stub = nullptr;
+        rhs._destroy = nullptr;
+        rhs._move = nullptr;
+    }
+
+private:
+    alignas(std::max_align_t) std::byte _inlineStorage[InlineSize > 0 ? InlineSize : 1]{};
+
+    void* _instance = nullptr;
+    StubFn _stub = nullptr;
+    DestroyFn _destroy = nullptr;
+    MoveFn _move = nullptr;
+};
+
+} // namespace corium
+// <<< End: corium/internal/FastDelegate.hpp
+
+// >>> Begin: corium/internal/VariantIndex.hpp
+
+#include <type_traits>
+#include <variant>
+
+namespace corium {
+
+template <typename T, typename... Types>
+constexpr std::size_t get_variant_index_impl() {
+    constexpr bool matches[] = { std::is_same_v<T, Types>... };
+    
+    for (std::size_t i = 0; i < sizeof...(Types); ++i) {
+        if (matches[i]) return i;
+    }
+    
+    return static_cast<std::size_t>(-1); 
+}
+
+/// @brief Helper trait to compute index of type T inside std::variant<Types...> at compile time.
+template <typename T, typename Variant>
+struct variant_index;
+
+template <typename T, typename... Types>
+struct variant_index<T, std::variant<Types...>> {
+    static constexpr std::size_t value = get_variant_index_impl<T, Types...>();
+    
+    static_assert(value != static_cast<std::size_t>(-1), 
+                  "ERROR: The requested Event type is not part of the std::variant!");
+};
+
+/// @brief Compile-time constant of type T's index in Variant.
+template <typename T, typename Variant>
+inline constexpr std::size_t variant_index_v = variant_index<T, Variant>::value;
+
+/// @brief Helper trait to check if type T exists inside std::variant<Types...> at compile time.
+template <typename T, typename Variant>
+struct has_variant_type;
+
+template <typename T, typename... Types>
+struct has_variant_type<T, std::variant<Types...>> {
+    static constexpr bool value = (std::is_same_v<T, Types> || ...);
+};
+
+/// @brief Compile-time boolean indicating if type T exists in Variant.
+template <typename T, typename Variant>
+inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
+
+namespace internal {
+
+template <typename T>
+struct TypeId {
+    static inline const char id = 0;
+};
+
+using TypeIdPtr = const void*;
+
+/// @brief Get static unique address for type T without dynamic allocations or RTTI.
+template <typename T>
+inline TypeIdPtr getTypeId() noexcept {
+    return &TypeId<T>::id;
+}
+
+template <typename T, typename = void>
+struct extract_event_variant {
+    using type = T;
+};
+
+template <typename T>
+struct extract_event_variant<T, std::void_t<typename T::EventVariant>> {
+    using type = typename T::EventVariant;
+};
+
+template <typename T>
+using extract_event_variant_t = typename extract_event_variant<T>::type;
+
+} // namespace internal
+
+} // namespace corium
+
+
+// <<< End: corium/internal/VariantIndex.hpp
 
 // >>> Begin: corium/policies/SignalPolicies.hpp
 
@@ -866,127 +1120,15 @@ private:
 
 // <<< End: corium/policies/SignalPolicies.hpp
 
-// >>> Begin: corium/policies/StoragePolicies.hpp
+// >>> Begin: corium/timers/TimerScheduler.hpp
 
+#include <array>
+#include <chrono>
 #include <cstddef>
-
-namespace corium {
-
-/// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
-/// @tparam MaxHandlers Maximum handlers per event type stored statically.
-/// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).
-template <std::size_t MaxHandlers = 8, std::size_t InlineSize = 32>
-struct FixedStoragePolicy {
-    static constexpr std::size_t max_handlers_per_event = MaxHandlers;
-    static constexpr std::size_t inline_storage_size = InlineSize;
-};
-
-/// @brief Default storage policy (8 handlers per event type, 32 bytes inline delegate storage).
-using DefaultStoragePolicy = FixedStoragePolicy<8, 32>;
-
-/// @brief Footprint-optimized storage policy (4 handlers per event type, 16 bytes inline storage).
-using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
-
-/// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
-using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
-
-/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
-using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
-
-} // namespace corium
-
-// <<< End: corium/policies/StoragePolicies.hpp
-
-// >>> Begin: corium/policies/OverflowPolicies.hpp
-
-#include <atomic>
-#include <cassert>
 #include <cstdint>
-#include <exception>
+#include <type_traits>
 #include <utility>
 
-
-namespace corium {
-
-/// @brief Default Overflow Policy: Silently drop incoming new event when queue is full. Zero overhead.
-struct DropNewestOverflowPolicy {
-    template <typename QueuePolicy, typename EventVariant>
-    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
-    {
-        (void)queue;
-        (void)event;
-        (void)priority;
-        return false;
-    }
-};
-
-/// @brief Overflow Policy: Evict oldest event in queue to make room for the new event.
-/// Ideal for high-frequency telemetry and sensor data where newest reading is critical.
-struct DropOldestOverflowPolicy {
-    template <typename QueuePolicy, typename EventVariant>
-    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
-    {
-        typename QueuePolicy::EventType dummy;
-        queue.tryPop(dummy); // Evict oldest event
-        auto res = queue.tryPush(std::forward<EventVariant>(event), priority);
-        return res.pushed;
-    }
-};
-
-/// @brief Overflow Policy: Trigger assertion / panic when queue fills up.
-/// Essential for mission-critical systems where event loss is unacceptable.
-struct PanicOverflowPolicy {
-    template <typename QueuePolicy, typename EventVariant>
-    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
-    {
-        (void)queue;
-        (void)event;
-        (void)priority;
-#if defined(CORIUM_PANIC_ON_OVERFLOW)
-        std::terminate();
-#else
-        assert(false && "Corium Queue Overflow: Queue capacity exceeded!");
-        return false;
-#endif
-    }
-};
-
-/// @brief Overflow Policy: Audit and count dropped events via atomic counter.
-class AuditOverflowPolicy {
-public:
-    template <typename QueuePolicy, typename EventVariant>
-    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
-    {
-        (void)queue;
-        (void)event;
-        (void)priority;
-        _droppedCount.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-
-    /// @brief Get total number of dropped events.
-    [[nodiscard]] uint64_t overflowCount() const noexcept
-    {
-        return _droppedCount.load(std::memory_order_relaxed);
-    }
-
-    /// @brief Reset total dropped event counter to 0.
-    void resetOverflowCount() noexcept
-    {
-        _droppedCount.store(0, std::memory_order_relaxed);
-    }
-
-private:
-    std::atomic<uint64_t> _droppedCount{0};
-};
-
-} // namespace corium
-
-// <<< End: corium/policies/OverflowPolicies.hpp
-
-// >>> Begin: corium/policies/TimerPolicies.hpp
-
-#include <cstddef>
 
 // >>> Begin: corium/timers/ClockPolicies.hpp
 
@@ -1023,6 +1165,7 @@ struct get_timer_clock_policy<T, std::void_t<typename T::clock_policy>> {
 
 } // namespace internal
 
+/// @ingroup timers
 /// @brief Default host clock policy using std::chrono::steady_clock.
 class ChronoClockPolicy {
 public:
@@ -1046,6 +1189,7 @@ public:
     }
 };
 
+/// @ingroup timers
 /// @brief Deterministic, manually-advanced clock policy for unit tests and simulation.
 class ManualClockPolicy {
 public:
@@ -1229,21 +1373,12 @@ public:
 
 // <<< End: corium/timers/ClockPolicies.hpp
 
-// >>> Begin: corium/timers/TimerScheduler.hpp
-
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <type_traits>
-#include <utility>
-
-
 namespace corium {
 
 using TimerId = uint32_t;
 constexpr TimerId INVALID_TIMER_ID = 0;
 
+/// @ingroup timers
 /// @brief Zero-heap Timer Scheduler storing timers in a fixed-capacity static array.
 /// Supports single-shot delayed events and recurring periodic events with compile-time clock policy.
 /// @tparam EventVariant Supported event variant list type.
@@ -1421,6 +1556,334 @@ private:
 
 namespace corium {
 
+/// @ingroup core
+/// @brief Context object passed to Application providing event registration, sink access, quit requests, and timer scheduling.
+/// Completely encapsulates EventBus and Reactor internals.
+/// @tparam EventVariant Supported event variant list type (defaults to DefaultEvents).
+template <typename EventVariant = DefaultEvents>
+class ApplicationContext {
+    static constexpr std::size_t NumEvents = std::variant_size_v<EventVariant>;
+
+    using RegFn = bool (*)(
+        void* busPtr,
+        void* handlerObj,
+        void* invokerFn,
+        void (*mover)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept,
+        void (*destroyer)(void* instance) noexcept,
+        std::size_t size
+    );
+
+public:
+    using EventVariantType = EventVariant;
+
+    using ScheduleDelayedFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds delay, EventPriority priority);
+    using SchedulePeriodicFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds interval, EventPriority priority);
+    using CancelTimerFn = bool (*)(void* ptr, TimerId id);
+
+    ApplicationContext() = default;
+
+    template <typename EventBusType>
+    ApplicationContext(EventBusType& events, StaticCallback quitCallback)
+        : _busPtr(&events), _eventSink(events.sink()), _quitCallback(quitCallback)
+    {
+        initRegFns<EventBusType>(std::make_index_sequence<NumEvents>{});
+    }
+
+    template <typename Scheduler>
+    void setTimerScheduler(Scheduler& scheduler) noexcept
+    {
+        _timerSchedulerPtr = &scheduler;
+        _scheduleDelayedFn = [](void* ptr, EventVariant evt, std::chrono::microseconds delay, EventPriority prio) {
+            return static_cast<Scheduler*>(ptr)->scheduleDelayed(std::move(evt), delay, prio);
+        };
+        _schedulePeriodicFn = [](void* ptr, EventVariant evt, std::chrono::microseconds interval, EventPriority prio) {
+            return static_cast<Scheduler*>(ptr)->schedulePeriodic(std::move(evt), interval, prio);
+        };
+        _cancelTimerFn = [](void* ptr, TimerId id) {
+            return static_cast<Scheduler*>(ptr)->cancelTimer(id);
+        };
+    }
+
+    /// @brief Register an event handler into the application event bus.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        using EventType = callable_event_type_t<Handler>;
+        static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of Application's EventVariant list!");
+        constexpr std::size_t typeIdx = variant_index_v<EventType, EventVariant>;
+
+        if (_busPtr && _regFns[typeIdx]) {
+            using Decayed = std::decay_t<Handler>;
+            Decayed h(std::forward<Handler>(handler));
+
+            void (*invoker)(void* instance, const EventType& event) = [](void* instance, const EventType& event) {
+                (*static_cast<Decayed*>(instance))(event);
+            };
+
+            auto mover = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
+                auto* src = static_cast<Decayed*>(srcInstance);
+                ::new (destStorage) Decayed(std::move(*src));
+                src->~Decayed();
+                destInstance = destStorage;
+                srcInstance = nullptr;
+            };
+
+            auto destroyer = [](void* instance) noexcept {
+                static_cast<Decayed*>(instance)->~Decayed();
+            };
+
+            void* srcPtr = &h;
+            return _regFns[typeIdx](_busPtr, srcPtr, reinterpret_cast<void*>(invoker), mover, destroyer, sizeof(Decayed));
+        }
+        return false;
+    }
+
+    /// @brief Access event sink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Schedule a single-shot delayed event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_scheduleDelayedFn && _timerSchedulerPtr) {
+            return _scheduleDelayedFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+        }
+        return INVALID_TIMER_ID;
+    }
+
+    /// @brief Schedule a recurring periodic event with std::chrono duration.
+    template <typename Rep, typename Period>
+    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
+    {
+        if (_schedulePeriodicFn && _timerSchedulerPtr) {
+            return _schedulePeriodicFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+        }
+        return INVALID_TIMER_ID;
+    }
+
+    /// @brief Cancel an active timer.
+    bool cancelTimer(TimerId id) const noexcept
+    {
+        if (_cancelTimerFn && _timerSchedulerPtr) {
+            return _cancelTimerFn(_timerSchedulerPtr, id);
+        }
+        return false;
+    }
+
+    /// @brief Request graceful application exit.
+    void requestQuit() const
+    {
+        if (_quitCallback) {
+            _quitCallback();
+        }
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return _busPtr != nullptr;
+    }
+
+private:
+    template <typename EventBusType, std::size_t... Is>
+    void initRegFns(std::index_sequence<Is...>) noexcept
+    {
+        ((_regFns[Is] = [](
+            void* bPtr,
+            void* handlerObj,
+            void* invokerFn,
+            void (*mover)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept,
+            void (*destroyer)(void* instance) noexcept,
+            std::size_t size
+        ) -> bool {
+            using EventType = std::variant_alternative_t<Is, EventVariant>;
+            using StoragePolicy = typename EventBusType::ReactorType::StoragePolicyType;
+            constexpr std::size_t InlineSize = StoragePolicy::inline_storage_size;
+
+            if (size > InlineSize) {
+                return false;
+            }
+
+            auto* bus = static_cast<EventBusType*>(bPtr);
+            auto stub = reinterpret_cast<void (*)(void*, const EventType&)>(invokerFn);
+
+            EventHandlerDelegate<EventType, InlineSize> del(handlerObj, stub, mover, destroyer);
+            return bus->template registerHandler<EventType>(std::move(del));
+        }), ...);
+    }
+
+    void* _busPtr = nullptr;
+    EventSinkT<EventVariant> _eventSink{};
+    StaticCallback _quitCallback{};
+    std::array<RegFn, NumEvents> _regFns{};
+
+    void* _timerSchedulerPtr = nullptr;
+    ScheduleDelayedFn _scheduleDelayedFn = nullptr;
+    SchedulePeriodicFn _schedulePeriodicFn = nullptr;
+    CancelTimerFn _cancelTimerFn = nullptr;
+};
+
+} // namespace corium
+
+// <<< End: corium/ApplicationContext.hpp
+
+// >>> Begin: corium/ServiceRegistry.hpp
+
+#include <array>
+#include <cstddef>
+#include <stop_token>
+#include <type_traits>
+#include <utility>
+
+
+// >>> Begin: corium/BackgroundService.hpp
+
+
+// >>> Begin: corium/Service.hpp
+
+
+// >>> Begin: corium/EventBus.hpp
+
+
+// >>> Begin: corium/internal/EventQueue.hpp
+
+#include <optional>
+#include <utility>
+
+
+// >>> Begin: corium/policies/Policies.hpp
+
+/// @file Policies.hpp
+/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
+
+
+// >>> Begin: corium/policies/StoragePolicies.hpp
+
+#include <cstddef>
+
+namespace corium {
+
+/// @ingroup policies
+/// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
+/// @tparam MaxHandlers Maximum handlers per event type stored statically.
+/// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).
+template <std::size_t MaxHandlers = 8, std::size_t InlineSize = 32>
+struct FixedStoragePolicy {
+    static constexpr std::size_t max_handlers_per_event = MaxHandlers;
+    static constexpr std::size_t inline_storage_size = InlineSize;
+};
+
+/// @brief Default storage policy (8 handlers per event type, 32 bytes inline delegate storage).
+using DefaultStoragePolicy = FixedStoragePolicy<8, 32>;
+
+/// @brief Footprint-optimized storage policy (4 handlers per event type, 16 bytes inline storage).
+using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
+
+/// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
+using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
+
+/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
+using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
+
+} // namespace corium
+
+// <<< End: corium/policies/StoragePolicies.hpp
+
+// >>> Begin: corium/policies/OverflowPolicies.hpp
+
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <exception>
+#include <utility>
+
+
+namespace corium {
+
+/// @brief Default Overflow Policy: Silently drop incoming new event when queue is full. Zero overhead.
+struct DropNewestOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+        return false;
+    }
+};
+
+/// @brief Overflow Policy: Evict oldest event in queue to make room for the new event.
+/// Ideal for high-frequency telemetry and sensor data where newest reading is critical.
+struct DropOldestOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        typename QueuePolicy::EventType dummy;
+        queue.tryPop(dummy); // Evict oldest event
+        auto res = queue.tryPush(std::forward<EventVariant>(event), priority);
+        return res.pushed;
+    }
+};
+
+/// @brief Overflow Policy: Trigger assertion / panic when queue fills up.
+/// Essential for mission-critical systems where event loss is unacceptable.
+struct PanicOverflowPolicy {
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+#if defined(CORIUM_PANIC_ON_OVERFLOW)
+        std::terminate();
+#else
+        assert(false && "Corium Queue Overflow: Queue capacity exceeded!");
+        return false;
+#endif
+    }
+};
+
+/// @brief Overflow Policy: Audit and count dropped events via atomic counter.
+class AuditOverflowPolicy {
+public:
+    template <typename QueuePolicy, typename EventVariant>
+    bool handleOverflow(QueuePolicy& queue, EventVariant&& event, EventPriority priority = EventPriority::Normal)
+    {
+        (void)queue;
+        (void)event;
+        (void)priority;
+        _droppedCount.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    /// @brief Get total number of dropped events.
+    [[nodiscard]] uint64_t overflowCount() const noexcept
+    {
+        return _droppedCount.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Reset total dropped event counter to 0.
+    void resetOverflowCount() noexcept
+    {
+        _droppedCount.store(0, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<uint64_t> _droppedCount{0};
+};
+
+} // namespace corium
+
+// <<< End: corium/policies/OverflowPolicies.hpp
+
+// >>> Begin: corium/policies/TimerPolicies.hpp
+
+#include <cstddef>
+
+namespace corium {
+
 /// @brief Compile-time policy configuring TimerScheduler capacity and clock source.
 /// @tparam MaxTimers Maximum number of concurrent timers allowed (default: 64).
 /// @tparam ClockPolicy Time source and arithmetic policy (default: ChronoClockPolicy).
@@ -1553,237 +2016,6 @@ private:
 #include <variant>
 
 
-// >>> Begin: corium/internal/FastDelegate.hpp
-
-#include <cassert>
-#include <cstddef>
-#include <new>
-#include <type_traits>
-#include <utility>
-
-namespace corium {
-
-/// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
-/// Eliminates std::function heap allocations and virtual table overhead for event handlers.
-/// @tparam EventType The concrete event type invoked by this delegate.
-template <typename EventType, std::size_t InlineSize = 32>
-class EventHandlerDelegate {
-    using StubFn = void (*)(void* instance, const EventType& event);
-    using DestroyFn = void (*)(void* instance) noexcept;
-    using MoveFn = void (*)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept;
-
-public:
-    EventHandlerDelegate() noexcept = default;
-
-    /// @brief Construct delegate wrapping a callable object (lambda, function pointer, or functor).
-    /// @tparam Handler Callable type.
-    /// @param handler Callable instance.
-    template <
-        typename Handler,
-        typename Decayed = std::decay_t<Handler>,
-        typename = std::enable_if_t<
-            !std::is_same_v<Decayed, EventHandlerDelegate> &&
-            std::is_invocable_r_v<void, Decayed&, const EventType&>
-        >
-    >
-    explicit EventHandlerDelegate(Handler&& handler)
-    {
-        static_assert(
-            std::is_nothrow_destructible_v<Decayed>,
-            "Handler destructor must be noexcept"
-        );
-        static_assert(
-            sizeof(Decayed) <= InlineSize,
-            "Handler size exceeds FastDelegate inline storage size! Reduce captured state or increase InlineSize."
-        );
-        static_assert(
-            alignof(Decayed) <= alignof(std::max_align_t),
-            "Handler alignment requirement exceeds inline storage alignment."
-        );
-        static_assert(
-            std::is_nothrow_move_constructible_v<Decayed>,
-            "Handler must be nothrow move constructible."
-        );
-
-        void* storage = static_cast<void*>(_inlineStorage);
-        ::new (storage) Decayed(std::forward<Handler>(handler));
-        _instance = storage;
-
-        _destroy = [](void* instance) noexcept {
-            reinterpret_cast<Decayed*>(instance)->~Decayed();
-        };
-
-        _move = [](void* destStorage, void*& destInstance, void*& srcInstance) noexcept {
-            auto* src = reinterpret_cast<Decayed*>(srcInstance);
-            ::new (destStorage) Decayed(std::move(*src));
-            src->~Decayed();
-            destInstance = destStorage;
-            srcInstance = nullptr;
-        };
-
-        _stub = [](void* instance, const EventType& event) {
-            (*reinterpret_cast<Decayed*>(instance))(event);
-        };
-    }
-
-    ~EventHandlerDelegate()
-    {
-        reset();
-    }
-
-    EventHandlerDelegate(EventHandlerDelegate&& rhs) noexcept
-    {
-        moveFrom(std::move(rhs));
-    }
-
-    EventHandlerDelegate& operator=(EventHandlerDelegate&& rhs) noexcept
-    {
-        if (this != &rhs) {
-            reset();
-            moveFrom(std::move(rhs));
-        }
-
-        return *this;
-    }
-
-    EventHandlerDelegate(const EventHandlerDelegate&) = delete;
-    EventHandlerDelegate& operator=(const EventHandlerDelegate&) = delete;
-
-    /// @brief Invoke wrapped handler directly with concrete event.
-    /// @param event Event instance to pass to handler.
-    void invoke(const EventType& event) const
-    {
-        assert(_stub && "Invoking an empty EventHandlerDelegate");
-
-        if (!_stub) {
-            return;
-        }
-
-        _stub(_instance, event);
-    }
-
-    /// @brief Check if delegate wraps a valid handler.
-    explicit operator bool() const noexcept
-    {
-        return _stub != nullptr;
-    }
-
-    /// @brief Reset delegate to empty state.
-    void reset() noexcept
-    {
-        if (_destroy) {
-            _destroy(_instance);
-        }
-
-        _instance = nullptr;
-        _stub = nullptr;
-        _destroy = nullptr;
-        _move = nullptr;
-    }
-
-private:
-    void moveFrom(EventHandlerDelegate&& rhs) noexcept
-    {
-        _stub = rhs._stub;
-        _destroy = rhs._destroy;
-        _move = rhs._move;
-
-        if (_move) {
-            _move(
-                static_cast<void*>(_inlineStorage),
-                _instance,
-                rhs._instance
-            );
-        } else {
-            _instance = nullptr;
-        }
-
-        rhs._stub = nullptr;
-        rhs._destroy = nullptr;
-        rhs._move = nullptr;
-    }
-
-private:
-    alignas(std::max_align_t) std::byte _inlineStorage[InlineSize > 0 ? InlineSize : 1]{};
-
-    void* _instance = nullptr;
-    StubFn _stub = nullptr;
-    DestroyFn _destroy = nullptr;
-    MoveFn _move = nullptr;
-};
-
-} // namespace corium
-// <<< End: corium/internal/FastDelegate.hpp
-
-// >>> Begin: corium/internal/VariantIndex.hpp
-
-#include <type_traits>
-#include <variant>
-
-namespace corium {
-
-template <typename T, typename... Types>
-constexpr std::size_t get_variant_index_impl() {
-    constexpr bool matches[] = { std::is_same_v<T, Types>... };
-    
-    for (std::size_t i = 0; i < sizeof...(Types); ++i) {
-        if (matches[i]) return i;
-    }
-    
-    return static_cast<std::size_t>(-1); 
-}
-
-/// @brief Helper trait to compute index of type T inside std::variant<Types...> at compile time.
-template <typename T, typename Variant>
-struct variant_index;
-
-template <typename T, typename... Types>
-struct variant_index<T, std::variant<Types...>> {
-    static constexpr std::size_t value = get_variant_index_impl<T, Types...>();
-    
-    static_assert(value != static_cast<std::size_t>(-1), 
-                  "ERROR: The requested Event type is not part of the std::variant!");
-};
-
-/// @brief Compile-time constant of type T's index in Variant.
-template <typename T, typename Variant>
-inline constexpr std::size_t variant_index_v = variant_index<T, Variant>::value;
-
-/// @brief Helper trait to check if type T exists inside std::variant<Types...> at compile time.
-template <typename T, typename Variant>
-struct has_variant_type;
-
-template <typename T, typename... Types>
-struct has_variant_type<T, std::variant<Types...>> {
-    static constexpr bool value = (std::is_same_v<T, Types> || ...);
-};
-
-/// @brief Compile-time boolean indicating if type T exists in Variant.
-template <typename T, typename Variant>
-inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
-
-namespace internal {
-
-template <typename T>
-struct TypeId {
-    static inline const char id = 0;
-};
-
-using TypeIdPtr = const void*;
-
-/// @brief Get static unique address for type T without dynamic allocations or RTTI.
-template <typename T>
-inline TypeIdPtr getTypeId() noexcept {
-    return &TypeId<T>::id;
-}
-
-} // namespace internal
-
-} // namespace corium
-
-
-// <<< End: corium/internal/VariantIndex.hpp
-
 namespace corium {
 namespace internal {
 
@@ -1837,6 +2069,7 @@ class BasicReactor<std::variant<Events...>, StoragePolicy> {
 
 public:
     using EventVariant = std::variant<Events...>;
+    using StoragePolicyType = StoragePolicy;
 
     BasicReactor() = default;
     ~BasicReactor() = default;
@@ -1961,6 +2194,7 @@ struct alignas(32) FlightRecord {
     }
 };
 
+/// @ingroup profiler
 /// @brief Zero-heap circular flight recorder storing the last N event telemetry records.
 /// Thread-safe for multiple producers and concurrent reader/dumping.
 /// @tparam Capacity Number of flight records (power of 2).
@@ -2126,6 +2360,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// @ingroup profiler
 /// @brief Real-time event latency and performance statistics tracker.
 /// Zero dynamic memory allocation. Tracks min, max, total queue latency and handler duration.
 /// @tparam QueueCapacity Capacity of the parallel post-timestamp ring buffer (must match
@@ -2317,6 +2552,7 @@ private:
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Policy-configurable non-virtual event bus implementation.
 /// @tparam EventVariantType The variant type list of supported events.
 /// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC).
@@ -2521,132 +2757,6 @@ using EventBusT = BasicEventBus<EventVariantType, QueuePolicy, SignalPolicy, Sto
 
 // <<< End: corium/EventBus.hpp
 
-namespace corium {
-
-/// @brief Context object passed to Application providing event registration, sink access, quit requests, and timer scheduling.
-/// Completely encapsulates EventBus internals.
-/// @tparam EventBusType Concrete event bus type used by the runtime.
-template <typename EventBusType = EventBus>
-class ApplicationContext {
-public:
-    using EventVariant = typename EventBusType::EventVariant;
-
-    using ScheduleDelayedFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds delay, EventPriority priority);
-    using SchedulePeriodicFn = TimerId (*)(void* ptr, EventVariant event, std::chrono::microseconds interval, EventPriority priority);
-    using CancelTimerFn = bool (*)(void* ptr, TimerId id);
-
-    ApplicationContext() = default;
-
-    ApplicationContext(EventBusType& events, StaticCallback quitCallback)
-        : _events(&events), _quitCallback(quitCallback)
-    {
-    }
-
-    template <typename Scheduler>
-    void setTimerScheduler(Scheduler& scheduler) noexcept
-    {
-        _timerSchedulerPtr = &scheduler;
-        _scheduleDelayedFn = [](void* ptr, EventVariant evt, std::chrono::microseconds delay, EventPriority prio) {
-            return static_cast<Scheduler*>(ptr)->scheduleDelayed(std::move(evt), delay, prio);
-        };
-        _schedulePeriodicFn = [](void* ptr, EventVariant evt, std::chrono::microseconds interval, EventPriority prio) {
-            return static_cast<Scheduler*>(ptr)->schedulePeriodic(std::move(evt), interval, prio);
-        };
-        _cancelTimerFn = [](void* ptr, TimerId id) {
-            return static_cast<Scheduler*>(ptr)->cancelTimer(id);
-        };
-    }
-
-    /// @brief Register an event handler into the application event bus.
-    template <typename Handler>
-    bool registerHandler(Handler&& handler)
-    {
-        if (_events) {
-            return _events->registerHandler(std::forward<Handler>(handler));
-        }
-        return false;
-    }
-
-    /// @brief Access event sink handle.
-    [[nodiscard]] EventSinkT<EventVariant> eventSink() const
-    {
-        if (_events) {
-            return _events->sink();
-        }
-        return EventSinkT<EventVariant>{};
-    }
-
-    /// @brief Schedule a single-shot delayed event with std::chrono duration.
-    template <typename Rep, typename Period>
-    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
-    {
-        if (_scheduleDelayedFn && _timerSchedulerPtr) {
-            return _scheduleDelayedFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
-        }
-        return INVALID_TIMER_ID;
-    }
-
-    /// @brief Schedule a recurring periodic event with std::chrono duration.
-    template <typename Rep, typename Period>
-    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
-    {
-        if (_schedulePeriodicFn && _timerSchedulerPtr) {
-            return _schedulePeriodicFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
-        }
-        return INVALID_TIMER_ID;
-    }
-
-    /// @brief Cancel an active timer.
-    bool cancelTimer(TimerId id) const noexcept
-    {
-        if (_cancelTimerFn && _timerSchedulerPtr) {
-            return _cancelTimerFn(_timerSchedulerPtr, id);
-        }
-        return false;
-    }
-
-    /// @brief Request graceful application exit.
-    void requestQuit() const
-    {
-        if (_quitCallback) {
-            _quitCallback();
-        }
-    }
-
-    explicit operator bool() const noexcept
-    {
-        return _events != nullptr;
-    }
-
-private:
-    EventBusType* _events = nullptr;
-    StaticCallback _quitCallback;
-
-    void* _timerSchedulerPtr = nullptr;
-    ScheduleDelayedFn _scheduleDelayedFn = nullptr;
-    SchedulePeriodicFn _schedulePeriodicFn = nullptr;
-    CancelTimerFn _cancelTimerFn = nullptr;
-};
-
-} // namespace corium
-
-// <<< End: corium/ApplicationContext.hpp
-
-// >>> Begin: corium/ServiceRegistry.hpp
-
-#include <array>
-#include <cstddef>
-#include <stop_token>
-#include <type_traits>
-#include <utility>
-
-
-// >>> Begin: corium/BackgroundService.hpp
-
-
-// >>> Begin: corium/Service.hpp
-
-
 // >>> Begin: corium/ServiceContext.hpp
 
 
@@ -2757,6 +2867,7 @@ using ServiceContextT = BasicServiceContext<EventVariant>;
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Non-allocating base class for synchronous or thread-agnostic services.
 /// Provides event producing (posting to main EventBus) and event consuming (receiving events into dedicated incoming bus).
 /// Does NOT own a thread. Zero heap allocations, zero vtables/RTTI.
@@ -2914,8 +3025,9 @@ using ConsumerService = Service<
 
 namespace corium {
 
-/// @brief Non-allocating base class for background services owning a dedicated C++20 std::jthread.
-/// Extends Service to add thread lifecycle management and thread-safe waitAndPump waiting.
+/// @ingroup core
+/// @brief Multi-threaded background worker service owning a dedicated std::jthread.
+/// Integrates incoming event queue with background worker execution and cooperative shutdown via std::stop_token.
 /// Zero heap allocations, zero vtables/RTTI.
 /// @tparam EventVariantType Supported event variant type list.
 /// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
@@ -3087,6 +3199,7 @@ concept HasJoin = requires(T& t) {
 
 } // namespace internal
 
+/// @ingroup core
 /// @brief Non-allocating ServiceRegistry storing service handles in a fixed stack/static array.
 /// Zero heap allocations, zero vtables/RTTI.
 /// @tparam MaxServices Maximum number of background services allowed per registry (default 8).
@@ -3252,17 +3365,19 @@ template <
 >
 class BasicRuntime;
 
+/// @ingroup core
 /// @brief Static CRTP base class for applications managed by Corium Runtime.
-/// Subclass Application<Derived> or Application<Derived, EventBusType, MaxServices> for zero-vtable compile-time static dispatch.
+/// Subclass Application<Derived> or Application<Derived, EventVariant, MaxServices> for zero-vtable compile-time static dispatch.
 /// All framework operations and handlers are protected for clean encapsulation within the derived application.
 /// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
-/// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
+/// @tparam EventVariantOrBus Event variant type list or EventBus type (defaults to DefaultEvents).
 /// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
-template <typename Derived, typename EventBusType = EventBus, std::size_t MaxServices = 8>
+template <typename Derived, typename EventVariantOrBus = DefaultEvents, std::size_t MaxServices = 8>
 class Application {
 public:
-    using EventVariant = typename EventBusType::EventVariant;
+    using EventVariant = internal::extract_event_variant_t<EventVariantOrBus>;
     using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
+    using ContextType = ApplicationContext<EventVariant>;
 
     Application() = default;
     ~Application() = default;
@@ -3291,60 +3406,57 @@ protected:
     template <typename Rep, typename Period>
     TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
     {
-        return _context.scheduleDelayed(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
+        return _context.scheduleDelayed(std::move(event), delay, priority);
     }
 
     /// @brief Schedule a recurring periodic event.
     template <typename Rep, typename Period>
     TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
     {
-        return _context.schedulePeriodic(std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
+        return _context.schedulePeriodic(std::move(event), interval, priority);
     }
 
-    /// @brief Cancel an active timer handle.
-    bool cancelTimer(TimerId id)
+    /// @brief Cancel an active timer.
+    bool cancelTimer(TimerId id) noexcept
     {
         return _context.cancelTimer(id);
     }
 
-    /// @brief Request graceful application shutdown.
+    /// @brief Request graceful runtime shutdown.
     void requestQuit()
     {
         _context.requestQuit();
     }
 
-    /// @brief Access reference to the internal ServiceRegistry.
+    /// @brief Access background service registry.
     [[nodiscard]] ServiceRegistryType& services() noexcept
     {
         return _serviceRegistry;
     }
 
-    /// @brief Access const reference to the internal ServiceRegistry.
+    /// @brief Access const background service registry.
     [[nodiscard]] const ServiceRegistryType& services() const noexcept
     {
         return _serviceRegistry;
     }
 
-    /// @brief Retrieve a registered service instance by concrete type.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    /// @brief Retrieve registered background service by concrete type.
     template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type (const overload).
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] const ServiceType* getService() const noexcept
+    [[nodiscard]] ServiceType* getService() const noexcept
     {
         return _serviceRegistry.template getService<ServiceType>();
     }
 
 private:
-    template <typename, typename, typename, typename, typename, typename, typename>
+    template <
+        typename EV,
+        typename QP,
+        typename SP,
+        typename STP,
+        typename OP,
+        typename TP,
+        typename PP
+    >
     friend class BasicRuntime;
 
     template <typename Registry>
@@ -3387,15 +3499,15 @@ private:
         }
     }
 
-    void setContext(ApplicationContext<EventBusType> context)
+    void setContext(ApplicationContext<EventVariant> context)
     {
         _context = context;
-        if constexpr (requires(Derived& d, ApplicationContext<EventBusType> c) { d.onSetContext(c); }) {
+        if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
             static_cast<Derived*>(this)->onSetContext(context);
         }
     }
 
-    ApplicationContext<EventBusType> _context;
+    ApplicationContext<EventVariant> _context;
     ServiceRegistryType _serviceRegistry;
 };
 
@@ -3405,6 +3517,7 @@ private:
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Corium Application Runtime managing MPSC event loops and static policy execution.
 /// Zero dynamic heap allocations, zero RTTI.
 /// @tparam EventVariant The variant type list of supported events.
@@ -3428,10 +3541,6 @@ public:
     using ClockPolicyType = typename internal::get_timer_clock_policy<TimerStoragePolicy>::type;
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
     using ProfilerPolicyType = ProfilerPolicy;
-
-    /// @brief Application base class specialization matching this Runtime's EventBus type.
-    template <typename Derived, std::size_t MaxServices = 8>
-    using Application = corium::Application<Derived, EventBusType, MaxServices>;
 
     enum class State {
         Created,
@@ -3463,16 +3572,21 @@ public:
     }
 
     /// @brief Initialize runtime with target application using static CRTP dispatch.
-    /// @tparam Derived Application core type deriving from Application<Derived, EventBusType, MaxServices>.
+    /// @tparam Derived Application core type deriving from Application<Derived, AppEvents, MaxServices>.
+    /// @tparam AppEvents Event variant or event bus type defined on the application.
     /// @tparam MaxServices Number of services the application can register (deduced automatically).
     /// @param application Application instance to initialize.
-    template <typename Derived, std::size_t MaxServices = 8>
-    void initialize(corium::Application<Derived, EventBusType, MaxServices>& application)
+    template <typename Derived, typename AppEvents = EventVariant, std::size_t MaxServices = 8>
+    void initialize(corium::Application<Derived, AppEvents, MaxServices>& application)
     {
+        using AppEventVariant = typename corium::Application<Derived, AppEvents, MaxServices>::EventVariant;
+        static_assert(std::is_same_v<AppEventVariant, EventVariant>,
+            "Application EventVariant list must match Runtime EventVariant list!");
+
         _state.store(State::Initializing, std::memory_order_release);
         _appShutdownCb = StaticCallback{
             [](void* appPtr) {
-                auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, EventBusType, MaxServices>*>(appPtr));
+                auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, AppEvents, MaxServices>*>(appPtr));
                 app->shutdownServices();
                 app->shutdown();
             },
@@ -3692,9 +3806,9 @@ public:
 
 private:
     /// @brief Create ApplicationContext for application wiring.
-    ApplicationContext<EventBusType> applicationContext()
+    ApplicationContext<EventVariant> applicationContext()
     {
-        auto ctx = ApplicationContext<EventBusType>{
+        auto ctx = ApplicationContext<EventVariant>{
             _eventBus,
             StaticCallback{
                 [](void* c) { static_cast<BasicRuntime*>(c)->requestQuit(); },
@@ -4300,6 +4414,7 @@ public:
 
 namespace corium::logging {
 
+/// @ingroup logging
 /// @brief Static compile-time logger wrapper managing severity level filtering and zero-heap string formatting.
 /// @tparam LogSink Log sink backend handling actual log entry output (e.g. ConsoleLogSink, FileLogSink, NullLogSink).
 /// @tparam MaxMessageSize Maximum character length for formatted log messages.
@@ -4503,6 +4618,7 @@ private:
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief RAII interrupt locking helper disabling interrupts upon construction and restoring them upon destruction.
 class InterruptLock {
 public:
@@ -4571,6 +4687,7 @@ private:
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief Lightweight, zero-overhead wrapper around EventSink explicitly tailored for Hardware ISR handlers.
 /// Guarantees zero heap allocation, lock-free execution, and noexcept exception safety.
 /// @tparam EventSinkType Target underlying event sink type.
@@ -4653,6 +4770,7 @@ using BaseType_t = long;
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief FreeRTOS-specialized ISR sink managing RTOS task context switches.
 /// @tparam EventSinkType Target underlying event sink.
 template <typename EventSinkType>
@@ -4840,6 +4958,7 @@ constexpr void execute_action(const Action& action, From& from, const Event& e, 
 
 } // namespace detail
 
+/// @ingroup fsm
 /// @brief Zero-heap, compile-time Finite State Machine.
 /// @tparam Table TransitionTable defining valid state transitions.
 /// @tparam InitialState Default initial active state.
@@ -4906,7 +5025,7 @@ public:
     bool process_event(const Event& event) {
         return std::visit([this, &event](auto& currentState) -> bool {
             using CurrentStateType = std::decay_t<decltype(currentState)>;
-            return try_transition<CurrentStateType, Event>(currentState, event, Table{});
+            return this->try_transition<CurrentStateType, Event>(currentState, event, Table{});
         }, _state);
     }
 
@@ -4955,6 +5074,7 @@ private:
 
 namespace corium::async {
 
+/// @ingroup async
 /// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining.
 /// @tparam T Result type returned by the coroutine (defaults to void).
 template <typename T = void>
@@ -5269,6 +5389,7 @@ struct WireHeader {
 };
 #pragma pack(pop)
 
+/// @ingroup wire
 /// @brief Statically-sized zero-heap binary wire packet.
 /// @tparam MaxPayloadSize Maximum payload capacity in bytes (default: 64).
 template <size_t MaxPayloadSize = 64>
@@ -5319,6 +5440,7 @@ struct WirePacket {
 
 namespace corium::wire {
 
+/// @ingroup wire
 /// @brief Zero-heap type-safe serializer and deserializer for Corium event variants over binary wire streams.
 class WireSerializer {
 public:
@@ -5441,6 +5563,7 @@ enum class CircuitState : uint8_t {
     HalfOpen  ///< Recovery probing: allowing a single canary call to verify health.
 };
 
+/// @ingroup safety
 /// @brief Zero-allocation Circuit Breaker pattern for isolating faulty handlers or peripheral links.
 /// Thread-safe lock-free state transitions.
 /// @tparam FailureThreshold Consecutive failures before tripping open (default: 3).
@@ -5593,6 +5716,7 @@ private:
 
 namespace corium::safety {
 
+/// @ingroup safety
 /// @brief Zero-heap multi-service heartbeat tracker for safety-critical execution.
 /// Thread-safe for concurrent heartbeat signals and supervisory health checks.
 /// @tparam MaxServices Maximum number of monitored services (default: 16).
@@ -5743,6 +5867,7 @@ struct CircuitBreakerTrippedEvent {
 
 namespace corium::safety {
 
+/// @ingroup safety
 /// @brief Dedicated safety supervisor monitoring subsystem heartbeats and controlling watchdog refresh.
 /// Compatible with hardware IWDG (STM32, ESP32, nRF), RTOS Task Watchdogs, and POSIX watchdogs.
 /// Zero dynamic heap allocations, zero threading overhead.
@@ -6540,6 +6665,7 @@ private:
 
 namespace corium::ipc {
 
+/// @ingroup ipc
 /// @brief High-level typed inter-process communication channel for Corium events.
 /// Encapsulates OS shared memory allocation and lock-free event dispatching.
 /// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).
@@ -6669,6 +6795,7 @@ private:
 
 namespace corium::ipc {
 
+/// @ingroup ipc
 /// @brief Typed IPC channel operating over UNIX Domain Datagram Sockets.
 /// Provides boundary-preserving, discrete event transmission with zero packet fragmentation.
 /// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).

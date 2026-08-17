@@ -71,6 +71,23 @@ public:
         };
     }
 
+    /// @brief Construct delegate from type-erased thunk operations.
+    EventHandlerDelegate(
+        void* srcObj,
+        void (*stub)(void* instance, const EventType& event),
+        void (*moveFn)(void* destStorage, void*& destInstance, void*& srcInstance) noexcept,
+        void (*destroyFn)(void* instance) noexcept
+    ) noexcept
+    {
+        void* storage = static_cast<void*>(_inlineStorage);
+        _destroy = destroyFn;
+        _move = moveFn;
+        _stub = stub;
+        if (_move) {
+            _move(storage, _instance, srcObj);
+        }
+    }
+
     ~EventHandlerDelegate()
     {
         reset();

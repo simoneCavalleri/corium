@@ -63,7 +63,7 @@ using HftRuntime = corium::RuntimeBuilder<>
 // -----------------------------------------------------------------------------
 // 3. Trading Engine Core Application
 // -----------------------------------------------------------------------------
-class HftTradingEngineApp : public HftRuntime::Application<HftTradingEngineApp> {
+class HftTradingEngineApp : public corium::Application<HftTradingEngineApp, HftEvents> {
 public:
     uint32_t quotesProcessed = 0;
     uint32_t tradesExecuted = 0;

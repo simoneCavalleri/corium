@@ -7,6 +7,7 @@
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Non-virtual type-erased event sink handle (raw pointer + static function pointer).
 /// Zero dynamic heap allocations, zero vtables/RTTI.
 /// @tparam EventVariant The variant type list of supported events.

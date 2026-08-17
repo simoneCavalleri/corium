@@ -182,7 +182,7 @@ using PriorityRuntime = RuntimeBuilder<>
     ::WithPriorityQueue<256, 1024>
     ::Build;
 
-class PriorityApp : public Application<PriorityApp, PriorityRuntime::EventBusType> {
+class PriorityApp : public corium::Application<PriorityApp, AppEvents> {
 public:
     void onRegisterHandlers() {
         on([](const NormalUpdateEvent& e) {
@@ -242,7 +242,7 @@ using TimerRuntime = RuntimeBuilder<>
     ::WithMaxTimers<32>
     ::Build;
 
-class TimerApp : public Application<TimerApp, TimerRuntime::EventBusType> {
+class TimerApp : public corium::Application<TimerApp, AppEvents> {
 public:
     TimerId heartbeatTimerId = INVALID_TIMER_ID;
 
@@ -318,7 +318,7 @@ using Esp32Runtime = RuntimeBuilder<>
     ::WithStoragePolicy<CompactStoragePolicy> // 4 handlers per event, 16B inline SBO
     ::Build;
 
-class Esp32FirmwareApp : public Application<Esp32FirmwareApp, Esp32Runtime::EventBusType> {
+class Esp32FirmwareApp : public corium::Application<Esp32FirmwareApp, Esp32Events> {
 public:
     void onRegisterHandlers() {
         on([](const ButtonPressEvent& e) {

@@ -11,6 +11,7 @@
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Policy-configurable non-virtual event bus implementation.
 /// @tparam EventVariantType The variant type list of supported events.
 /// @tparam QueuePolicy Strategy for queueing events (bounded lock-free MPSC).

@@ -13,6 +13,7 @@
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Non-allocating base class for synchronous or thread-agnostic services.
 /// Provides event producing (posting to main EventBus) and event consuming (receiving events into dedicated incoming bus).
 /// Does NOT own a thread. Zero heap allocations, zero vtables/RTTI.

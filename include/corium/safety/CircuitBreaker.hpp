@@ -13,6 +13,7 @@ enum class CircuitState : uint8_t {
     HalfOpen  ///< Recovery probing: allowing a single canary call to verify health.
 };
 
+/// @ingroup safety
 /// @brief Zero-allocation Circuit Breaker pattern for isolating faulty handlers or peripheral links.
 /// Thread-safe lock-free state transitions.
 /// @tparam FailureThreshold Consecutive failures before tripping open (default: 3).

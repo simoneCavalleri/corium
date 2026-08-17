@@ -6,6 +6,7 @@
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief Lightweight, zero-overhead wrapper around EventSink explicitly tailored for Hardware ISR handlers.
 /// Guarantees zero heap allocation, lock-free execution, and noexcept exception safety.
 /// @tparam EventSinkType Target underlying event sink type.

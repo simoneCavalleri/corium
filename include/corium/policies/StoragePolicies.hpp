@@ -4,6 +4,7 @@
 
 namespace corium {
 
+/// @ingroup policies
 /// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
 /// @tparam MaxHandlers Maximum handlers per event type stored statically.
 /// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).

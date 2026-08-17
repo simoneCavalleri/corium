@@ -16,6 +16,7 @@
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Corium Application Runtime managing MPSC event loops and static policy execution.
 /// Zero dynamic heap allocations, zero RTTI.
 /// @tparam EventVariant The variant type list of supported events.
@@ -39,10 +40,6 @@ public:
     using ClockPolicyType = typename internal::get_timer_clock_policy<TimerStoragePolicy>::type;
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
     using ProfilerPolicyType = ProfilerPolicy;
-
-    /// @brief Application base class specialization matching this Runtime's EventBus type.
-    template <typename Derived, std::size_t MaxServices = 8>
-    using Application = corium::Application<Derived, EventBusType, MaxServices>;
 
     enum class State {
         Created,
@@ -74,16 +71,21 @@ public:
     }
 
     /// @brief Initialize runtime with target application using static CRTP dispatch.
-    /// @tparam Derived Application core type deriving from Application<Derived, EventBusType, MaxServices>.
+    /// @tparam Derived Application core type deriving from Application<Derived, AppEvents, MaxServices>.
+    /// @tparam AppEvents Event variant or event bus type defined on the application.
     /// @tparam MaxServices Number of services the application can register (deduced automatically).
     /// @param application Application instance to initialize.
-    template <typename Derived, std::size_t MaxServices = 8>
-    void initialize(corium::Application<Derived, EventBusType, MaxServices>& application)
+    template <typename Derived, typename AppEvents = EventVariant, std::size_t MaxServices = 8>
+    void initialize(corium::Application<Derived, AppEvents, MaxServices>& application)
     {
+        using AppEventVariant = typename corium::Application<Derived, AppEvents, MaxServices>::EventVariant;
+        static_assert(std::is_same_v<AppEventVariant, EventVariant>,
+            "Application EventVariant list must match Runtime EventVariant list!");
+
         _state.store(State::Initializing, std::memory_order_release);
         _appShutdownCb = StaticCallback{
             [](void* appPtr) {
-                auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, EventBusType, MaxServices>*>(appPtr));
+                auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, AppEvents, MaxServices>*>(appPtr));
                 app->shutdownServices();
                 app->shutdown();
             },
@@ -303,9 +305,9 @@ public:
 
 private:
     /// @brief Create ApplicationContext for application wiring.
-    ApplicationContext<EventBusType> applicationContext()
+    ApplicationContext<EventVariant> applicationContext()
     {
-        auto ctx = ApplicationContext<EventBusType>{
+        auto ctx = ApplicationContext<EventVariant>{
             _eventBus,
             StaticCallback{
                 [](void* c) { static_cast<BasicRuntime*>(c)->requestQuit(); },

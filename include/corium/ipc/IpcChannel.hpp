@@ -11,6 +11,7 @@
 
 namespace corium::ipc {
 
+/// @ingroup ipc
 /// @brief High-level typed inter-process communication channel for Corium events.
 /// Encapsulates OS shared memory allocation and lock-free event dispatching.
 /// @tparam EventVariant Supported event variant list (must be trivially copyable or POD).

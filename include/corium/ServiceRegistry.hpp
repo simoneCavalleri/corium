@@ -45,6 +45,7 @@ concept HasJoin = requires(T& t) {
 
 } // namespace internal
 
+/// @ingroup core
 /// @brief Non-allocating ServiceRegistry storing service handles in a fixed stack/static array.
 /// Zero heap allocations, zero vtables/RTTI.
 /// @tparam MaxServices Maximum number of background services allowed per registry (default 8).

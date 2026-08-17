@@ -18,6 +18,7 @@ using BaseType_t = long;
 
 namespace corium::embedded {
 
+/// @ingroup embedded
 /// @brief FreeRTOS-specialized ISR sink managing RTOS task context switches.
 /// @tparam EventSinkType Target underlying event sink.
 template <typename EventSinkType>

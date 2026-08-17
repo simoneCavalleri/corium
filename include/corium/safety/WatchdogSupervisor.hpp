@@ -13,6 +13,7 @@
 
 namespace corium::safety {
 
+/// @ingroup safety
 /// @brief Dedicated safety supervisor monitoring subsystem heartbeats and controlling watchdog refresh.
 /// Compatible with hardware IWDG (STM32, ESP32, nRF), RTOS Task Watchdogs, and POSIX watchdogs.
 /// Zero dynamic heap allocations, zero threading overhead.

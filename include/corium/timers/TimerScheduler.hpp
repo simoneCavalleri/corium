@@ -16,6 +16,7 @@ namespace corium {
 using TimerId = uint32_t;
 constexpr TimerId INVALID_TIMER_ID = 0;
 
+/// @ingroup timers
 /// @brief Zero-heap Timer Scheduler storing timers in a fixed-capacity static array.
 /// Supports single-shot delayed events and recurring periodic events with compile-time clock policy.
 /// @tparam EventVariant Supported event variant list type.
