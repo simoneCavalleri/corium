@@ -43,7 +43,7 @@ public:
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
     using ProfilerPolicyType = ProfilerPolicy;
 
-    enum class State {
+    enum class State : uint8_t {
         Created,
         Initializing,
         Running,
@@ -251,56 +251,55 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _eventBus.signalPolicy();
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _eventBus.signalPolicy();
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _eventBus.overflowPolicy();
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _eventBus.overflowPolicy();
     }
 
     /// @brief Access reference to timer scheduler.
-    TimerSchedulerType& timerScheduler() noexcept
+    [[nodiscard]] TimerSchedulerType& timerScheduler() noexcept
     {
         return _timerScheduler;
     }
 
     /// @brief Access const reference to timer scheduler.
-    const TimerSchedulerType& timerScheduler() const noexcept
+    [[nodiscard]] const TimerSchedulerType& timerScheduler() const noexcept
     {
         return _timerScheduler;
     }
 
     /// @brief Access event sink handle.
-    EventSinkT<EventVariant> eventSink() noexcept
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() noexcept
     {
         return _eventBus.sink();
     }
 
-
     /// @brief Access reference to profiler policy.
-    ProfilerPolicyType& profiler() noexcept
+    [[nodiscard]] ProfilerPolicyType& profiler() noexcept
     {
         return _eventBus.profiler();
     }
 
     /// @brief Access const reference to profiler policy.
-    const ProfilerPolicyType& profiler() const noexcept
+    [[nodiscard]] const ProfilerPolicyType& profiler() const noexcept
     {
         return _eventBus.profiler();
     }

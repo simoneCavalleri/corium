@@ -27,11 +27,11 @@ class MpscRingBuffer {
             new (static_cast<void*>(storage)) T(std::forward<Args>(args)...);
         }
 
-        T& value() noexcept {
+        [[nodiscard]] T& value() noexcept {
             return *std::launder(reinterpret_cast<T*>(storage));
         }
 
-        const T& value() const noexcept {
+        [[nodiscard]] const T& value() const noexcept {
             return *std::launder(reinterpret_cast<const T*>(storage));
         }
 
@@ -65,6 +65,12 @@ public:
 
     MpscRingBuffer(const MpscRingBuffer&) = delete;
     MpscRingBuffer& operator=(const MpscRingBuffer&) = delete;
+
+    /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers, const lvalue overload).
+    PushResult tryPush(const T& value) {
+        T copy = value;
+        return tryPush(std::move(copy));
+    }
 
     /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers).
     PushResult tryPush(T&& value) {

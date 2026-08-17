@@ -8,7 +8,7 @@ namespace corium::async {
 
 /// @brief Awaitable that yields control back to the caller/event loop once.
 struct YieldAwaiter {
-    constexpr bool await_ready() const noexcept { return false; }
+    [[nodiscard]] constexpr bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> handle) const noexcept {
         handle.resume();
     }
@@ -25,7 +25,7 @@ template <typename Rep, typename Period>
 struct DelayAwaiter {
     std::chrono::duration<Rep, Period> duration;
 
-    constexpr bool await_ready() const noexcept {
+    [[nodiscard]] constexpr bool await_ready() const noexcept {
         return duration.count() <= 0;
     }
 

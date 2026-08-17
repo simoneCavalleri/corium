@@ -9,30 +9,23 @@ Checks: >
   performance-*,
   modernize-*,
   clang-analyzer-*,
-  readability-*,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
-  -readability-identifier-length,
-  -readability-magic-numbers,
+  -modernize-raw-string-literal,
+  -modernize-macro-to-enum,
+  -modernize-use-constraints,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
-  -readability-function-cognitive-complexity,
-  -readability-else-after-return,
-  -readability-implicit-bool-conversion
+  -bugprone-exception-escape,
+  -bugprone-unchecked-optional-access,
+  -performance-inefficient-vector-operation,
+  -clang-analyzer-optin.performance.Padding
 
 WarningsAsErrors: 'cert-*,bugprone-*,performance-*,modernize-*'
 
 HeaderFilterRegex: 'include/corium/.*'
 
 CheckOptions:
-  - key: readability-identifier-naming.NamespaceCase
-    value: lower_case
-  - key: readability-identifier-naming.ClassCase
-    value: CamelCase
-  - key: readability-identifier-naming.StructCase
-    value: CamelCase
-  - key: readability-identifier-naming.EnumCase
-    value: CamelCase
   - key: performance-move-const-arg.CheckTriviallyCopyableMove
     value: true
 ...

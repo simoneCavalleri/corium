@@ -8,7 +8,7 @@ using namespace corium;
 // 1. Producer Service using ProducerBackgroundService (No incoming queue/reactor footprint)
 class DummyProducerService : public ProducerBackgroundService<> {
 public:
-    void run(std::stop_token stopToken) {
+    void run(const std::stop_token& stopToken) {
         while (!stopToken.stop_requested()) {
             _tickCount++;
             post(TickEvent{0.01});
@@ -16,7 +16,7 @@ public:
         }
     }
 
-    int tickCount() const { return _tickCount; }
+    [[nodiscard]] int tickCount() const { return _tickCount; }
 
 private:
     int _tickCount = 0;

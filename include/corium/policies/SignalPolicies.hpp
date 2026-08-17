@@ -27,7 +27,7 @@ struct StaticCallback {
     StaticCallback() = default;
 
     /* implicit */ StaticCallback(SimpleFn simpleFn)
-        : fn(reinterpret_cast<ContextFn>(simpleFn)), arg(nullptr)
+        : fn(reinterpret_cast<ContextFn>(simpleFn))
     {
         if (simpleFn) {
             // Helper trampoline for parameterless function pointers

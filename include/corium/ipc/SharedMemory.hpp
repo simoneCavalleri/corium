@@ -46,7 +46,7 @@ private:
 /// Manages OS-level shared memory allocation, memory mapping, and cleanup.
 class SharedMemory {
 public:
-    enum class AccessMode {
+    enum class AccessMode : uint8_t {
         CreateOrOpen,
         OpenReadOnly,
         OpenReadWrite

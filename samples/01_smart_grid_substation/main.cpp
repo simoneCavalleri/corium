@@ -66,7 +66,7 @@ using SmartGridRuntime = corium::RuntimeBuilder
 // -----------------------------------------------------------------------------
 class SubstationMeteringService : public corium::ProducerBackgroundService<SmartGridEvents> {
 public:
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         uint32_t sampleIndex = 1;
         while (!stopToken.stop_requested() && sampleIndex <= 4) {

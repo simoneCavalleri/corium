@@ -147,11 +147,11 @@ class MpscRingBuffer {
             new (static_cast<void*>(storage)) T(std::forward<Args>(args)...);
         }
 
-        T& value() noexcept {
+        [[nodiscard]] T& value() noexcept {
             return *std::launder(reinterpret_cast<T*>(storage));
         }
 
-        const T& value() const noexcept {
+        [[nodiscard]] const T& value() const noexcept {
             return *std::launder(reinterpret_cast<const T*>(storage));
         }
 
@@ -185,6 +185,12 @@ public:
 
     MpscRingBuffer(const MpscRingBuffer&) = delete;
     MpscRingBuffer& operator=(const MpscRingBuffer&) = delete;
+
+    /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers, const lvalue overload).
+    PushResult tryPush(const T& value) {
+        T copy = value;
+        return tryPush(std::move(copy));
+    }
 
     /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers).
     PushResult tryPush(T&& value) {
@@ -924,7 +930,7 @@ struct StaticCallback {
     StaticCallback() = default;
 
     /* implicit */ StaticCallback(SimpleFn simpleFn)
-        : fn(reinterpret_cast<ContextFn>(simpleFn)), arg(nullptr)
+        : fn(reinterpret_cast<ContextFn>(simpleFn))
     {
         if (simpleFn) {
             // Helper trampoline for parameterless function pointers
@@ -1428,7 +1434,7 @@ public:
         } else if constexpr (std::is_same_v<duration, std::chrono::milliseconds>) {
             return allocateTimer(std::move(event), expiry, std::chrono::duration_cast<std::chrono::milliseconds>(interval), priority, true);
         } else {
-            duration nativeInterval = static_cast<duration>(std::chrono::duration_cast<std::chrono::microseconds>(interval).count());
+            auto nativeInterval = static_cast<duration>(std::chrono::duration_cast<std::chrono::microseconds>(interval).count());
             return allocateTimer(std::move(event), expiry, nativeInterval, priority, true);
         }
     }
@@ -1646,7 +1652,7 @@ public:
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.
     template <typename Rep, typename Period>
-    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
+    [[nodiscard]] TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
     {
         if (_scheduleDelayedFn && _timerSchedulerPtr) {
             return _scheduleDelayedFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
@@ -1656,7 +1662,7 @@ public:
 
     /// @brief Schedule a recurring periodic event with std::chrono duration.
     template <typename Rep, typename Period>
-    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
+    [[nodiscard]] TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
     {
         if (_schedulePeriodicFn && _timerSchedulerPtr) {
             return _schedulePeriodicFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
@@ -1665,7 +1671,7 @@ public:
     }
 
     /// @brief Cancel an active timer.
-    bool cancelTimer(TimerId id) const noexcept
+    [[nodiscard]] bool cancelTimer(TimerId id) const noexcept
     {
         if (_cancelTimerFn && _timerSchedulerPtr) {
             return _cancelTimerFn(_timerSchedulerPtr, id);
@@ -1923,7 +1929,7 @@ public:
     /// @brief Push an event into the queue and trigger signal policy on 0->1 transition (rvalue overload).
     bool pushEvent(EventVariant&& event, EventPriority priority = EventPriority::Normal)
     {
-        auto res = _queuePolicy.tryPush(std::move(event), priority);
+        auto res = _queuePolicy.tryPush(event, priority);
         if (!res.pushed) {
             return _overflowPolicy.handleOverflow(_queuePolicy, std::move(event), priority);
         }
@@ -1972,25 +1978,25 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _signalPolicy;
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _signalPolicy;
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _overflowPolicy;
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _overflowPolicy;
     }
@@ -2046,7 +2052,7 @@ inline void panic(const char* file, int line, const char* message) noexcept {
     __asm volatile("bkpt #0");
     for (;;) {}
 #else
-    std::fprintf(stderr, "Corium Panic: %s (%s:%d)\n", message, file, line);
+    (void)std::fprintf(stderr, "Corium Panic: %s (%s:%d)\n", message, file, line);
     std::abort();
 #endif
 }
@@ -2402,7 +2408,7 @@ public:
     {
         // Best-effort: if the timestamp queue is full (e.g. profiler not being read),
         // drop the timestamp rather than blocking or corrupting the event queue.
-        _timestamps.tryPush(std::move(postNs));
+        _timestamps.tryPush(postNs);
     }
 
     /// @brief Pop and return the oldest recorded post timestamp (called at dispatch time).
@@ -2708,13 +2714,13 @@ public:
     }
 
     /// @brief Access reference to profiler policy.
-    ProfilerPolicy& profiler() noexcept
+    [[nodiscard]] ProfilerPolicy& profiler() noexcept
     {
         return _profilerPolicy;
     }
 
     /// @brief Access const reference to profiler policy.
-    const ProfilerPolicy& profiler() const noexcept
+    [[nodiscard]] const ProfilerPolicy& profiler() const noexcept
     {
         return _profilerPolicy;
     }
@@ -2758,25 +2764,25 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _eventQueue.signalPolicy();
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _eventQueue.signalPolicy();
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _eventQueue.overflowPolicy();
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _eventQueue.overflowPolicy();
     }
@@ -3045,8 +3051,8 @@ protected:
         return _context.template sendToService<TargetService>(std::forward<EventType>(event), priority);
     }
 
-    IncomingBus& incomingBus() noexcept { return _incomingBus; }
-    const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
+    [[nodiscard]] IncomingBus& incomingBus() noexcept { return _incomingBus; }
+    [[nodiscard]] const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
 
 private:
     ServiceContextT<EventVariant> _context;
@@ -3604,7 +3610,7 @@ public:
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
     using ProfilerPolicyType = ProfilerPolicy;
 
-    enum class State {
+    enum class State : uint8_t {
         Created,
         Initializing,
         Running,
@@ -3812,56 +3818,55 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _eventBus.signalPolicy();
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _eventBus.signalPolicy();
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _eventBus.overflowPolicy();
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _eventBus.overflowPolicy();
     }
 
     /// @brief Access reference to timer scheduler.
-    TimerSchedulerType& timerScheduler() noexcept
+    [[nodiscard]] TimerSchedulerType& timerScheduler() noexcept
     {
         return _timerScheduler;
     }
 
     /// @brief Access const reference to timer scheduler.
-    const TimerSchedulerType& timerScheduler() const noexcept
+    [[nodiscard]] const TimerSchedulerType& timerScheduler() const noexcept
     {
         return _timerScheduler;
     }
 
     /// @brief Access event sink handle.
-    EventSinkT<EventVariant> eventSink() noexcept
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() noexcept
     {
         return _eventBus.sink();
     }
 
-
     /// @brief Access reference to profiler policy.
-    ProfilerPolicyType& profiler() noexcept
+    [[nodiscard]] ProfilerPolicyType& profiler() noexcept
     {
         return _eventBus.profiler();
     }
 
     /// @brief Access const reference to profiler policy.
-    const ProfilerPolicyType& profiler() const noexcept
+    [[nodiscard]] const ProfilerPolicyType& profiler() const noexcept
     {
         return _eventBus.profiler();
     }
@@ -4437,7 +4442,7 @@ public:
     void close() noexcept
     {
         if (_file) {
-            std::fclose(_file);
+            (void)std::fclose(_file);
             _file = nullptr;
         }
     }
@@ -4447,12 +4452,12 @@ public:
     void write(const LogEventT<N>& event) const
     {
         if (_file) {
-            std::fprintf(_file, "[%s] [%s] %.*s\n",
-                         logLevelToString(event.level),
-                         event.category,
-                         static_cast<int>(event.length),
-                         event.message.data());
-            std::fflush(_file);
+            (void)std::fprintf(_file, "[%s] [%s] %.*s\n",
+                               logLevelToString(event.level),
+                               event.category,
+                               static_cast<int>(event.length),
+                               event.message.data());
+            (void)std::fflush(_file);
         }
     }
 
@@ -4660,7 +4665,7 @@ public:
     }
 
     /// @brief Main background execution loop.
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         _logger.info("Asynchronous LogBackgroundService started.");
         while (!stopToken.stop_requested()) {
@@ -5244,7 +5249,7 @@ public:
     }
 
     /// @brief Awaiter interface for co_await chaining.
-    bool await_ready() const noexcept {
+    [[nodiscard]] bool await_ready() const noexcept {
         return !_handle || _handle.done();
     }
 
@@ -5347,7 +5352,7 @@ public:
         }
     }
 
-    bool await_ready() const noexcept {
+    [[nodiscard]] bool await_ready() const noexcept {
         return !_handle || _handle.done();
     }
 
@@ -5386,7 +5391,7 @@ namespace corium::async {
 
 /// @brief Awaitable that yields control back to the caller/event loop once.
 struct YieldAwaiter {
-    constexpr bool await_ready() const noexcept { return false; }
+    [[nodiscard]] constexpr bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> handle) const noexcept {
         handle.resume();
     }
@@ -5403,7 +5408,7 @@ template <typename Rep, typename Period>
 struct DelayAwaiter {
     std::chrono::duration<Rep, Period> duration;
 
-    constexpr bool await_ready() const noexcept {
+    [[nodiscard]] constexpr bool await_ready() const noexcept {
         return duration.count() <= 0;
     }
 
@@ -6129,7 +6134,7 @@ public:
     }
 
     /// @brief Background worker loop executing periodic health supervision.
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         while (!stopToken.stop_requested()) {
             std::this_thread::sleep_for(_checkInterval);
@@ -6429,7 +6434,7 @@ private:
 /// Manages OS-level shared memory allocation, memory mapping, and cleanup.
 class SharedMemory {
 public:
-    enum class AccessMode {
+    enum class AccessMode : uint8_t {
         CreateOrOpen,
         OpenReadOnly,
         OpenReadWrite

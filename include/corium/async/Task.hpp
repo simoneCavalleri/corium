@@ -92,7 +92,7 @@ public:
     }
 
     /// @brief Awaiter interface for co_await chaining.
-    bool await_ready() const noexcept {
+    [[nodiscard]] bool await_ready() const noexcept {
         return !_handle || _handle.done();
     }
 
@@ -195,7 +195,7 @@ public:
         }
     }
 
-    bool await_ready() const noexcept {
+    [[nodiscard]] bool await_ready() const noexcept {
         return !_handle || _handle.done();
     }
 

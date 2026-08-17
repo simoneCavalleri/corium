@@ -107,13 +107,13 @@ public:
     }
 
     /// @brief Access reference to profiler policy.
-    ProfilerPolicy& profiler() noexcept
+    [[nodiscard]] ProfilerPolicy& profiler() noexcept
     {
         return _profilerPolicy;
     }
 
     /// @brief Access const reference to profiler policy.
-    const ProfilerPolicy& profiler() const noexcept
+    [[nodiscard]] const ProfilerPolicy& profiler() const noexcept
     {
         return _profilerPolicy;
     }
@@ -157,25 +157,25 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _eventQueue.signalPolicy();
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _eventQueue.signalPolicy();
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _eventQueue.overflowPolicy();
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _eventQueue.overflowPolicy();
     }

@@ -58,6 +58,7 @@ TEST(FastDelegateTest, MoveSemantics) {
 
     EventHandlerDelegate<TickEvent> d2 = std::move(d1);
 
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     EXPECT_FALSE(static_cast<bool>(d1));
     EXPECT_TRUE(static_cast<bool>(d2));
 

@@ -57,7 +57,7 @@ public:
     void close() noexcept
     {
         if (_file) {
-            std::fclose(_file);
+            (void)std::fclose(_file);
             _file = nullptr;
         }
     }
@@ -67,12 +67,12 @@ public:
     void write(const LogEventT<N>& event) const
     {
         if (_file) {
-            std::fprintf(_file, "[%s] [%s] %.*s\n",
-                         logLevelToString(event.level),
-                         event.category,
-                         static_cast<int>(event.length),
-                         event.message.data());
-            std::fflush(_file);
+            (void)std::fprintf(_file, "[%s] [%s] %.*s\n",
+                               logLevelToString(event.level),
+                               event.category,
+                               static_cast<int>(event.length),
+                               event.message.data());
+            (void)std::fflush(_file);
         }
     }
 

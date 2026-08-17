@@ -59,7 +59,7 @@ TEST(LoggingTest, FileLogSinkOutput)
     std::getline(file, line);
     EXPECT_NE(line.find("[WARN] [Storage] Disk space low"), std::string::npos);
     file.close();
-    std::remove(testFilePath);
+    (void)std::remove(testFilePath);
 }
 
 struct LoggingMockSink {

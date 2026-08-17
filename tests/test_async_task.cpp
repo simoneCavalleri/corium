@@ -20,11 +20,11 @@ Task<int> asyncChained()
 
 Task<void> asyncSequence(std::vector<std::string>& log)
 {
-    log.push_back("Step 1");
+    log.emplace_back("Step 1");
     co_await yield();
-    log.push_back("Step 2");
+    log.emplace_back("Step 2");
     co_await yield();
-    log.push_back("Step 3");
+    log.emplace_back("Step 3");
 }
 
 TEST(AsyncTaskTest, SimpleTaskComputation)

@@ -64,7 +64,7 @@ constexpr uint32_t TASK_ID_STABILITY_CTRL   = 3;
 
 class BrakeActuatorService : public corium::ProducerBackgroundService<AutomotiveEvents> {
 public:
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         uint32_t cycle = 1;
         while (!stopToken.stop_requested() && cycle <= 4) {

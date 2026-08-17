@@ -26,7 +26,7 @@ public:
     /// @brief Push an event into the queue and trigger signal policy on 0->1 transition (rvalue overload).
     bool pushEvent(EventVariant&& event, EventPriority priority = EventPriority::Normal)
     {
-        auto res = _queuePolicy.tryPush(std::move(event), priority);
+        auto res = _queuePolicy.tryPush(event, priority);
         if (!res.pushed) {
             return _overflowPolicy.handleOverflow(_queuePolicy, std::move(event), priority);
         }
@@ -75,25 +75,25 @@ public:
     }
 
     /// @brief Access reference to signal policy.
-    SignalPolicy& signalPolicy() noexcept
+    [[nodiscard]] SignalPolicy& signalPolicy() noexcept
     {
         return _signalPolicy;
     }
 
     /// @brief Access const reference to signal policy.
-    const SignalPolicy& signalPolicy() const noexcept
+    [[nodiscard]] const SignalPolicy& signalPolicy() const noexcept
     {
         return _signalPolicy;
     }
 
     /// @brief Access reference to overflow policy.
-    OverflowPolicy& overflowPolicy() noexcept
+    [[nodiscard]] OverflowPolicy& overflowPolicy() noexcept
     {
         return _overflowPolicy;
     }
 
     /// @brief Access const reference to overflow policy.
-    const OverflowPolicy& overflowPolicy() const noexcept
+    [[nodiscard]] const OverflowPolicy& overflowPolicy() const noexcept
     {
         return _overflowPolicy;
     }

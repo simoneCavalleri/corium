@@ -28,7 +28,7 @@ inline void panic(const char* file, int line, const char* message) noexcept {
     __asm volatile("bkpt #0");
     for (;;) {}
 #else
-    std::fprintf(stderr, "Corium Panic: %s (%s:%d)\n", message, file, line);
+    (void)std::fprintf(stderr, "Corium Panic: %s (%s:%d)\n", message, file, line);
     std::abort();
 #endif
 }

@@ -54,7 +54,7 @@ public:
     {
         // Best-effort: if the timestamp queue is full (e.g. profiler not being read),
         // drop the timestamp rather than blocking or corrupting the event queue.
-        _timestamps.tryPush(std::move(postNs));
+        _timestamps.tryPush(postNs);
     }
 
     /// @brief Pop and return the oldest recorded post timestamp (called at dispatch time).

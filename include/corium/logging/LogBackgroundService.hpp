@@ -36,7 +36,7 @@ public:
     }
 
     /// @brief Main background execution loop.
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         _logger.info("Asynchronous LogBackgroundService started.");
         while (!stopToken.stop_requested()) {

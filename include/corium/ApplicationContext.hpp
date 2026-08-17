@@ -109,7 +109,7 @@ public:
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.
     template <typename Rep, typename Period>
-    TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
+    [[nodiscard]] TimerId scheduleDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal) const
     {
         if (_scheduleDelayedFn && _timerSchedulerPtr) {
             return _scheduleDelayedFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(delay), priority);
@@ -119,7 +119,7 @@ public:
 
     /// @brief Schedule a recurring periodic event with std::chrono duration.
     template <typename Rep, typename Period>
-    TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
+    [[nodiscard]] TimerId schedulePeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal) const
     {
         if (_schedulePeriodicFn && _timerSchedulerPtr) {
             return _schedulePeriodicFn(_timerSchedulerPtr, std::move(event), std::chrono::duration_cast<std::chrono::microseconds>(interval), priority);
@@ -128,7 +128,7 @@ public:
     }
 
     /// @brief Cancel an active timer.
-    bool cancelTimer(TimerId id) const noexcept
+    [[nodiscard]] bool cancelTimer(TimerId id) const noexcept
     {
         if (_cancelTimerFn && _timerSchedulerPtr) {
             return _cancelTimerFn(_timerSchedulerPtr, id);

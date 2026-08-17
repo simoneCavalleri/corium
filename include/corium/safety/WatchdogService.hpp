@@ -62,7 +62,7 @@ public:
     }
 
     /// @brief Background worker loop executing periodic health supervision.
-    void run(std::stop_token stopToken)
+    void run(const std::stop_token& stopToken)
     {
         while (!stopToken.stop_requested()) {
             std::this_thread::sleep_for(_checkInterval);

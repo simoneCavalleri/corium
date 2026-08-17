@@ -8,7 +8,7 @@ using namespace corium;
 
 class TestProducerService : public BackgroundService<> {
 public:
-    void run(std::stop_token stopToken) {
+    void run(const std::stop_token& stopToken) {
         while (!stopToken.stop_requested()) {
             _tickCount++;
             post(TickEvent{0.05});
@@ -16,7 +16,7 @@ public:
         }
     }
 
-    int count() const { return _tickCount; }
+    [[nodiscard]] int count() const { return _tickCount; }
 
 private:
     int _tickCount = 0;
@@ -68,14 +68,14 @@ public:
         });
     }
 
-    void run(std::stop_token stopToken) {
+    void run(const std::stop_token& stopToken) {
         while (!stopToken.stop_requested()) {
             waitAndPump(stopToken, std::chrono::milliseconds(20));
         }
     }
 
-    int signalsReceived() const { return _signalsReceived; }
-    uint32_t lastSignalId() const { return _lastSignalId; }
+    [[nodiscard]] int signalsReceived() const { return _signalsReceived; }
+    [[nodiscard]] uint32_t lastSignalId() const { return _lastSignalId; }
 
 private:
     int _signalsReceived = 0;
@@ -84,7 +84,7 @@ private:
 
 class InterServiceProducer : public BackgroundService<> {
 public:
-    void run(std::stop_token stopToken) {
+    void run(const std::stop_token& stopToken) {
         uint32_t id = 1;
         while (!stopToken.stop_requested()) {
             sendToService<TestConsumerService>(SignalEvent{id++});
@@ -153,8 +153,8 @@ public:
         });
     }
 
-    int eventsHandled() const { return _eventsHandled; }
-    uint32_t lastVal() const { return _lastVal; }
+    [[nodiscard]] int eventsHandled() const { return _eventsHandled; }
+    [[nodiscard]] uint32_t lastVal() const { return _lastVal; }
 
 private:
     int _eventsHandled = 0;
@@ -177,7 +177,7 @@ public:
     bool onErrorCalled = false;
     std::string capturedError;
 
-    void onError(std::exception_ptr ep) {
+    void onError(const std::exception_ptr& ep) {
         onErrorCalled = true;
         try {
             if (ep) std::rethrow_exception(ep);
@@ -186,7 +186,7 @@ public:
         }
     }
 
-    void run(std::stop_token) {
+    void run(const std::stop_token&) {
         throw std::runtime_error("Simulated worker failure");
     }
 };

@@ -66,7 +66,7 @@ public:
         } else if constexpr (std::is_same_v<duration, std::chrono::milliseconds>) {
             return allocateTimer(std::move(event), expiry, std::chrono::duration_cast<std::chrono::milliseconds>(interval), priority, true);
         } else {
-            duration nativeInterval = static_cast<duration>(std::chrono::duration_cast<std::chrono::microseconds>(interval).count());
+            auto nativeInterval = static_cast<duration>(std::chrono::duration_cast<std::chrono::microseconds>(interval).count());
             return allocateTimer(std::move(event), expiry, nativeInterval, priority, true);
         }
     }

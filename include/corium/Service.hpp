@@ -131,8 +131,8 @@ protected:
         return _context.template sendToService<TargetService>(std::forward<EventType>(event), priority);
     }
 
-    IncomingBus& incomingBus() noexcept { return _incomingBus; }
-    const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
+    [[nodiscard]] IncomingBus& incomingBus() noexcept { return _incomingBus; }
+    [[nodiscard]] const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
 
 private:
     ServiceContextT<EventVariant> _context;

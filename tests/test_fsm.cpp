@@ -9,22 +9,22 @@ using namespace corium::fsm;
 // States
 struct StateIdle {
     static inline std::vector<std::string>* logPtr = nullptr;
-    void onEnter() { if (logPtr) logPtr->push_back("Idle:Enter"); }
-    void onExit() { if (logPtr) logPtr->push_back("Idle:Exit"); }
+    void onEnter() { if (logPtr) logPtr->emplace_back("Idle:Enter"); }
+    void onExit() { if (logPtr) logPtr->emplace_back("Idle:Exit"); }
 };
 
 struct StateRunning {
     int speed = 0;
     static inline std::vector<std::string>* logPtr = nullptr;
-    void onEnter() { if (logPtr) logPtr->push_back("Running:Enter"); }
-    void onExit() { if (logPtr) logPtr->push_back("Running:Exit"); }
+    void onEnter() { if (logPtr) logPtr->emplace_back("Running:Enter"); }
+    void onExit() { if (logPtr) logPtr->emplace_back("Running:Exit"); }
 };
 
 struct StateFault {
     int errorCode = 0;
     static inline std::vector<std::string>* logPtr = nullptr;
-    void onEnter() { if (logPtr) logPtr->push_back("Fault:Enter"); }
-    void onExit() { if (logPtr) logPtr->push_back("Fault:Exit"); }
+    void onEnter() { if (logPtr) logPtr->emplace_back("Fault:Enter"); }
+    void onExit() { if (logPtr) logPtr->emplace_back("Fault:Exit"); }
 };
 
 // Events
