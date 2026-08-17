@@ -1,0 +1,102 @@
+cmake_minimum_required(VERSION 3.14)
+project(Corium LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Header-only library target
+add_library(corium INTERFACE)
+target_include_directories(corium INTERFACE include)
+
+# Showcase Sample Targets
+add_executable(sample_01_quickstart samples/01_quickstart/main.cpp)
+target_link_libraries(sample_01_quickstart PRIVATE corium)
+
+add_executable(sample_02_embedded_baremetal samples/02_embedded_baremetal/main.cpp)
+target_link_libraries(sample_02_embedded_baremetal PRIVATE corium)
+
+add_executable(sample_03_policies_and_queues samples/03_policies_and_queues/main.cpp)
+target_link_libraries(sample_03_policies_and_queues PRIVATE corium)
+
+add_executable(sample_04_safety_and_profiling samples/04_safety_and_profiling/main.cpp)
+target_link_libraries(sample_04_safety_and_profiling PRIVATE corium)
+
+add_executable(sample_05_protocols_and_ipc samples/05_protocols_and_ipc/main.cpp)
+target_link_libraries(sample_05_protocols_and_ipc PRIVATE corium)
+
+# Unit Test Suite Target
+option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
+
+if(CORIUM_BUILD_TESTS)
+    enable_testing()
+    include(FetchContent)
+
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
+
+    add_executable(
+        corium_tests
+        tests/main.cpp
+        tests/test_mpsc_ring_buffer.cpp
+        tests/test_fast_delegate.cpp
+        tests/test_reactor.cpp
+        tests/test_runtime.cpp
+        tests/test_background_service.cpp
+        tests/test_priority_queue.cpp
+        tests/test_overflow_policy.cpp
+        tests/test_timer_scheduler.cpp
+        tests/test_logging.cpp
+        tests/test_no_queue_service.cpp
+        tests/test_clock_policies.cpp
+        tests/test_isr_sink.cpp
+        tests/test_batch_pump.cpp
+        tests/test_fsm.cpp
+        tests/test_async_task.cpp
+        tests/test_wire_protocol.cpp
+        tests/test_profiler.cpp
+        tests/test_safety.cpp
+        tests/test_ipc.cpp
+    )
+    target_link_libraries(corium_tests PRIVATE corium gtest)
+
+    add_executable(corium_zero_heap_test tests/test_zero_heap_guarantee.cpp)
+    target_link_libraries(corium_zero_heap_test PRIVATE corium)
+
+    include(GoogleTest)
+    gtest_discover_tests(corium_tests)
+    add_test(NAME ZeroHeapGuaranteeTest COMMAND corium_zero_heap_test)
+endif()
+
+# Optional Benchmark Suite Target
+option(CORIUM_BUILD_BENCHMARKS "Build Corium benchmark suite" OFF)
+
+if(CORIUM_BUILD_BENCHMARKS)
+    include(FetchContent)
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable Google Benchmark self-tests" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable Google Benchmark install" FORCE)
+
+    FetchContent_Declare(
+        googlebenchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.8.3
+    )
+    FetchContent_MakeAvailable(googlebenchmark)
+
+    add_executable(
+        corium_benchmarks
+        benchmarks/bench_main.cpp
+        benchmarks/bench_ring_buffer.cpp
+        benchmarks/bench_event_dispatch.cpp
+        benchmarks/bench_batch_pump.cpp
+    )
+    target_link_libraries(corium_benchmarks PRIVATE corium benchmark::benchmark)
+endif()
