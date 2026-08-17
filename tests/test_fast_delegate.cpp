@@ -33,19 +33,25 @@ TEST(FastDelegateTest, InlineSBOExecution) {
 
 TEST(FastDelegateTest, CustomInlineSizeExecution) {
     // Large capture fitted into customized 256-byte inline storage
-    char largeBuffer[128];
-    for (int i = 0; i < 128; ++i) largeBuffer[i] = static_cast<char>(i);
+    std::array<char, 128> largeBuffer{};
+    for (std::size_t i = 0; i < largeBuffer.size(); ++i) {
+        largeBuffer[i] = static_cast<char>(i);
+    }
 
     int sum = 0;
     EventHandlerDelegate<TickEvent, 256> delegate([largeBuffer, &sum](const TickEvent&) {
-        for (int i = 0; i < 128; ++i) sum += largeBuffer[i];
+        for (char b : largeBuffer) {
+            sum += b;
+        }
     });
 
     EXPECT_TRUE(static_cast<bool>(delegate));
     delegate.invoke(TickEvent{0.0});
 
     int expectedSum = 0;
-    for (int i = 0; i < 128; ++i) expectedSum += i;
+    for (char b : largeBuffer) {
+        expectedSum += b;
+    }
 
     EXPECT_EQ(sum, expectedSum);
 }
