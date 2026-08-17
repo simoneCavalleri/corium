@@ -65,9 +65,9 @@ using MotorFsmTable = TransitionTable<
 >;
 
 using AppEvents = std::variant<QuitEvent, StartCommand, StopCommand>;
-using FsmTestRuntime = RuntimeBuilder<>::WithEvents<AppEvents>::Build;
+using FsmTestRuntime = RuntimeBuilder::WithEvents<AppEvents>::Build;
 
-class FsmIntegrationApp : public Application<FsmIntegrationApp, FsmTestRuntime::EventBusType> {
+class FsmIntegrationApp : public Application<FsmIntegrationApp, AppEvents> {
 public:
     StateMachine<MotorFsmTable, StateIdle, StateRunning, StateFault> motorFsm;
 

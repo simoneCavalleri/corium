@@ -55,7 +55,7 @@ using SmartGridEvents = std::variant<
 >;
 
 // Build custom zero-heap Runtime specialized for SmartGridEvents
-using SmartGridRuntime = corium::RuntimeBuilder<>
+using SmartGridRuntime = corium::RuntimeBuilder
     ::WithEvents<SmartGridEvents>
     ::WithPriorityQueue<64, 256> // 64 High-Priority emergency slots, 256 Normal telemetry slots
     ::WithMaxTimers<16>

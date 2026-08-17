@@ -48,7 +48,7 @@ using FlightEvents = std::variant<
 >;
 
 // Zero-allocation bare-metal runtime
-using FlightRuntime = corium::RuntimeBuilder<>
+using FlightRuntime = corium::RuntimeBuilder
     ::WithEvents<FlightEvents>
     ::WithPriorityQueue<16, 64> // 16 High-Priority (E-Stop/Failsafe), 64 Normal (Telemetry/RC)
     ::WithStoragePolicy<corium::FixedStoragePolicy<4, 16>> // Max 4 handlers, 16B inline SBO

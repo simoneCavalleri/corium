@@ -52,7 +52,7 @@ TEST(PriorityQueueTest, PriorityOrdering)
 
 TEST(PriorityQueueTest, EventBusPriorityDispatch)
 {
-    using PriorityRuntime = RuntimeBuilder<>
+    using PriorityRuntime = RuntimeBuilder
         ::WithEvents<TestEvents>
         ::WithPriorityQueue<128, 128>
         ::Build;
@@ -103,7 +103,7 @@ TEST(PriorityQueueTest, EventBusPriorityDispatch)
 
 TEST(PriorityQueueTest, ConcurrentMultiProducerPush)
 {
-    using PriorityRuntime = RuntimeBuilder<>
+    using PriorityRuntime = RuntimeBuilder
         ::WithEvents<TestEvents>
         ::WithPriorityQueue<1024, 1024>
         ::Build;

@@ -35,9 +35,9 @@ TEST(WireProtocolTest, SerializeAndValidatePacket)
 
 TEST(WireProtocolTest, DeserializeDirectlyIntoRuntime)
 {
-    using WireRuntime = RuntimeBuilder<>::WithEvents<WireTestEvents>::Build;
+    using WireRuntime = RuntimeBuilder::WithEvents<WireTestEvents>::Build;
 
-    class App : public Application<App, WireRuntime::EventBusType> {
+    class App : public Application<App, WireTestEvents> {
     public:
         std::vector<uint32_t> sensors;
         std::vector<uint16_t> alerts;

@@ -13,7 +13,7 @@ using OverflowTestEvents = std::variant<QuitEvent, TelemetryEvent>;
 TEST(OverflowPolicyTest, DropNewestPolicy)
 {
     // Bounded queue capacity = 4
-    using DropNewestRuntime = RuntimeBuilder<>
+    using DropNewestRuntime = RuntimeBuilder
         ::WithEvents<OverflowTestEvents>
         ::WithCapacity<4>
         ::WithOverflowPolicy<DropNewestOverflowPolicy>
@@ -31,7 +31,7 @@ TEST(OverflowPolicyTest, DropNewestPolicy)
     sink.post(TelemetryEvent{5});
 
     std::vector<int> received;
-    class App : public Application<App, DropNewestRuntime::EventBusType> {
+    class App : public Application<App, OverflowTestEvents> {
     public:
         std::vector<int>* recPtr;
         void onRegisterHandlers() {
@@ -57,7 +57,7 @@ TEST(OverflowPolicyTest, DropNewestPolicy)
 
 TEST(OverflowPolicyTest, AuditOverflowPolicyCounter)
 {
-    using AuditRuntime = RuntimeBuilder<>
+    using AuditRuntime = RuntimeBuilder
         ::WithEvents<OverflowTestEvents>
         ::WithCapacity<8>
         ::WithOverflowPolicy<AuditOverflowPolicy>
@@ -86,7 +86,7 @@ TEST(OverflowPolicyTest, AuditOverflowPolicyCounter)
 
 TEST(OverflowPolicyTest, DropOldestPolicyEviction)
 {
-    using DropOldestRuntime = RuntimeBuilder<>
+    using DropOldestRuntime = RuntimeBuilder
         ::WithEvents<OverflowTestEvents>
         ::WithCapacity<4>
         ::WithOverflowPolicy<DropOldestOverflowPolicy>
@@ -101,7 +101,7 @@ TEST(OverflowPolicyTest, DropOldestPolicyEviction)
     }
 
     std::vector<int> received;
-    class App : public Application<App, DropOldestRuntime::EventBusType> {
+    class App : public Application<App, OverflowTestEvents> {
     public:
         std::vector<int>* recPtr;
         void onRegisterHandlers() {

@@ -45,9 +45,9 @@ TEST(BatchPumpTest, EventBusProcessBatchAndDrain)
 
 TEST(BatchPumpTest, RuntimePumpBatchAndDrain)
 {
-    using BatchRuntime = RuntimeBuilder<>::WithEvents<BatchEvents>::Build;
+    using BatchRuntime = RuntimeBuilder::WithEvents<BatchEvents>::Build;
 
-    class App : public Application<App, BatchRuntime::EventBusType> {
+    class App : public Application<App, BatchEvents> {
     public:
         std::vector<int> values;
         void onRegisterHandlers() {

@@ -53,7 +53,7 @@ using HftEvents = std::variant<
 // 2. High-Throughput HFT Runtime with Custom Capacity & Overflow Policies
 // -----------------------------------------------------------------------------
 // Configured with 32 High-Priority slots (Risk Cancels) and 128 Normal slots (Quotes/Trades)
-using HftRuntime = corium::RuntimeBuilder<>
+using HftRuntime = corium::RuntimeBuilder
     ::WithEvents<HftEvents>
     ::WithPriorityQueue<32, 128>
     ::WithOverflowPolicy<corium::AuditOverflowPolicy> // Audit counter for dropped packets during micro-bursts

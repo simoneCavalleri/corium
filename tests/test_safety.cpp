@@ -6,6 +6,7 @@
 #include "corium/safety/HeartbeatMonitor.hpp"
 #include "corium/safety/SafetyEvents.hpp"
 #include "corium/safety/WatchdogSupervisor.hpp"
+#include "corium/safety/WatchdogService.hpp"
 
 #include <chrono>
 #include <thread>
@@ -21,6 +22,27 @@ using SafetyTestEvents = std::variant<
     DeadlineMissedEvent,
     CircuitBreakerTrippedEvent
 >;
+
+using WdServiceEvents = std::variant<QuitEvent, WatchdogTimeoutEvent>;
+
+struct MonitoredApp : public corium::Application<MonitoredApp, WdServiceEvents> {
+    WatchdogService<WdServiceEvents, 4> wdService{std::chrono::milliseconds(10)};
+    bool timeoutTriggered = false;
+    uint32_t timedOutServiceId = 0;
+
+    template <typename Registry>
+    void onConfigureServices(Registry& registry) {
+        registry.registerService(wdService);
+    }
+
+    void onRegisterHandlers() {
+        on([this](const WatchdogTimeoutEvent& e) {
+            timeoutTriggered = true;
+            timedOutServiceId = e.serviceId;
+            requestQuit();
+        });
+    }
+};
 
 } // namespace
 
@@ -55,11 +77,11 @@ TEST(SafetyTest, HeartbeatMonitorMultiServiceTracking)
 
 TEST(SafetyTest, WatchdogSupervisorKickAndSuppression)
 {
-    using SafetyRuntime = RuntimeBuilder<>
+    using SafetyRuntime = RuntimeBuilder
         ::WithEvents<SafetyTestEvents>
         ::Build;
 
-    class SafetyApp : public Application<SafetyApp, SafetyRuntime::EventBusType> {
+    class SafetyApp : public Application<SafetyApp, SafetyTestEvents> {
     public:
         int timeoutsDetected = 0;
         uint32_t timedOutServiceId = 0;
@@ -149,4 +171,52 @@ TEST(SafetyTest, CircuitBreakerStateTransitions)
     EXPECT_TRUE(breaker.execute([]() { return true; }));
     EXPECT_EQ(breaker.state(), CircuitState::Closed);
     EXPECT_EQ(breaker.failureCount(), 0u);
+}
+
+TEST(SafetyTest, WatchdogServiceAutonomousSupervision) {
+    using SafetyRuntime = corium::RuntimeBuilder
+        ::WithEvents<WdServiceEvents>
+        ::WithPriorityQueue<16, 64>
+        ::Build;
+
+    SafetyRuntime runtime;
+    MonitoredApp app;
+
+    // Register service 42 with 25ms timeout
+    app.wdService.registerService(42, 25'000'000);
+
+    runtime.initialize(app);
+
+    // Beat for the first 30ms (3 times)
+    for (int i = 0; i < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        app.wdService.beat(42);
+        runtime.pump();
+    }
+
+    // Now stop beating and wait for timeout
+    std::this_thread::sleep_for(std::chrono::milliseconds(45));
+    runtime.pump();
+
+    EXPECT_TRUE(app.timeoutTriggered);
+    EXPECT_EQ(app.timedOutServiceId, 42u);
+
+    runtime.shutdown();
+}
+
+TEST(SafetyTest, PanicHandlerHook) {
+    static bool panicCalled = false;
+    static int panicLine = 0;
+
+    corium::setPanicHandler([](const char* /*file*/, int line, const char* /*msg*/) noexcept {
+        panicCalled = true;
+        panicLine = line;
+    });
+
+    CORIUM_PANIC("Simulated bare-metal fault");
+    EXPECT_TRUE(panicCalled);
+    EXPECT_GT(panicLine, 0);
+
+    // Reset handler
+    corium::setPanicHandler(nullptr);
 }

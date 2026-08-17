@@ -20,14 +20,29 @@ class BasicRuntime;
 
 namespace internal {
 
-/// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member.
+/// @brief Compile-time helper to round up an integer to the next power of 2.
+template <std::size_t N>
+constexpr std::size_t next_power_of_two() {
+    if (N <= 1) return 1;
+    std::size_t val = N - 1;
+    val |= val >> 1;
+    val |= val >> 2;
+    val |= val >> 4;
+    val |= val >> 8;
+    val |= val >> 16;
+    val |= val >> 32;
+    return val + 1;
+}
+
+/// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member,
+/// rounded up to the nearest power of 2 for power-of-two ring buffer constraints.
 /// Falls back to 1024 for policies without a capacity (e.g. NoQueuePolicy).
 template <typename QueuePolicy, typename = void>
 struct queue_capacity_of : std::integral_constant<std::size_t, 1024> {};
 
 template <typename QueuePolicy>
 struct queue_capacity_of<QueuePolicy, std::void_t<decltype(QueuePolicy::capacity)>>
-    : std::integral_constant<std::size_t, QueuePolicy::capacity> {};
+    : std::integral_constant<std::size_t, next_power_of_two<QueuePolicy::capacity>()> {};
 
 template <typename QueuePolicy>
 static constexpr std::size_t queue_capacity_of_v = queue_capacity_of<QueuePolicy>::value;
@@ -63,9 +78,9 @@ struct rebind_queue_capacity<QueuePolicy<EventVariant, OldCapacity>, NewCapacity
     using type = QueuePolicy<EventVariant, NewCapacity>;
 };
 
-template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t OldHigh, size_t OldNormal, size_t OldLow, size_t NewCapacity>
-struct rebind_queue_capacity<QueuePolicy<EventVariant, OldHigh, OldNormal, OldLow>, NewCapacity> {
-    using type = QueuePolicy<EventVariant, OldHigh, NewCapacity, OldLow>;
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t HighCap, size_t OldNormalCap, size_t LowCap, size_t NewCapacity>
+struct rebind_queue_capacity<QueuePolicy<EventVariant, HighCap, OldNormalCap, LowCap>, NewCapacity> {
+    using type = QueuePolicy<EventVariant, HighCap, NewCapacity, LowCap>;
 };
 
 template <typename QueuePolicy, size_t NewCapacity>
@@ -73,7 +88,8 @@ using rebind_queue_capacity_t = typename rebind_queue_capacity<QueuePolicy, NewC
 
 } // namespace internal
 
-/// @brief Fluent compile-time builder for configuring BasicRuntime type aliases.
+/// @ingroup core
+/// @brief Primary template implementation for fluent compile-time Runtime construction.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
@@ -83,10 +99,10 @@ template <
     typename TimerStoragePolicy = DefaultTimerStoragePolicy,
     typename ProfilerPolicy = profiler::NullProfiler
 >
-struct RuntimeBuilder {
+struct BasicRuntimeBuilder {
     /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
     template <typename NewEventVariant>
-    using WithEvents = RuntimeBuilder<
+    using WithEvents = BasicRuntimeBuilder<
         NewEventVariant,
         internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
         SignalPolicy,
@@ -98,7 +114,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
     template <size_t Capacity>
-    using WithCapacity = RuntimeBuilder<
+    using WithCapacity = BasicRuntimeBuilder<
         EventVariant,
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
         SignalPolicy,
@@ -110,7 +126,7 @@ struct RuntimeBuilder {
 
     /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
     template <size_t HighCapacity = 256, size_t NormalCapacity = 1024>
-    using WithPriorityQueue = RuntimeBuilder<
+    using WithPriorityQueue = BasicRuntimeBuilder<
         EventVariant,
         PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
         SignalPolicy,
@@ -122,7 +138,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom QueuePolicy.
     template <typename NewQueuePolicy>
-    using WithQueuePolicy = RuntimeBuilder<
+    using WithQueuePolicy = BasicRuntimeBuilder<
         EventVariant,
         NewQueuePolicy,
         SignalPolicy,
@@ -134,7 +150,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom SignalPolicy.
     template <typename NewSignalPolicy>
-    using WithSignalPolicy = RuntimeBuilder<
+    using WithSignalPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         NewSignalPolicy,
@@ -146,7 +162,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom StoragePolicy.
     template <typename NewStoragePolicy>
-    using WithStoragePolicy = RuntimeBuilder<
+    using WithStoragePolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -158,7 +174,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom OverflowPolicy.
     template <typename NewOverflowPolicy>
-    using WithOverflowPolicy = RuntimeBuilder<
+    using WithOverflowPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -170,7 +186,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify maximum number of concurrent active timers.
     template <size_t MaxTimers>
-    using WithMaxTimers = RuntimeBuilder<
+    using WithMaxTimers = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -182,7 +198,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom ClockPolicy (time source strategy).
     template <typename NewClockPolicy>
-    using WithClockPolicy = RuntimeBuilder<
+    using WithClockPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -194,7 +210,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom TimerStoragePolicy.
     template <typename NewTimerStoragePolicy>
-    using WithTimerStoragePolicy = RuntimeBuilder<
+    using WithTimerStoragePolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -206,7 +222,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
     template <size_t NewMaxHandlers>
-    using WithMaxHandlersPerEvent = RuntimeBuilder<
+    using WithMaxHandlersPerEvent = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -218,7 +234,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
     template <size_t NewInlineSize>
-    using WithInlineSize = RuntimeBuilder<
+    using WithInlineSize = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -230,7 +246,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom ProfilerPolicy strategy.
     template <typename NewProfilerPolicy>
-    using WithProfiler = RuntimeBuilder<
+    using WithProfiler = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -244,7 +260,7 @@ struct RuntimeBuilder {
     /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
     /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
     template <std::size_t BufferCapacity = 256>
-    using WithFlightRecorder = RuntimeBuilder<
+    using WithFlightRecorder = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -257,7 +273,8 @@ struct RuntimeBuilder {
     /// @brief Convenience helper: Configure real-time event latency statistics tracker.
     /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
     /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
-    using WithLatencyTracker = RuntimeBuilder<
+    template <std::size_t BufferCapacity = 256>
+    using WithLatencyTracker = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -270,5 +287,10 @@ struct RuntimeBuilder {
     /// @brief Complete builder configuration and return BasicRuntime type.
     using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, TimerStoragePolicy, ProfilerPolicy>;
 };
+
+/// @ingroup core
+/// @brief Fluent compile-time builder for configuring BasicRuntime.
+/// Usage: `using MyRuntime = corium::RuntimeBuilder::WithEvents<MyEvents>::Build;`
+struct RuntimeBuilder : BasicRuntimeBuilder<> {};
 
 } // namespace corium

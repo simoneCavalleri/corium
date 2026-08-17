@@ -115,12 +115,12 @@ TEST(ClockPoliciesTest, RuntimeWithManualClockBuilder)
 {
     ManualClockPolicy::reset();
 
-    using ManualRuntime = RuntimeBuilder<>
+    using ManualRuntime = RuntimeBuilder
         ::WithEvents<ClockTestEvents>
         ::WithClockPolicy<ManualClockPolicy>
         ::Build;
 
-    class App : public Application<App, ManualRuntime::EventBusType> {
+    class App : public Application<App, ClockTestEvents> {
     public:
         int receivedId = 0;
         void onRegisterHandlers() {

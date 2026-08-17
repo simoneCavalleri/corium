@@ -121,11 +121,11 @@ TEST(IpcTest, IpcChannelTypedEventExchange)
     EXPECT_TRUE(clientChannel.post(IpcCommandEvent{42, 100}));
 
     // Host receives and drains into a Corium Runtime
-    using IpcRuntime = RuntimeBuilder<>
+    using IpcRuntime = RuntimeBuilder
         ::WithEvents<IpcTestEvents>
         ::Build;
 
-    class ReceiverApp : public Application<ReceiverApp, IpcRuntime::EventBusType> {
+    class ReceiverApp : public Application<ReceiverApp, IpcTestEvents> {
     public:
         int telemetryReceived = 0;
         int commandsReceived = 0;
@@ -236,5 +236,41 @@ TEST(IpcTest, UdsChannelDatagramEventTransmission)
 
     server.close();
     client.close();
+}
+
+TEST(IpcTest, RawMemoryBufferDirectBind)
+{
+    using ChannelType = IpcChannel<IpcTestEvents, 32>;
+    alignas(64) std::vector<uint8_t> sramBuffer(ChannelType::QueueType::requiredMemorySize());
+
+    RawMemoryBuffer rawMem(sramBuffer.data(), sramBuffer.size(), true);
+    EXPECT_TRUE(rawMem.isValid());
+    EXPECT_EQ(rawMem.size(), sramBuffer.size());
+
+    // Host binds as creator to SRAM region
+    ChannelType hostChannel;
+    EXPECT_TRUE(hostChannel.bindRaw(rawMem.data(), true));
+
+    // Client attaches to same SRAM region
+    ChannelType clientChannel;
+    EXPECT_TRUE(clientChannel.bindRaw(rawMem.data(), false));
+
+    // Client posts event
+    EXPECT_TRUE(clientChannel.post(IpcCommandEvent{42, 888}));
+
+    // Host pops event
+    IpcTestEvents ev;
+    EXPECT_TRUE(hostChannel.tryPop(ev));
+
+    bool handled = false;
+    std::visit([&](auto&& e) {
+        using T = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, IpcCommandEvent>) {
+            EXPECT_EQ(e.commandId, 42u);
+            EXPECT_EQ(e.payload, 888u);
+            handled = true;
+        }
+    }, ev);
+    EXPECT_TRUE(handled);
 }
 

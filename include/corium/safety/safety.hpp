@@ -4,3 +4,4 @@
 #include "corium/safety/HeartbeatMonitor.hpp"
 #include "corium/safety/SafetyEvents.hpp"
 #include "corium/safety/WatchdogSupervisor.hpp"
+#include "corium/safety/WatchdogService.hpp"

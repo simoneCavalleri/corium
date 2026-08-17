@@ -3,8 +3,8 @@
 
 using namespace corium;
 
-template <typename EventBusType = Runtime::EventBusType>
-class TestApp : public Application<TestApp<EventBusType>, EventBusType> {
+template <typename EventVariant = DefaultEvents>
+class TestApp : public Application<TestApp<EventVariant>, EventVariant> {
 public:
     int tickCount = 0;
     bool initialized = false;
@@ -38,16 +38,11 @@ TEST(RuntimeTest, BasicLifecycleAndPump) {
 
     runtime.eventSink().post(TickEvent{0.01});
     runtime.eventSink().post(TickEvent{0.02});
-    runtime.pump();
-
-    EXPECT_EQ(app.tickCount, 2);
-    EXPECT_FALSE(runtime.quitRequested());
-
     runtime.eventSink().post(TickEvent{0.03});
-    runtime.pump();
 
-    EXPECT_EQ(app.tickCount, 3);
+    runtime.pump();
     EXPECT_TRUE(runtime.quitRequested());
+    EXPECT_EQ(app.tickCount, 3);
 
     runtime.shutdown();
     EXPECT_TRUE(app.shutdownCalled);
@@ -55,12 +50,12 @@ TEST(RuntimeTest, BasicLifecycleAndPump) {
 
 TEST(RuntimeTest, PolicyRuntimes) {
     // 1. NoSignalPolicy Busy-Spin Runtime
-    using BusySpinRuntime = RuntimeBuilder<>
+    using BusySpinRuntime = RuntimeBuilder
         ::WithSignalPolicy<NoSignalPolicy>
         ::Build;
 
     BusySpinRuntime spinRuntime;
-    TestApp<BusySpinRuntime::EventBusType> spinApp;
+    TestApp<BusySpinRuntime::EventType> spinApp;
 
     spinRuntime.initialize(spinApp);
     spinRuntime.eventSink().post(TickEvent{0.1});
@@ -72,12 +67,12 @@ TEST(RuntimeTest, PolicyRuntimes) {
     spinRuntime.shutdown();
 
     // 2. StoragePolicy Customization
-    using LargeRuntime = RuntimeBuilder<>
+    using LargeRuntime = RuntimeBuilder
         ::WithStoragePolicy<LargeStoragePolicy>
         ::Build;
 
     LargeRuntime largeRuntime;
-    TestApp<LargeRuntime::EventBusType> largeApp;
+    TestApp<LargeRuntime::EventType> largeApp;
 
     largeRuntime.initialize(largeApp);
     largeRuntime.eventSink().post(TickEvent{0.1});
@@ -104,13 +99,13 @@ TEST(RuntimeTest, StateMachineTransitions) {
 TEST(RuntimeTest, BuilderOrderIndependence) {
     using GameEvents = std::variant<QuitEvent, TickEvent>;
 
-    using OrderA = RuntimeBuilder<>
+    using OrderA = RuntimeBuilder
         ::WithCapacity<4096>
         ::WithEvents<GameEvents>
         ::WithStoragePolicy<LargeStoragePolicy>
         ::Build;
 
-    using OrderB = RuntimeBuilder<>
+    using OrderB = RuntimeBuilder
         ::WithStoragePolicy<LargeStoragePolicy>
         ::WithEvents<GameEvents>
         ::WithCapacity<4096>

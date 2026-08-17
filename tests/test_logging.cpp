@@ -94,9 +94,9 @@ TEST(LoggingTest, LoggerLevelFiltering)
 TEST(LoggingTest, LoggerIntegrationWithRuntime)
 {
     using AppEvents = std::variant<QuitEvent, LogEvent>;
-    using TestRuntime = RuntimeBuilder<>::WithEvents<AppEvents>::Build;
+    using TestRuntime = RuntimeBuilder::WithEvents<AppEvents>::Build;
 
-    class LogApp : public Application<LogApp, TestRuntime::EventBusType> {
+    class LogApp : public Application<LogApp, AppEvents> {
     public:
         bool logReceived = false;
         std::string receivedMsg;

@@ -22,12 +22,12 @@ using IsrTestEvents = std::variant<QuitEvent, IsrGpioEvent, EmergencyIsrEvent>;
 
 TEST(IsrSinkTest, IsrEventSinkNormalAndHighPriority)
 {
-    using IsrRuntime = RuntimeBuilder<>
+    using IsrRuntime = RuntimeBuilder
         ::WithEvents<IsrTestEvents>
         ::WithPriorityQueue<128, 512>
         ::Build;
 
-    class App : public Application<App, IsrRuntime::EventBusType> {
+    class App : public Application<App, IsrTestEvents> {
     public:
         std::vector<std::string> log;
 
@@ -68,10 +68,10 @@ TEST(IsrSinkTest, IsrEventSinkNormalAndHighPriority)
 
 TEST(IsrSinkTest, FreeRtosIsrSinkTaskWokenTracking)
 {
-    using IsrRuntime = RuntimeBuilder<>::WithEvents<IsrTestEvents>::Build;
+    using IsrRuntime = RuntimeBuilder::WithEvents<IsrTestEvents>::Build;
     IsrRuntime runtime;
 
-    class App : public Application<App, IsrRuntime::EventBusType> {
+    class App : public Application<App, IsrTestEvents> {
     public:
         int eventsReceived = 0;
         void onRegisterHandlers() {

@@ -19,6 +19,29 @@
 
 namespace corium::ipc {
 
+/// @ingroup ipc
+/// @brief Non-allocating wrapper for fixed raw memory regions (e.g. multi-core SRAM, DMA buffers, hardware shared RAM).
+class RawMemoryBuffer {
+public:
+    constexpr RawMemoryBuffer() noexcept = default;
+
+    constexpr RawMemoryBuffer(void* address, std::size_t size, bool isCreator = false) noexcept
+        : _address(address), _size(size), _isCreator(isCreator)
+    {}
+
+    [[nodiscard]] void* data() noexcept { return _address; }
+    [[nodiscard]] const void* data() const noexcept { return _address; }
+    [[nodiscard]] std::size_t size() const noexcept { return _size; }
+    [[nodiscard]] bool isValid() const noexcept { return _address != nullptr; }
+    [[nodiscard]] bool isCreator() const noexcept { return _isCreator; }
+
+private:
+    void* _address{nullptr};
+    std::size_t _size{0};
+    bool _isCreator{false};
+};
+
+/// @ingroup ipc
 /// @brief Cross-platform zero-copy shared memory region wrapper.
 /// Manages OS-level shared memory allocation, memory mapping, and cleanup.
 class SharedMemory {

@@ -2016,6 +2016,66 @@ private:
 #include <variant>
 
 
+// >>> Begin: corium/internal/Panic.hpp
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstdint>
+
+namespace corium {
+
+/// @ingroup embedded
+/// @brief Signature of the custom bare-metal panic handler callback.
+using PanicHandlerFn = void (*)(const char* file, int line, const char* message) noexcept;
+
+namespace internal {
+
+inline PanicHandlerFn& getPanicHandler() noexcept {
+    static PanicHandlerFn handler = nullptr;
+    return handler;
+}
+
+inline void panic(const char* file, int line, const char* message) noexcept {
+    if (auto fn = getPanicHandler()) {
+        fn(file, line, message);
+        return;
+    }
+#if defined(CORIUM_CUSTOM_PANIC)
+    CORIUM_CUSTOM_PANIC(file, line, message);
+#elif defined(__arm__) || defined(__thumb__)
+    __asm volatile("bkpt #0");
+    for (;;) {}
+#else
+    std::fprintf(stderr, "Corium Panic: %s (%s:%d)\n", message, file, line);
+    std::abort();
+#endif
+}
+
+} // namespace internal
+
+/// @ingroup embedded
+/// @brief Configure the global bare-metal panic handler hook (e.g. for Hardware Fault logging).
+inline void setPanicHandler(PanicHandlerFn fn) noexcept {
+    internal::getPanicHandler() = fn;
+}
+
+} // namespace corium
+
+#if defined(CORIUM_ENABLE_ASSERTIONS) || !defined(NDEBUG)
+#define CORIUM_ASSERT(cond, msg) \
+    do { \
+        if (!(cond)) [[unlikely]] { \
+            ::corium::internal::panic(__FILE__, __LINE__, msg); \
+        } \
+    } while (0)
+#else
+#define CORIUM_ASSERT(cond, msg) do { (void)sizeof(cond); } while (0)
+#endif
+
+#define CORIUM_PANIC(msg) ::corium::internal::panic(__FILE__, __LINE__, msg)
+
+// <<< End: corium/internal/Panic.hpp
+
 namespace corium {
 namespace internal {
 
@@ -2087,7 +2147,7 @@ public:
     /// @note Must be called before runtime.initialize() seals the reactor.
     template <typename EventType, typename Handler>
     bool registerHandler(Handler&& handler) {
-        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        CORIUM_ASSERT(!_sealed, "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
         auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
         return list.registerHandler(std::forward<Handler>(handler));
@@ -2099,7 +2159,7 @@ public:
     /// @note Must be called before runtime.initialize() seals the reactor.
     template <typename Handler>
     bool registerHandler(Handler&& handler) {
-        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        CORIUM_ASSERT(!_sealed, "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         using EventType = callable_event_type_t<Handler>;
         return registerHandler<EventType>(std::forward<Handler>(handler));
     }
@@ -3537,6 +3597,8 @@ template <
 >
 class BasicRuntime {
 public:
+    using EventVariantType = EventVariant;
+    using EventType = EventVariant;
     using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, ProfilerPolicy>;
     using ClockPolicyType = typename internal::get_timer_clock_policy<TimerStoragePolicy>::type;
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;
@@ -3872,14 +3934,29 @@ class BasicRuntime;
 
 namespace internal {
 
-/// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member.
+/// @brief Compile-time helper to round up an integer to the next power of 2.
+template <std::size_t N>
+constexpr std::size_t next_power_of_two() {
+    if (N <= 1) return 1;
+    std::size_t val = N - 1;
+    val |= val >> 1;
+    val |= val >> 2;
+    val |= val >> 4;
+    val |= val >> 8;
+    val |= val >> 16;
+    val |= val >> 32;
+    return val + 1;
+}
+
+/// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member,
+/// rounded up to the nearest power of 2 for power-of-two ring buffer constraints.
 /// Falls back to 1024 for policies without a capacity (e.g. NoQueuePolicy).
 template <typename QueuePolicy, typename = void>
 struct queue_capacity_of : std::integral_constant<std::size_t, 1024> {};
 
 template <typename QueuePolicy>
 struct queue_capacity_of<QueuePolicy, std::void_t<decltype(QueuePolicy::capacity)>>
-    : std::integral_constant<std::size_t, QueuePolicy::capacity> {};
+    : std::integral_constant<std::size_t, next_power_of_two<QueuePolicy::capacity>()> {};
 
 template <typename QueuePolicy>
 static constexpr std::size_t queue_capacity_of_v = queue_capacity_of<QueuePolicy>::value;
@@ -3915,9 +3992,9 @@ struct rebind_queue_capacity<QueuePolicy<EventVariant, OldCapacity>, NewCapacity
     using type = QueuePolicy<EventVariant, NewCapacity>;
 };
 
-template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t OldHigh, size_t OldNormal, size_t OldLow, size_t NewCapacity>
-struct rebind_queue_capacity<QueuePolicy<EventVariant, OldHigh, OldNormal, OldLow>, NewCapacity> {
-    using type = QueuePolicy<EventVariant, OldHigh, NewCapacity, OldLow>;
+template <template <typename, size_t, size_t, size_t> class QueuePolicy, typename EventVariant, size_t HighCap, size_t OldNormalCap, size_t LowCap, size_t NewCapacity>
+struct rebind_queue_capacity<QueuePolicy<EventVariant, HighCap, OldNormalCap, LowCap>, NewCapacity> {
+    using type = QueuePolicy<EventVariant, HighCap, NewCapacity, LowCap>;
 };
 
 template <typename QueuePolicy, size_t NewCapacity>
@@ -3925,7 +4002,8 @@ using rebind_queue_capacity_t = typename rebind_queue_capacity<QueuePolicy, NewC
 
 } // namespace internal
 
-/// @brief Fluent compile-time builder for configuring BasicRuntime type aliases.
+/// @ingroup core
+/// @brief Primary template implementation for fluent compile-time Runtime construction.
 template <
     typename EventVariant = DefaultEvents,
     typename QueuePolicy = BoundedMpscQueuePolicy<EventVariant, 1024>,
@@ -3935,10 +4013,10 @@ template <
     typename TimerStoragePolicy = DefaultTimerStoragePolicy,
     typename ProfilerPolicy = profiler::NullProfiler
 >
-struct RuntimeBuilder {
+struct BasicRuntimeBuilder {
     /// @brief Specify custom event variant list type (preserves existing queue capacity/policy).
     template <typename NewEventVariant>
-    using WithEvents = RuntimeBuilder<
+    using WithEvents = BasicRuntimeBuilder<
         NewEventVariant,
         internal::rebind_queue_policy_t<QueuePolicy, NewEventVariant>,
         SignalPolicy,
@@ -3950,7 +4028,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom queue capacity for bounded MPSC queue (preserves existing event variant).
     template <size_t Capacity>
-    using WithCapacity = RuntimeBuilder<
+    using WithCapacity = BasicRuntimeBuilder<
         EventVariant,
         internal::rebind_queue_capacity_t<QueuePolicy, Capacity>,
         SignalPolicy,
@@ -3962,7 +4040,7 @@ struct RuntimeBuilder {
 
     /// @brief Switch queue policy to PriorityMpscQueuePolicy with specified high and normal capacities.
     template <size_t HighCapacity = 256, size_t NormalCapacity = 1024>
-    using WithPriorityQueue = RuntimeBuilder<
+    using WithPriorityQueue = BasicRuntimeBuilder<
         EventVariant,
         PriorityMpscQueuePolicy<EventVariant, HighCapacity, NormalCapacity>,
         SignalPolicy,
@@ -3974,7 +4052,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom QueuePolicy.
     template <typename NewQueuePolicy>
-    using WithQueuePolicy = RuntimeBuilder<
+    using WithQueuePolicy = BasicRuntimeBuilder<
         EventVariant,
         NewQueuePolicy,
         SignalPolicy,
@@ -3986,7 +4064,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom SignalPolicy.
     template <typename NewSignalPolicy>
-    using WithSignalPolicy = RuntimeBuilder<
+    using WithSignalPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         NewSignalPolicy,
@@ -3998,7 +4076,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom StoragePolicy.
     template <typename NewStoragePolicy>
-    using WithStoragePolicy = RuntimeBuilder<
+    using WithStoragePolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4010,7 +4088,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom OverflowPolicy.
     template <typename NewOverflowPolicy>
-    using WithOverflowPolicy = RuntimeBuilder<
+    using WithOverflowPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4022,7 +4100,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify maximum number of concurrent active timers.
     template <size_t MaxTimers>
-    using WithMaxTimers = RuntimeBuilder<
+    using WithMaxTimers = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4034,7 +4112,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom ClockPolicy (time source strategy).
     template <typename NewClockPolicy>
-    using WithClockPolicy = RuntimeBuilder<
+    using WithClockPolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4046,7 +4124,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom TimerStoragePolicy.
     template <typename NewTimerStoragePolicy>
-    using WithTimerStoragePolicy = RuntimeBuilder<
+    using WithTimerStoragePolicy = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4058,7 +4136,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify maximum handlers per event type (rebinds StoragePolicy).
     template <size_t NewMaxHandlers>
-    using WithMaxHandlersPerEvent = RuntimeBuilder<
+    using WithMaxHandlersPerEvent = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4070,7 +4148,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify inline storage size for FastDelegate (rebinds StoragePolicy).
     template <size_t NewInlineSize>
-    using WithInlineSize = RuntimeBuilder<
+    using WithInlineSize = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4082,7 +4160,7 @@ struct RuntimeBuilder {
 
     /// @brief Specify custom ProfilerPolicy strategy.
     template <typename NewProfilerPolicy>
-    using WithProfiler = RuntimeBuilder<
+    using WithProfiler = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4096,7 +4174,7 @@ struct RuntimeBuilder {
     /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
     /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
     template <std::size_t BufferCapacity = 256>
-    using WithFlightRecorder = RuntimeBuilder<
+    using WithFlightRecorder = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4109,7 +4187,8 @@ struct RuntimeBuilder {
     /// @brief Convenience helper: Configure real-time event latency statistics tracker.
     /// The QueueCapacity of the internal timestamp ring buffer is automatically derived from
     /// the current QueuePolicy capacity, ensuring accurate per-event latency measurement.
-    using WithLatencyTracker = RuntimeBuilder<
+    template <std::size_t BufferCapacity = 256>
+    using WithLatencyTracker = BasicRuntimeBuilder<
         EventVariant,
         QueuePolicy,
         SignalPolicy,
@@ -4122,6 +4201,11 @@ struct RuntimeBuilder {
     /// @brief Complete builder configuration and return BasicRuntime type.
     using Build = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, TimerStoragePolicy, ProfilerPolicy>;
 };
+
+/// @ingroup core
+/// @brief Fluent compile-time builder for configuring BasicRuntime.
+/// Usage: `using MyRuntime = corium::RuntimeBuilder::WithEvents<MyEvents>::Build;`
+struct RuntimeBuilder : BasicRuntimeBuilder<> {};
 
 } // namespace corium
 
@@ -5984,6 +6068,84 @@ private:
 
 // <<< End: corium/safety/WatchdogSupervisor.hpp
 
+// >>> Begin: corium/safety/WatchdogService.hpp
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <stop_token>
+#include <thread>
+
+
+namespace corium::safety {
+
+/// @ingroup safety
+/// @brief Multi-threaded background safety service executing periodic heartbeat supervision.
+/// Automatically verifies monitored task deadlines and dispatches WatchdogTimeoutEvent to the main event bus on violations.
+/// @tparam EventVariant Supported event variant list type.
+/// @tparam MaxServices Maximum number of monitored services (default 16).
+/// @tparam ClockPolicy Clock source strategy (defaults to ChronoClockPolicy).
+template <
+    typename EventVariant = DefaultEvents,
+    std::size_t MaxServices = 16,
+    typename ClockPolicy = ChronoClockPolicy
+>
+class WatchdogService : public BackgroundService<EventVariant> {
+public:
+    using SupervisorType = WatchdogSupervisor<MaxServices, ClockPolicy>;
+    using KickCallbackFn = typename SupervisorType::KickCallbackFn;
+
+    explicit WatchdogService(std::chrono::milliseconds checkInterval = std::chrono::milliseconds(20))
+        : _checkInterval(checkInterval)
+    {}
+
+    /// @brief Set callback to refresh the physical hardware watchdog (e.g. STM32 IWDG).
+    void setWatchdogKickCallback(KickCallbackFn kickFn, void* userData = nullptr) noexcept
+    {
+        _supervisor.setWatchdogKickCallback(kickFn, userData);
+    }
+
+    /// @brief Register a service for supervision with maximum timeout in nanoseconds.
+    bool registerService(uint32_t serviceId, uint64_t timeoutNs) noexcept
+    {
+        return _supervisor.registerService(serviceId, timeoutNs);
+    }
+
+    /// @brief Submit a heartbeat for a monitored service.
+    void beat(uint32_t serviceId) noexcept
+    {
+        _supervisor.beat(serviceId);
+    }
+
+    /// @brief Access underlying WatchdogSupervisor.
+    [[nodiscard]] SupervisorType& supervisor() noexcept
+    {
+        return _supervisor;
+    }
+
+    [[nodiscard]] const SupervisorType& supervisor() const noexcept
+    {
+        return _supervisor;
+    }
+
+    /// @brief Background worker loop executing periodic health supervision.
+    void run(std::stop_token stopToken)
+    {
+        while (!stopToken.stop_requested()) {
+            std::this_thread::sleep_for(_checkInterval);
+            _supervisor.supervise(this->context().mainSink());
+        }
+    }
+
+private:
+    std::chrono::milliseconds _checkInterval;
+    SupervisorType _supervisor;
+};
+
+} // namespace corium::safety
+
+// <<< End: corium/safety/WatchdogService.hpp
+
 // <<< End: corium/safety/safety.hpp
 
 // >>> Begin: corium/ipc/ipc.hpp
@@ -6240,6 +6402,29 @@ private:
 
 namespace corium::ipc {
 
+/// @ingroup ipc
+/// @brief Non-allocating wrapper for fixed raw memory regions (e.g. multi-core SRAM, DMA buffers, hardware shared RAM).
+class RawMemoryBuffer {
+public:
+    constexpr RawMemoryBuffer() noexcept = default;
+
+    constexpr RawMemoryBuffer(void* address, std::size_t size, bool isCreator = false) noexcept
+        : _address(address), _size(size), _isCreator(isCreator)
+    {}
+
+    [[nodiscard]] void* data() noexcept { return _address; }
+    [[nodiscard]] const void* data() const noexcept { return _address; }
+    [[nodiscard]] std::size_t size() const noexcept { return _size; }
+    [[nodiscard]] bool isValid() const noexcept { return _address != nullptr; }
+    [[nodiscard]] bool isCreator() const noexcept { return _isCreator; }
+
+private:
+    void* _address{nullptr};
+    std::size_t _size{0};
+    bool _isCreator{false};
+};
+
+/// @ingroup ipc
 /// @brief Cross-platform zero-copy shared memory region wrapper.
 /// Manages OS-level shared memory allocation, memory mapping, and cleanup.
 class SharedMemory {
@@ -6704,6 +6889,16 @@ public:
             return false;
         }
         _queue.bind(_shm.data(), false);
+        return _queue.isValid();
+    }
+
+    /// @brief Bind channel directly to a raw memory buffer (e.g. multi-core embedded SRAM).
+    /// @param buffer Pointer to raw memory region.
+    /// @param isCreator If true, initializes queue headers; if false, attaches to existing queue.
+    /// @return true if valid, false if buffer is null.
+    bool bindRaw(void* buffer, bool isCreator = true) noexcept
+    {
+        _queue.bind(buffer, isCreator);
         return _queue.isValid();
     }
 

@@ -45,7 +45,7 @@ using AvionicsEvents = std::variant<
 >;
 
 // Zero-heap host application runtime
-using AvionicsRuntime = corium::RuntimeBuilder<>
+using AvionicsRuntime = corium::RuntimeBuilder
     ::WithEvents<AvionicsEvents>
     ::WithPriorityQueue<32, 128>
     ::Build;

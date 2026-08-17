@@ -110,12 +110,12 @@ TEST(ProfilerTest, LatencyTrackerStatistics)
 
 TEST(ProfilerTest, RuntimeIntegrationWithFlightRecorder)
 {
-    using ProfiledRuntime = RuntimeBuilder<>
+    using ProfiledRuntime = RuntimeBuilder
         ::WithEvents<ProfilerTestEvents>
         ::WithFlightRecorder<128>
         ::Build;
 
-    class App : public Application<App, ProfiledRuntime::EventBusType> {
+    class App : public Application<App, ProfilerTestEvents> {
     public:
         int sensorCount = 0;
         int commandCount = 0;

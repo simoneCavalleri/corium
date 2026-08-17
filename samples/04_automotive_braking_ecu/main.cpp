@@ -20,7 +20,7 @@
 #include "corium/profiler/FlightRecorder.hpp"
 #include "corium/safety/CircuitBreaker.hpp"
 #include "corium/safety/SafetyEvents.hpp"
-#include "corium/safety/WatchdogSupervisor.hpp"
+#include "corium/safety/WatchdogService.hpp"
 
 // -----------------------------------------------------------------------------
 // 1. Automotive ECU Domain Events
@@ -48,11 +48,11 @@ using AutomotiveEvents = std::variant<
     corium::safety::WatchdogTimeoutEvent
 >;
 
-// Zero-heap runtime with FlightRecorder profiler enabled
-using AutomotiveRuntime = corium::RuntimeBuilder<>
+// ASIL-D specialized Runtime with nanosecond FlightRecorder profiler
+using AutomotiveRuntime = corium::RuntimeBuilder
     ::WithEvents<AutomotiveEvents>
-    ::WithPriorityQueue<32, 128>
-    ::WithProfiler<corium::profiler::FlightRecorderProfiler<64>> // 64-event circular flight buffer
+    ::WithPriorityQueue<32, 128>            // 32 High-Priority emergency slots, 128 Normal torque slots
+    ::WithFlightRecorder<64>                // Circular trace logger storing the last 64 events
     ::Build;
 
 // -----------------------------------------------------------------------------
@@ -92,7 +92,7 @@ public:
     static constexpr uint32_t RecoveryCooldownMs = 100;
 
     BrakeActuatorService actuatorService;
-    corium::safety::WatchdogSupervisor<MaxMonitoredTasks> watchdog;
+    corium::safety::WatchdogService<AutomotiveEvents, MaxMonitoredTasks> watchdogService{std::chrono::milliseconds(20)};
     corium::safety::CircuitBreaker<FaultTripThreshold, RecoveryCooldownMs> circuitBreaker;
 
     uint32_t torqueCommandsProcessed = 0;
@@ -102,6 +102,7 @@ public:
     void onConfigureServices(Registry& registry)
     {
         registry.registerService(actuatorService);
+        registry.registerService(watchdogService);
     }
 
     void onRegisterHandlers()
@@ -109,7 +110,7 @@ public:
         // 1. Nominal Torque Demand Handler
         on([this](const InverterTorqueCommandEvent& cmd) {
             torqueCommandsProcessed++;
-            watchdog.beat(TASK_ID_BRAKE_ACTUATOR); // Heartbeat reported
+            watchdogService.beat(TASK_ID_BRAKE_ACTUATOR); // Heartbeat reported
 
             if (circuitBreaker.allowExecution()) {
                 std::cout << "  [\033[32mBRAKE-BY-WIRE\033[0m] Target Torque: "
@@ -135,18 +136,18 @@ public:
         std::cout << "[ECU Core] Initializing ASIL-D Safety Watchdog & Heartbeat Monitor...\n";
 
         // Configure hardware watchdog kick callback
-        watchdog.setWatchdogKickCallback([](void*) {
+        watchdogService.setWatchdogKickCallback([](void*) {
             std::cout << "  [\033[35mHARDWARE IWDG\033[0m] >>> REFRESH / PET HARDWARE WATCHDOG <<<\n";
         });
 
         // Register safety tasks and their maximum allowable deadline SLAs
-        watchdog.registerService(TASK_ID_PEDAL_SENSOR,   50'000'000); // 50ms SLA
-        watchdog.registerService(TASK_ID_BRAKE_ACTUATOR, 40'000'000); // 40ms SLA
-        watchdog.registerService(TASK_ID_STABILITY_CTRL, 60'000'000); // 60ms SLA
+        watchdogService.registerService(TASK_ID_PEDAL_SENSOR,   50'000'000); // 50ms SLA
+        watchdogService.registerService(TASK_ID_BRAKE_ACTUATOR, 40'000'000); // 40ms SLA
+        watchdogService.registerService(TASK_ID_STABILITY_CTRL, 60'000'000); // 60ms SLA
 
         // Initial heartbeats
-        watchdog.beat(TASK_ID_PEDAL_SENSOR);
-        watchdog.beat(TASK_ID_STABILITY_CTRL);
+        watchdogService.beat(TASK_ID_PEDAL_SENSOR);
+        watchdogService.beat(TASK_ID_STABILITY_CTRL);
     }
 };
 
@@ -168,20 +169,17 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
         // Periodic sensor task heartbeats
-        app.watchdog.beat(TASK_ID_PEDAL_SENSOR);
-        app.watchdog.beat(TASK_ID_STABILITY_CTRL);
+        app.watchdogService.beat(TASK_ID_PEDAL_SENSOR);
+        app.watchdogService.beat(TASK_ID_STABILITY_CTRL);
 
         // Process incoming actuator events
         runtime.pump();
-
-        // Run watchdog supervisor iteration (kicks IWDG if healthy, suppresses and dispatches if failed)
-        app.watchdog.supervise(runtime.eventSink());
     }
 
     std::cout << "\n=======================================================\n";
     std::cout << " [Automotive Safety Supervisor Summary]\n";
-    std::cout << "  - Hardware Watchdog Kicks   : " << app.watchdog.totalKicks() << " (Nominal execution)\n";
-    std::cout << "  - Watchdog Suppressions     : " << app.watchdog.totalSuppressions() << " (Fault isolated)\n";
+    std::cout << "  - Hardware Watchdog Kicks   : " << app.watchdogService.supervisor().totalKicks() << " (Nominal execution)\n";
+    std::cout << "  - Watchdog Suppressions     : " << app.watchdogService.supervisor().totalSuppressions() << " (Fault isolated)\n";
     std::cout << "  - Circuit Breaker State     : "
               << (app.circuitBreaker.state() == corium::safety::CircuitState::Open ? "\033[31;1mOPEN (Isolated)\033[0m" : "CLOSED") << "\n";
     std::cout << "=======================================================\n\n";

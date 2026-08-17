@@ -36,6 +36,8 @@ template <
 >
 class BasicRuntime {
 public:
+    using EventVariantType = EventVariant;
+    using EventType = EventVariant;
     using EventBusType = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy, ProfilerPolicy>;
     using ClockPolicyType = typename internal::get_timer_clock_policy<TimerStoragePolicy>::type;
     using TimerSchedulerType = TimerScheduler<EventVariant, TimerStoragePolicy::max_timers, ClockPolicyType>;

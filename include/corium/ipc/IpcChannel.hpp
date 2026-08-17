@@ -53,6 +53,16 @@ public:
         return _queue.isValid();
     }
 
+    /// @brief Bind channel directly to a raw memory buffer (e.g. multi-core embedded SRAM).
+    /// @param buffer Pointer to raw memory region.
+    /// @param isCreator If true, initializes queue headers; if false, attaches to existing queue.
+    /// @return true if valid, false if buffer is null.
+    bool bindRaw(void* buffer, bool isCreator = true) noexcept
+    {
+        _queue.bind(buffer, isCreator);
+        return _queue.isValid();
+    }
+
     /// @brief Post an event into the shared memory queue for remote processes.
     /// Lock-free, zero-allocation, multi-producer safe.
     /// @tparam EventType Strongly-typed event type.

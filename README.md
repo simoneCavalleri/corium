@@ -177,7 +177,7 @@ struct EmergencyStopEvent { const char* reason; };
 using AppEvents = std::variant<QuitEvent, NormalUpdateEvent, EmergencyStopEvent>;
 
 // Configure Runtime with PriorityMpscQueuePolicy
-using PriorityRuntime = RuntimeBuilder<>
+using PriorityRuntime = RuntimeBuilder
     ::WithEvents<AppEvents>
     ::WithPriorityQueue<256, 1024>
     ::Build;
@@ -236,7 +236,7 @@ struct DelayedAlertEvent { const char* message; };
 using AppEvents = std::variant<QuitEvent, HeartbeatEvent, DelayedAlertEvent>;
 
 // Configure Runtime with Custom Clock Policy and Max Timers
-using TimerRuntime = RuntimeBuilder<>
+using TimerRuntime = RuntimeBuilder
     ::WithEvents<AppEvents>
     ::WithClockPolicy<ChronoClockPolicy> // Or EspTimerClockPolicy, FreeRtosClockPolicy, ManualClockPolicy
     ::WithMaxTimers<32>
@@ -310,7 +310,7 @@ struct ButtonPressEvent { uint8_t pin; uint32_t durationMs; };
 using Esp32Events = std::variant<QuitEvent, ButtonPressEvent>;
 
 // Embedded policy-based runtime configuration
-using Esp32Runtime = RuntimeBuilder<>
+using Esp32Runtime = RuntimeBuilder
     ::WithEvents<Esp32Events>
     ::WithCapacity<256>                     // 256-element lock-free ring buffer
     ::WithClockPolicy<EspTimerClockPolicy> // Native esp_timer_get_time() hardware clock
@@ -528,7 +528,7 @@ Track event queue latency (time between `post()` and handler dispatch), executio
 using namespace corium;
 
 // Configure Runtime with 256-entry in-memory circular flight recorder
-using ProfiledRuntime = RuntimeBuilder<>
+using ProfiledRuntime = RuntimeBuilder
     ::WithEvents<DefaultEvents>
     ::WithFlightRecorder<256>
     ::Build;
@@ -659,7 +659,7 @@ struct TelemetryData { float temp; };
 using MyEvents = std::variant<QuitEvent, TelemetryData>;
 
 // Fluent Compile-Time Builder
-using CustomEmbeddedRuntime = RuntimeBuilder<>
+using CustomEmbeddedRuntime = RuntimeBuilder
     ::WithEvents<MyEvents>
     ::WithPriorityQueue<128, 512>            // 128 High, 512 Normal priority slots
     ::WithClockPolicy<EspTimerClockPolicy>   // Hardware 64-bit microsecond clock

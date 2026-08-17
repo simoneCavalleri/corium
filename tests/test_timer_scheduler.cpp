@@ -104,12 +104,12 @@ TEST(TimerSchedulerTest, TimerCancellation)
 
 TEST(TimerSchedulerTest, RuntimeIntegrationWithApplication)
 {
-    using TimerRuntime = RuntimeBuilder<>
+    using TimerRuntime = RuntimeBuilder
         ::WithEvents<TimerTestEvents>
         ::WithMaxTimers<16>
         ::Build;
 
-    class App : public Application<App, TimerRuntime::EventBusType> {
+    class App : public Application<App, TimerTestEvents> {
     public:
         int alertCount = 0;
         int tickCount = 0;

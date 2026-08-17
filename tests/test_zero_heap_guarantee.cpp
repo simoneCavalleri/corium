@@ -50,7 +50,7 @@ int main() {
     std::cout << " Corium Zero-Heap Hot-Path Allocation Verification Test\n";
     std::cout << "=========================================================\n\n";
 
-    using ZeroHeapRuntime = RuntimeBuilder<>
+    using ZeroHeapRuntime = RuntimeBuilder
         ::WithEvents<ZeroHeapEvents>
         ::WithCapacity<1024>
         ::WithStoragePolicy<CompactStoragePolicy>

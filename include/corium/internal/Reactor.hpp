@@ -11,6 +11,7 @@
 #include "corium/Events.hpp"
 #include "corium/internal/CallableTraits.hpp"
 #include "corium/internal/FastDelegate.hpp"
+#include "corium/internal/Panic.hpp"
 #include "corium/internal/VariantIndex.hpp"
 #include "corium/policies/StoragePolicies.hpp"
 
@@ -85,7 +86,7 @@ public:
     /// @note Must be called before runtime.initialize() seals the reactor.
     template <typename EventType, typename Handler>
     bool registerHandler(Handler&& handler) {
-        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        CORIUM_ASSERT(!_sealed, "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
         auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
         return list.registerHandler(std::forward<Handler>(handler));
@@ -97,7 +98,7 @@ public:
     /// @note Must be called before runtime.initialize() seals the reactor.
     template <typename Handler>
     bool registerHandler(Handler&& handler) {
-        assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
+        CORIUM_ASSERT(!_sealed, "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         using EventType = callable_event_type_t<Handler>;
         return registerHandler<EventType>(std::forward<Handler>(handler));
     }
