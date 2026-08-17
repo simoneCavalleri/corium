@@ -143,12 +143,38 @@ jobs:
           ./sample_02_single
 
   # ---------------------------------------------------------------------------
-  # 5. Automated GitHub Release on Git Tag
+  # 5. Static Analysis (Clang-Tidy Strict Quality Gate)
+  # ---------------------------------------------------------------------------
+  clang-tidy:
+    name: "Clang-Tidy Static Analysis (cert, bugprone, performance, modernize)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang-Tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+
+      - name: Generate Compile Commands Database
+        run: >
+          cmake -B build-tidy
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCORIUM_BUILD_TESTS=ON
+          -DCORIUM_BUILD_SAMPLES=ON
+
+      - name: Run Clang-Tidy Verification
+        run: |
+          clang-tidy-18 -p build-tidy \
+            tests/*.cpp samples/*/main.cpp
+
+  # ---------------------------------------------------------------------------
+  # 6. Automated GitHub Release on Git Tag
   # ---------------------------------------------------------------------------
   release:
     name: "Publish GitHub Release"
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [matrix-build, address-sanitizers, thread-sanitizer, single-header-verification]
+    needs: [matrix-build, address-sanitizers, thread-sanitizer, single-header-verification, clang-tidy]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
