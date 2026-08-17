@@ -11,20 +11,20 @@ add_library(corium INTERFACE)
 target_include_directories(corium INTERFACE include)
 
 # Showcase Sample Targets
-add_executable(sample_01_quickstart samples/01_quickstart/main.cpp)
-target_link_libraries(sample_01_quickstart PRIVATE corium)
+add_executable(sample_01_smart_grid_substation samples/01_smart_grid_substation/main.cpp)
+target_link_libraries(sample_01_smart_grid_substation PRIVATE corium)
 
-add_executable(sample_02_embedded_baremetal samples/02_embedded_baremetal/main.cpp)
-target_link_libraries(sample_02_embedded_baremetal PRIVATE corium)
+add_executable(sample_02_aerospace_flight_controller samples/02_aerospace_flight_controller/main.cpp)
+target_link_libraries(sample_02_aerospace_flight_controller PRIVATE corium)
 
-add_executable(sample_03_policies_and_queues samples/03_policies_and_queues/main.cpp)
-target_link_libraries(sample_03_policies_and_queues PRIVATE corium)
+add_executable(sample_03_hft_market_data_engine samples/03_hft_market_data_engine/main.cpp)
+target_link_libraries(sample_03_hft_market_data_engine PRIVATE corium)
 
-add_executable(sample_04_safety_and_profiling samples/04_safety_and_profiling/main.cpp)
-target_link_libraries(sample_04_safety_and_profiling PRIVATE corium)
+add_executable(sample_04_automotive_braking_ecu samples/04_automotive_braking_ecu/main.cpp)
+target_link_libraries(sample_04_automotive_braking_ecu PRIVATE corium)
 
-add_executable(sample_05_protocols_and_ipc samples/05_protocols_and_ipc/main.cpp)
-target_link_libraries(sample_05_protocols_and_ipc PRIVATE corium)
+add_executable(sample_05_drone_ground_control_ipc samples/05_drone_ground_control_ipc/main.cpp)
+target_link_libraries(sample_05_drone_ground_control_ipc PRIVATE corium)
 
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)

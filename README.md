@@ -31,7 +31,7 @@ flowchart TD
 
     subgraph Corium ["Corium Runtime Core (Zero-Heap / Zero-RTTI)"]
         IsrSink["IsrEventSink / FreeRtosIsrSink"]
-        Sink["IEventSinkT Handle (Lock-Free Push)"]
+        Sink["EventSinkT Handle (Lock-Free Push)"]
         Queue["PriorityMpscQueuePolicy / BoundedMpscQueuePolicy"]
         Reactor["ReactorT & FastDelegate Dispatcher"]
     end
@@ -100,11 +100,11 @@ Corium includes 5 focused, production-grade showcase applications in `samples/`:
 
 | Showcase Sample | Source Path | Key Features Demonstrated |
 | :--- | :--- | :--- |
-| **01. Quickstart & Fundamentals** | [`samples/01_quickstart/`](samples/01_quickstart/main.cpp) | `Application`, `EventBus`, background worker threads (`onConfigureServices`), priority dispatching, and periodic timers. |
-| **02. Embedded Bare-Metal & ISR** | [`samples/02_embedded_baremetal/`](samples/02_embedded_baremetal/main.cpp) | Strict `-fno-rtti -fno-exceptions`, `IsrEventSink`, hardware timer clock policies, zero-heap guarantee. |
-| **03. Policies & Queue Streaming** | [`samples/03_policies_and_queues/`](samples/03_policies_and_queues/main.cpp) | `AuditOverflowPolicy` dropped event counting, batch pumping (`pumpBatch()`), and queue sizing. |
-| **04. Safety & Telemetry Profiling** | [`samples/04_safety_and_profiling/`](samples/04_safety_and_profiling/main.cpp) | `WatchdogSupervisor`, multi-service SLAs, `CircuitBreaker`, and in-memory `FlightRecorder` Chrome Tracing JSON export. |
-| **05. Protocols & Multi-Process IPC** | [`samples/05_protocols_and_ipc/`](samples/05_protocols_and_ipc/main.cpp) | Binary `WirePacket` with CRC16, zero-copy Shared Memory (`IpcChannel`), and UNIX Domain Sockets (`UdsChannel`). |
+| **01. Smart Grid Substation Monitor** | [`samples/01_smart_grid_substation/`](samples/01_smart_grid_substation/main.cpp) | Modern C++20 CRTP `Application`, asynchronous coroutine tasks (`AsyncTask`), `ProducerBackgroundService`, periodic diagnostics, and high-priority surge alerts. |
+| **02. Aerospace UAV Flight Controller** | [`samples/02_aerospace_flight_controller/`](samples/02_aerospace_flight_controller/main.cpp) | Strict `-fno-rtti -fno-exceptions` bare-metal mode, hardware ISR sinks (`IsrEventSink`), active compile-time FSM (`StateMachine`), zero heap allocations. |
+| **03. HFT Market Data & Execution Engine** | [`samples/03_hft_market_data_engine/`](samples/03_hft_market_data_engine/main.cpp) | `PriorityMpscQueuePolicy` risk cancels ahead of normal market flow, `AuditOverflowPolicy` dropped micro-burst counting, batch chunk pumping. |
+| **04. Automotive Steer-by-Wire ECU** | [`samples/04_automotive_braking_ecu/`](samples/04_automotive_braking_ecu/main.cpp) | ASIL-D safety, `WatchdogSupervisor` multi-task deadline SLAs, lock-free `CircuitBreaker` fault isolation, in-memory `FlightRecorder` Chrome Tracing / Perfetto JSON export. |
+| **05. Drone Ground Control & Avionics IPC** | [`samples/05_drone_ground_control_ipc/`](samples/05_drone_ground_control_ipc/main.cpp) | Binary `WirePacket` CRC-16 protocol framing, zero-copy POSIX Shared Memory (`IpcChannel`), UNIX Domain Datagram Sockets (`UdsChannel`). |
 
 ---
 
@@ -713,7 +713,7 @@ ctest --test-dir build --output-on-failure
 ### Strict Bare-Metal Verification (`-fno-rtti -fno-exceptions`)
 
 ```bash
-g++ -std=c++20 -fno-rtti -fno-exceptions -Iinclude samples/05_esp32_embedded/main.cpp -o my_app
+g++ -std=c++20 -fno-rtti -fno-exceptions -Iinclude samples/02_aerospace_flight_controller/main.cpp -o my_app
 ./my_app
 ```
 
