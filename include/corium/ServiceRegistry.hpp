@@ -135,8 +135,6 @@ public:
         if (service) {
             if constexpr (requires { service->sink(); }) {
                 return service->sink();
-            } else if constexpr (requires { service->serviceSink(); }) {
-                return service->serviceSink();
             }
         }
         return EventSinkT<EventVariant>{};
@@ -145,10 +143,9 @@ public:
     /// @brief Initialize and launch all registered background service jthreads.
     void initialize(ServiceContextType ctx)
     {
-        ctx.registryPtr = const_cast<BasicServiceRegistry*>(this);
-        ctx.getServiceFn = [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
+        ctx.setRegistry(const_cast<BasicServiceRegistry*>(this), [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
             return static_cast<BasicServiceRegistry*>(regPtr)->getServiceById(typeId);
-        };
+        });
 
         for (size_t i = 0; i < _count; ++i) {
             if (_services[i].initFn) {

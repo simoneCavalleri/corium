@@ -9,8 +9,21 @@
 
 namespace corium {
 
+// Forward declaration of BasicRuntime for friendship
+template <
+    typename EventVariant,
+    typename QueuePolicy,
+    typename SignalPolicy,
+    typename StoragePolicy,
+    typename OverflowPolicy,
+    typename TimerStoragePolicy,
+    typename ProfilerPolicy
+>
+class BasicRuntime;
+
 /// @brief Static CRTP base class for applications managed by Corium Runtime.
 /// Subclass Application<Derived> or Application<Derived, EventBusType, MaxServices> for zero-vtable compile-time static dispatch.
+/// All framework operations and handlers are protected for clean encapsulation within the derived application.
 /// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
 /// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
 /// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
@@ -21,6 +34,7 @@ public:
     using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
 
     Application() = default;
+    ~Application() = default;
 
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
@@ -33,20 +47,7 @@ protected:
     template <typename Handler>
     bool on(Handler&& handler)
     {
-        return _context.events().registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register event handler with automatic event type deduction (alias for on).
-    template <typename Handler>
-    bool handle(Handler&& handler)
-    {
-        return _context.events().registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Access event bus reference.
-    [[nodiscard]] EventBusType& events()
-    {
-        return _context.events();
+        return _context.registerHandler(std::forward<Handler>(handler));
     }
 
     /// @brief Access event sink handle.
@@ -81,7 +82,40 @@ protected:
         _context.requestQuit();
     }
 
-public:
+    /// @brief Access reference to the internal ServiceRegistry.
+    [[nodiscard]] ServiceRegistryType& services() noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Access const reference to the internal ServiceRegistry.
+    [[nodiscard]] const ServiceRegistryType& services() const noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type (const overload).
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] const ServiceType* getService() const noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+private:
+    template <typename, typename, typename, typename, typename, typename, typename>
+    friend class BasicRuntime;
+
     template <typename Registry>
     void configureServices(Registry& registry)
     {
@@ -130,37 +164,6 @@ public:
         }
     }
 
-    /// @brief Access reference to the internal ServiceRegistry.
-    [[nodiscard]] ServiceRegistryType& services() noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Access const reference to the internal ServiceRegistry.
-    [[nodiscard]] const ServiceRegistryType& services() const noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type (const overload).
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] const ServiceType* getService() const noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-private:
     ApplicationContext<EventBusType> _context;
     ServiceRegistryType _serviceRegistry;
 };

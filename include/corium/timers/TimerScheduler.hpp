@@ -32,16 +32,6 @@ public:
     using time_point = typename ClockPolicy::time_point;
     using duration = typename ClockPolicy::duration;
 
-    struct TimerEntry {
-        TimerId id = INVALID_TIMER_ID;
-        EventVariant event{};
-        time_point expiryTime{};
-        duration interval{};
-        EventPriority priority = EventPriority::Normal;
-        bool isPeriodic = false;
-        bool active = false;
-    };
-
     TimerScheduler() = default;
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.
@@ -181,6 +171,16 @@ private:
 
         return INVALID_TIMER_ID; // Capacity exceeded
     }
+
+    struct TimerEntry {
+        TimerId id = INVALID_TIMER_ID;
+        EventVariant event{};
+        time_point expiryTime{};
+        duration interval{};
+        EventPriority priority = EventPriority::Normal;
+        bool isPeriodic = false;
+        bool active = false;
+    };
 
     std::array<TimerEntry, MaxTimers> _timers{};
     size_t _activeCount = 0;

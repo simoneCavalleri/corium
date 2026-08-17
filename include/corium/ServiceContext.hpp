@@ -10,12 +10,38 @@ namespace corium {
 /// and communicate with other registered background services.
 /// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
-struct BasicServiceContext {
+class BasicServiceContext {
+public:
     using GetServiceFn = void* (*)(void* registryPtr, internal::TypeIdPtr typeId);
 
-    EventSinkT<EventVariant> eventSink;
-    void* registryPtr = nullptr;
-    GetServiceFn getServiceFn = nullptr;
+    BasicServiceContext() = default;
+
+    explicit BasicServiceContext(
+        EventSinkT<EventVariant> sink,
+        void* regPtr = nullptr,
+        GetServiceFn fn = nullptr
+    ) noexcept
+        : _eventSink(sink), _registryPtr(regPtr), _getServiceFn(fn)
+    {}
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Configure registry resolution bridge (internal framework usage).
+    void setRegistry(void* registryPtr, GetServiceFn fn) noexcept
+    {
+        _registryPtr = registryPtr;
+        _getServiceFn = fn;
+    }
 
     /// @brief Retrieve another registered service instance by type.
     /// @tparam ServiceType Type of the target background service.
@@ -23,8 +49,8 @@ struct BasicServiceContext {
     template <typename ServiceType>
     [[nodiscard]] ServiceType* getService() const noexcept
     {
-        if (registryPtr && getServiceFn) {
-            return static_cast<ServiceType*>(getServiceFn(registryPtr, internal::getTypeId<ServiceType>()));
+        if (_registryPtr && _getServiceFn) {
+            return static_cast<ServiceType*>(_getServiceFn(_registryPtr, internal::getTypeId<ServiceType>()));
         }
         return nullptr;
     }
@@ -39,8 +65,6 @@ struct BasicServiceContext {
         if (service) {
             if constexpr (requires { service->sink(); }) {
                 return service->sink();
-            } else if constexpr (requires { service->serviceSink(); }) {
-                return service->serviceSink();
             }
         }
         return EventSinkT<EventVariant>{};
@@ -62,6 +86,11 @@ struct BasicServiceContext {
         }
         return false;
     }
+
+private:
+    EventSinkT<EventVariant> _eventSink;
+    void* _registryPtr = nullptr;
+    GetServiceFn _getServiceFn = nullptr;
 };
 
 /// @brief Default ServiceContext alias using DefaultEvents.

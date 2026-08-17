@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <utility>
 #include "corium/EventBus.hpp"
 #include "corium/EventSink.hpp"
 #include "corium/policies/QueuePolicies.hpp"
@@ -9,7 +10,8 @@
 
 namespace corium {
 
-/// @brief Context object passed to Application providing event bus access, quit requests, and timer scheduling.
+/// @brief Context object passed to Application providing event registration, sink access, quit requests, and timer scheduling.
+/// Completely encapsulates EventBus internals.
 /// @tparam EventBusType Concrete event bus type used by the runtime.
 template <typename EventBusType = EventBus>
 class ApplicationContext {
@@ -42,16 +44,23 @@ public:
         };
     }
 
-    /// @brief Access reference to the event bus.
-    [[nodiscard]] EventBusType& events() const
+    /// @brief Register an event handler into the application event bus.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler)
     {
-        return *_events;
+        if (_events) {
+            return _events->registerHandler(std::forward<Handler>(handler));
+        }
+        return false;
     }
 
     /// @brief Access event sink handle.
     [[nodiscard]] EventSinkT<EventVariant> eventSink() const
     {
-        return _events->sink();
+        if (_events) {
+            return _events->sink();
+        }
+        return EventSinkT<EventVariant>{};
     }
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.

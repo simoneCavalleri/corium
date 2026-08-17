@@ -31,6 +31,7 @@
 // >>> Begin: corium/ApplicationContext.hpp
 
 #include <chrono>
+#include <utility>
 
 // >>> Begin: corium/EventBus.hpp
 
@@ -1259,16 +1260,6 @@ public:
     using time_point = typename ClockPolicy::time_point;
     using duration = typename ClockPolicy::duration;
 
-    struct TimerEntry {
-        TimerId id = INVALID_TIMER_ID;
-        EventVariant event{};
-        time_point expiryTime{};
-        duration interval{};
-        EventPriority priority = EventPriority::Normal;
-        bool isPeriodic = false;
-        bool active = false;
-    };
-
     TimerScheduler() = default;
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.
@@ -1408,6 +1399,16 @@ private:
 
         return INVALID_TIMER_ID; // Capacity exceeded
     }
+
+    struct TimerEntry {
+        TimerId id = INVALID_TIMER_ID;
+        EventVariant event{};
+        time_point expiryTime{};
+        duration interval{};
+        EventPriority priority = EventPriority::Normal;
+        bool isPeriodic = false;
+        bool active = false;
+    };
 
     std::array<TimerEntry, MaxTimers> _timers{};
     size_t _activeCount = 0;
@@ -1784,6 +1785,7 @@ inline TypeIdPtr getTypeId() noexcept {
 // <<< End: corium/internal/VariantIndex.hpp
 
 namespace corium {
+namespace internal {
 
 /// @brief Fixed-capacity stack-allocated list of event handlers for a single event type.
 /// @tparam EventType Event type handled.
@@ -1819,6 +1821,8 @@ private:
     size_t _count = 0;
 };
 
+} // namespace internal
+
 /// @brief Primary template declaration for BasicReactor.
 template <typename EventVariant = DefaultEvents, typename StoragePolicy = DefaultStoragePolicy>
 class BasicReactor;
@@ -1852,7 +1856,7 @@ public:
     bool registerHandler(Handler&& handler) {
         assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
-        auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+        auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
         return list.registerHandler(std::forward<Handler>(handler));
     }
 
@@ -1872,7 +1876,7 @@ public:
     void dispatch(const EventVariant& event) const {
         std::visit([this](const auto& concreteEvent) {
             using EventType = std::decay_t<decltype(concreteEvent)>;
-            const auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+            const auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
             list.dispatch(concreteEvent);
         }, event);
     }
@@ -1888,7 +1892,7 @@ public:
     }
 
 private:
-    std::tuple<FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
+    std::tuple<internal::FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
     bool _sealed = false;
 };
 
@@ -2519,7 +2523,8 @@ using EventBusT = BasicEventBus<EventVariantType, QueuePolicy, SignalPolicy, Sto
 
 namespace corium {
 
-/// @brief Context object passed to Application providing event bus access, quit requests, and timer scheduling.
+/// @brief Context object passed to Application providing event registration, sink access, quit requests, and timer scheduling.
+/// Completely encapsulates EventBus internals.
 /// @tparam EventBusType Concrete event bus type used by the runtime.
 template <typename EventBusType = EventBus>
 class ApplicationContext {
@@ -2552,16 +2557,23 @@ public:
         };
     }
 
-    /// @brief Access reference to the event bus.
-    [[nodiscard]] EventBusType& events() const
+    /// @brief Register an event handler into the application event bus.
+    template <typename Handler>
+    bool registerHandler(Handler&& handler)
     {
-        return *_events;
+        if (_events) {
+            return _events->registerHandler(std::forward<Handler>(handler));
+        }
+        return false;
     }
 
     /// @brief Access event sink handle.
     [[nodiscard]] EventSinkT<EventVariant> eventSink() const
     {
-        return _events->sink();
+        if (_events) {
+            return _events->sink();
+        }
+        return EventSinkT<EventVariant>{};
     }
 
     /// @brief Schedule a single-shot delayed event with std::chrono duration.
@@ -2645,12 +2657,38 @@ namespace corium {
 /// and communicate with other registered background services.
 /// @tparam EventVariant The variant type list of supported events.
 template <typename EventVariant = DefaultEvents>
-struct BasicServiceContext {
+class BasicServiceContext {
+public:
     using GetServiceFn = void* (*)(void* registryPtr, internal::TypeIdPtr typeId);
 
-    EventSinkT<EventVariant> eventSink;
-    void* registryPtr = nullptr;
-    GetServiceFn getServiceFn = nullptr;
+    BasicServiceContext() = default;
+
+    explicit BasicServiceContext(
+        EventSinkT<EventVariant> sink,
+        void* regPtr = nullptr,
+        GetServiceFn fn = nullptr
+    ) noexcept
+        : _eventSink(sink), _registryPtr(regPtr), _getServiceFn(fn)
+    {}
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Configure registry resolution bridge (internal framework usage).
+    void setRegistry(void* registryPtr, GetServiceFn fn) noexcept
+    {
+        _registryPtr = registryPtr;
+        _getServiceFn = fn;
+    }
 
     /// @brief Retrieve another registered service instance by type.
     /// @tparam ServiceType Type of the target background service.
@@ -2658,8 +2696,8 @@ struct BasicServiceContext {
     template <typename ServiceType>
     [[nodiscard]] ServiceType* getService() const noexcept
     {
-        if (registryPtr && getServiceFn) {
-            return static_cast<ServiceType*>(getServiceFn(registryPtr, internal::getTypeId<ServiceType>()));
+        if (_registryPtr && _getServiceFn) {
+            return static_cast<ServiceType*>(_getServiceFn(_registryPtr, internal::getTypeId<ServiceType>()));
         }
         return nullptr;
     }
@@ -2674,8 +2712,6 @@ struct BasicServiceContext {
         if (service) {
             if constexpr (requires { service->sink(); }) {
                 return service->sink();
-            } else if constexpr (requires { service->serviceSink(); }) {
-                return service->serviceSink();
             }
         }
         return EventSinkT<EventVariant>{};
@@ -2697,6 +2733,11 @@ struct BasicServiceContext {
         }
         return false;
     }
+
+private:
+    EventSinkT<EventVariant> _eventSink;
+    void* _registryPtr = nullptr;
+    GetServiceFn _getServiceFn = nullptr;
 };
 
 /// @brief Default ServiceContext alias using DefaultEvents.
@@ -2761,12 +2802,6 @@ public:
         return _incomingBus.sink();
     }
 
-    /// @brief Get an EventSink handle targeting this service's incoming event queue (alias).
-    [[nodiscard]] EventSinkT<EventVariant> serviceSink() noexcept
-    {
-        return _incomingBus.sink();
-    }
-
     /// @brief Register an event handler for incoming events with explicit event type parameter.
     template <typename EventType, typename Handler>
     bool registerHandler(Handler&& handler)
@@ -2777,13 +2812,6 @@ public:
     /// @brief Register an event handler for incoming events with automatic event type deduction.
     template <typename Handler>
     bool on(Handler&& handler)
-    {
-        return _incomingBus.registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register an event handler for incoming events with automatic event type deduction (alias).
-    template <typename Handler>
-    bool handle(Handler&& handler)
     {
         return _incomingBus.registerHandler(std::forward<Handler>(handler));
     }
@@ -2822,21 +2850,24 @@ protected:
     [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
     [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
 
-    [[nodiscard]] EventSinkT<EventVariant> events() const noexcept { return _context.eventSink; }
-    [[nodiscard]] EventSinkT<EventVariant> mainEventSink() const noexcept { return _context.eventSink; }
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept { return _context.mainSink(); }
 
+    /// @brief Post an event into the main application event queue.
     template <typename EventType>
     void post(EventType&& event, EventPriority priority = EventPriority::Normal) const
     {
-        _context.eventSink.post(std::forward<EventType>(event), priority);
+        _context.mainSink().post(std::forward<EventType>(event), priority);
     }
 
+    /// @brief Post a high-priority event into the main application event queue.
     template <typename EventType>
     void postHighPriority(EventType&& event) const
     {
-        _context.eventSink.postHighPriority(std::forward<EventType>(event));
+        _context.mainSink().postHighPriority(std::forward<EventType>(event));
     }
 
+    /// @brief Post an event directly to another registered service.
     template <typename TargetService, typename EventType>
     bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
     {
@@ -3146,8 +3177,6 @@ public:
         if (service) {
             if constexpr (requires { service->sink(); }) {
                 return service->sink();
-            } else if constexpr (requires { service->serviceSink(); }) {
-                return service->serviceSink();
             }
         }
         return EventSinkT<EventVariant>{};
@@ -3156,10 +3185,9 @@ public:
     /// @brief Initialize and launch all registered background service jthreads.
     void initialize(ServiceContextType ctx)
     {
-        ctx.registryPtr = const_cast<BasicServiceRegistry*>(this);
-        ctx.getServiceFn = [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
+        ctx.setRegistry(const_cast<BasicServiceRegistry*>(this), [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
             return static_cast<BasicServiceRegistry*>(regPtr)->getServiceById(typeId);
-        };
+        });
 
         for (size_t i = 0; i < _count; ++i) {
             if (_services[i].initFn) {
@@ -3212,8 +3240,21 @@ using ServiceRegistryT = BasicServiceRegistry<MaxServices, EventVariant>;
 
 namespace corium {
 
+// Forward declaration of BasicRuntime for friendship
+template <
+    typename EventVariant,
+    typename QueuePolicy,
+    typename SignalPolicy,
+    typename StoragePolicy,
+    typename OverflowPolicy,
+    typename TimerStoragePolicy,
+    typename ProfilerPolicy
+>
+class BasicRuntime;
+
 /// @brief Static CRTP base class for applications managed by Corium Runtime.
 /// Subclass Application<Derived> or Application<Derived, EventBusType, MaxServices> for zero-vtable compile-time static dispatch.
+/// All framework operations and handlers are protected for clean encapsulation within the derived application.
 /// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
 /// @tparam EventBusType EventBus type used by the runtime (defaults to EventBus).
 /// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
@@ -3224,6 +3265,7 @@ public:
     using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
 
     Application() = default;
+    ~Application() = default;
 
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
@@ -3236,20 +3278,7 @@ protected:
     template <typename Handler>
     bool on(Handler&& handler)
     {
-        return _context.events().registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register event handler with automatic event type deduction (alias for on).
-    template <typename Handler>
-    bool handle(Handler&& handler)
-    {
-        return _context.events().registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Access event bus reference.
-    [[nodiscard]] EventBusType& events()
-    {
-        return _context.events();
+        return _context.registerHandler(std::forward<Handler>(handler));
     }
 
     /// @brief Access event sink handle.
@@ -3284,7 +3313,40 @@ protected:
         _context.requestQuit();
     }
 
-public:
+    /// @brief Access reference to the internal ServiceRegistry.
+    [[nodiscard]] ServiceRegistryType& services() noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Access const reference to the internal ServiceRegistry.
+    [[nodiscard]] const ServiceRegistryType& services() const noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type (const overload).
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] const ServiceType* getService() const noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+private:
+    template <typename, typename, typename, typename, typename, typename, typename>
+    friend class BasicRuntime;
+
     template <typename Registry>
     void configureServices(Registry& registry)
     {
@@ -3333,37 +3395,6 @@ public:
         }
     }
 
-    /// @brief Access reference to the internal ServiceRegistry.
-    [[nodiscard]] ServiceRegistryType& services() noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Access const reference to the internal ServiceRegistry.
-    [[nodiscard]] const ServiceRegistryType& services() const noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type (const overload).
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] const ServiceType* getService() const noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-private:
     ApplicationContext<EventBusType> _context;
     ServiceRegistryType _serviceRegistry;
 };
@@ -3646,11 +3677,6 @@ public:
         return _eventBus.sink();
     }
 
-    /// @brief Access reference to internal event bus.
-    EventBusType& eventBus() noexcept
-    {
-        return _eventBus;
-    }
 
     /// @brief Access reference to profiler policy.
     ProfilerPolicyType& profiler() noexcept
@@ -3664,6 +3690,7 @@ public:
         return _eventBus.profiler();
     }
 
+private:
     /// @brief Create ApplicationContext for application wiring.
     ApplicationContext<EventBusType> applicationContext()
     {
@@ -3678,7 +3705,6 @@ public:
         return ctx;
     }
 
-private:
     void registerCoreHandlers()
     {
         if constexpr (has_variant_type_v<QuitEvent, EventVariant>) {
@@ -6586,10 +6612,7 @@ public:
         std::size_t count = 0;
         EventVariant ev;
         while (_queue.tryPop(ev)) {
-            std::visit([&sink](auto&& typedEvent) {
-                sink.post(std::forward<decltype(typedEvent)>(typedEvent));
-            }, ev);
-
+            sink.post(std::move(ev));
             count++;
             if (maxEvents > 0 && count >= maxEvents) {
                 break;
@@ -6718,10 +6741,7 @@ public:
         std::size_t count = 0;
         EventVariant ev;
         while (tryPop(ev)) {
-            std::visit([&sink](auto&& typedEvent) {
-                sink.post(std::forward<decltype(typedEvent)>(typedEvent));
-            }, ev);
-
+            sink.post(std::move(ev));
             count++;
             if (maxEvents > 0 && count >= maxEvents) {
                 break;

@@ -15,6 +15,7 @@
 #include "corium/policies/StoragePolicies.hpp"
 
 namespace corium {
+namespace internal {
 
 /// @brief Fixed-capacity stack-allocated list of event handlers for a single event type.
 /// @tparam EventType Event type handled.
@@ -50,6 +51,8 @@ private:
     size_t _count = 0;
 };
 
+} // namespace internal
+
 /// @brief Primary template declaration for BasicReactor.
 template <typename EventVariant = DefaultEvents, typename StoragePolicy = DefaultStoragePolicy>
 class BasicReactor;
@@ -83,7 +86,7 @@ public:
     bool registerHandler(Handler&& handler) {
         assert(!_sealed && "registerHandler() called after reactor was sealed by runtime.initialize(). Move handler registration into onRegisterHandlers().");
         static_assert(has_variant_type_v<EventType, EventVariant>, "EventType is not part of EventVariant!");
-        auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+        auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
         return list.registerHandler(std::forward<Handler>(handler));
     }
 
@@ -103,7 +106,7 @@ public:
     void dispatch(const EventVariant& event) const {
         std::visit([this](const auto& concreteEvent) {
             using EventType = std::decay_t<decltype(concreteEvent)>;
-            const auto& list = std::get<FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
+            const auto& list = std::get<internal::FixedHandlerList<EventType, MaxHandlersPerEvent, InlineSize>>(_handlers);
             list.dispatch(concreteEvent);
         }, event);
     }
@@ -119,7 +122,7 @@ public:
     }
 
 private:
-    std::tuple<FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
+    std::tuple<internal::FixedHandlerList<Events, MaxHandlersPerEvent, InlineSize>...> _handlers{};
     bool _sealed = false;
 };
 

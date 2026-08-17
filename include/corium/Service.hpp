@@ -58,12 +58,6 @@ public:
         return _incomingBus.sink();
     }
 
-    /// @brief Get an EventSink handle targeting this service's incoming event queue (alias).
-    [[nodiscard]] EventSinkT<EventVariant> serviceSink() noexcept
-    {
-        return _incomingBus.sink();
-    }
-
     /// @brief Register an event handler for incoming events with explicit event type parameter.
     template <typename EventType, typename Handler>
     bool registerHandler(Handler&& handler)
@@ -74,13 +68,6 @@ public:
     /// @brief Register an event handler for incoming events with automatic event type deduction.
     template <typename Handler>
     bool on(Handler&& handler)
-    {
-        return _incomingBus.registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register an event handler for incoming events with automatic event type deduction (alias).
-    template <typename Handler>
-    bool handle(Handler&& handler)
     {
         return _incomingBus.registerHandler(std::forward<Handler>(handler));
     }
@@ -119,21 +106,24 @@ protected:
     [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
     [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
 
-    [[nodiscard]] EventSinkT<EventVariant> events() const noexcept { return _context.eventSink; }
-    [[nodiscard]] EventSinkT<EventVariant> mainEventSink() const noexcept { return _context.eventSink; }
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept { return _context.mainSink(); }
 
+    /// @brief Post an event into the main application event queue.
     template <typename EventType>
     void post(EventType&& event, EventPriority priority = EventPriority::Normal) const
     {
-        _context.eventSink.post(std::forward<EventType>(event), priority);
+        _context.mainSink().post(std::forward<EventType>(event), priority);
     }
 
+    /// @brief Post a high-priority event into the main application event queue.
     template <typename EventType>
     void postHighPriority(EventType&& event) const
     {
-        _context.eventSink.postHighPriority(std::forward<EventType>(event));
+        _context.mainSink().postHighPriority(std::forward<EventType>(event));
     }
 
+    /// @brief Post an event directly to another registered service.
     template <typename TargetService, typename EventType>
     bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
     {

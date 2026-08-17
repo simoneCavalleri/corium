@@ -288,11 +288,6 @@ public:
         return _eventBus.sink();
     }
 
-    /// @brief Access reference to internal event bus.
-    EventBusType& eventBus() noexcept
-    {
-        return _eventBus;
-    }
 
     /// @brief Access reference to profiler policy.
     ProfilerPolicyType& profiler() noexcept
@@ -306,6 +301,7 @@ public:
         return _eventBus.profiler();
     }
 
+private:
     /// @brief Create ApplicationContext for application wiring.
     ApplicationContext<EventBusType> applicationContext()
     {
@@ -320,7 +316,6 @@ public:
         return ctx;
     }
 
-private:
     void registerCoreHandlers()
     {
         if constexpr (has_variant_type_v<QuitEvent, EventVariant>) {

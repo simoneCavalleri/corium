@@ -83,10 +83,7 @@ public:
         std::size_t count = 0;
         EventVariant ev;
         while (_queue.tryPop(ev)) {
-            std::visit([&sink](auto&& typedEvent) {
-                sink.post(std::forward<decltype(typedEvent)>(typedEvent));
-            }, ev);
-
+            sink.post(std::move(ev));
             count++;
             if (maxEvents > 0 && count >= maxEvents) {
                 break;

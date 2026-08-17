@@ -209,6 +209,8 @@ public:
             this->requestQuit();
         });
     }
+    size_t serviceCount() { return services().size(); }
+    FaultyBackgroundService* findService() { return getService<FaultyBackgroundService>(); }
 };
 
 TEST(BackgroundServiceTest, WorkerExceptionHandlingAndErrorEventDispatch) {
@@ -218,8 +220,8 @@ TEST(BackgroundServiceTest, WorkerExceptionHandlingAndErrorEventDispatch) {
     runtime.initialize(app);
 
     // Test Application::services() and Application::getService()
-    EXPECT_EQ(app.getService<FaultyBackgroundService>(), &app.service);
-    EXPECT_EQ(app.services().size(), 1u);
+    EXPECT_EQ(app.findService(), &app.service);
+    EXPECT_EQ(app.serviceCount(), 1u);
 
     // Wait for the worker to fail and post ErrorEvent
     auto start = std::chrono::steady_clock::now();
