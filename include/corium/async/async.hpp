@@ -14,3 +14,5 @@
 #include "corium/async/WhenAny.hpp"          // IWYU pragma: export
 #include "corium/async/Generator.hpp"        // IWYU pragma: export
 #include "corium/async/AsyncEvent.hpp"       // IWYU pragma: export
+#include "corium/async/Channel.hpp"          // IWYU pragma: export
+#include "corium/async/Semaphore.hpp"        // IWYU pragma: export

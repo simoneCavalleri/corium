@@ -25,4 +25,5 @@
 #include "corium/safety/safety.hpp"
 #include "corium/ipc/ipc.hpp"
 #include "corium/net/net.hpp"
+#include "corium/EventRouter.hpp"
 // IWYU pragma: end_exports

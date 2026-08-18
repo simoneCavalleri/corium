@@ -131,6 +131,12 @@ public:
         _stub(_instance, event);
     }
 
+    /// @brief Function call operator for callable ergonomics.
+    void operator()(const EventType& event) const
+    {
+        invoke(event);
+    }
+
     /// @brief Check if delegate wraps a valid handler.
     explicit operator bool() const noexcept
     {

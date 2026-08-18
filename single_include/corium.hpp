@@ -854,6 +854,12 @@ public:
         _stub(_instance, event);
     }
 
+    /// @brief Function call operator for callable ergonomics.
+    void operator()(const EventType& event) const
+    {
+        invoke(event);
+    }
+
     /// @brief Check if delegate wraps a valid handler.
     explicit operator bool() const noexcept
     {
@@ -7358,6 +7364,323 @@ private:
 
 // <<< End: corium/async/AsyncEvent.hpp
 
+// >>> Begin: corium/async/Channel.hpp
+/**
+ * @file Channel.hpp
+ * @ingroup async
+ * @brief Zero-heap bounded asynchronous channel for C++20 coroutine message passing.
+ */
+
+
+#include <array>
+#include <atomic>
+#include <coroutine>
+#include <cstddef>
+#include <optional>
+#include <type_traits>
+#include <utility>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Statically allocated bounded asynchronous channel for typed producer-consumer coroutines.
+/// @tparam T Element type transferred through the channel.
+/// @tparam Capacity Maximum capacity of the channel ring buffer (must be power of two or positive).
+template <typename T, size_t Capacity = 16>
+class Channel {
+    static_assert(Capacity > 0, "Channel capacity must be greater than zero.");
+
+public:
+    using ValueType = T;
+
+    constexpr Channel() noexcept = default;
+
+    ~Channel() {
+        close();
+    }
+
+    Channel(const Channel&) = delete;
+    Channel& operator=(const Channel&) = delete;
+
+    /// @brief Non-blocking attempt to push an item into the channel.
+    /// @param value Item to push.
+    /// @return true if pushed; false if channel is full or closed.
+    bool tryPush(T value) noexcept {
+        if (m_closed.load(std::memory_order_acquire)) {
+            return false;
+        }
+
+        size_t count = m_count.load(std::memory_order_relaxed);
+        if (count >= Capacity) {
+            return false;
+        }
+
+        size_t tail = m_tail.load(std::memory_order_relaxed);
+        m_buffer[tail] = std::move(value);
+        m_tail.store((tail + 1) % Capacity, std::memory_order_relaxed);
+        m_count.fetch_add(1, std::memory_order_release);
+
+        // Resume any waiting consumer
+        auto h = m_recvWaiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (h && !h.done()) {
+            h.resume();
+        }
+        return true;
+    }
+
+    /// @brief Non-blocking attempt to pop an item from the channel.
+    /// @param out Variable to receive the popped item.
+    /// @return true if popped; false if channel is empty.
+    bool tryPop(T& out) noexcept {
+        size_t count = m_count.load(std::memory_order_relaxed);
+        if (count == 0) {
+            return false;
+        }
+
+        size_t head = m_head.load(std::memory_order_relaxed);
+        out = std::move(m_buffer[head]);
+        m_head.store((head + 1) % Capacity, std::memory_order_relaxed);
+        m_count.fetch_sub(1, std::memory_order_release);
+
+        // Resume any waiting producer
+        auto h = m_sendWaiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (h && !h.done()) {
+            h.resume();
+        }
+        return true;
+    }
+
+    /// @brief Close the channel. No more pushes will succeed. Remaining elements can still be popped.
+    void close() noexcept {
+        m_closed.store(true, std::memory_order_release);
+        auto hr = m_recvWaiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (hr && !hr.done()) {
+            hr.resume();
+        }
+        auto hs = m_sendWaiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (hs && !hs.done()) {
+            hs.resume();
+        }
+    }
+
+    /// @brief Check if channel is closed.
+    [[nodiscard]] bool isClosed() const noexcept {
+        return m_closed.load(std::memory_order_acquire);
+    }
+
+    /// @brief Number of elements currently in the channel.
+    [[nodiscard]] size_t size() const noexcept {
+        return m_count.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Check if channel is empty.
+    [[nodiscard]] bool empty() const noexcept {
+        return size() == 0;
+    }
+
+    /// @brief Check if channel is full.
+    [[nodiscard]] bool full() const noexcept {
+        return size() >= Capacity;
+    }
+
+    /// @brief Awaiter for pushing an item asynchronously (suspends if channel is full).
+    struct PushAwaiter {
+        Channel& chan;
+        T val;
+        bool done{false};
+
+        [[nodiscard]] bool await_ready() noexcept {
+            if (chan.isClosed()) {
+                done = true;
+                return true;
+            }
+            if (chan.tryPush(std::move(val))) {
+                done = true;
+                return true;
+            }
+            return false;
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept {
+            chan.m_pendingPushVal = std::move(val);
+            chan.m_sendWaiter.store(h, std::memory_order_release);
+            return true;
+        }
+
+        bool await_resume() noexcept {
+            if (done) return !chan.isClosed();
+            if (chan.m_pendingPushVal.has_value()) {
+                bool pushed = chan.tryPush(std::move(*chan.m_pendingPushVal));
+                chan.m_pendingPushVal.reset();
+                return pushed;
+            }
+            return false;
+        }
+    };
+
+    /// @brief Push an item into the channel asynchronously with backpressure suspension.
+    /// @param val Item to push.
+    /// @return Awaiter resolving to true if pushed, false if channel closed.
+    [[nodiscard]] PushAwaiter push(T val) noexcept {
+        return PushAwaiter{*this, std::move(val), false};
+    }
+
+    /// @brief Awaiter for popping an item asynchronously (suspends if channel is empty).
+    struct PopAwaiter {
+        Channel& chan;
+        std::optional<T> result{};
+
+        [[nodiscard]] bool await_ready() noexcept {
+            T item{};
+            if (chan.tryPop(item)) {
+                result = std::move(item);
+                return true;
+            }
+            if (chan.isClosed()) {
+                result = std::nullopt;
+                return true;
+            }
+            return false;
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept {
+            T item{};
+            if (chan.tryPop(item)) {
+                result = std::move(item);
+                return false;
+            }
+            if (chan.isClosed()) {
+                result = std::nullopt;
+                return false;
+            }
+            chan.m_recvWaiter.store(h, std::memory_order_release);
+            return true;
+        }
+
+        std::optional<T> await_resume() noexcept {
+            if (result.has_value()) {
+                return result;
+            }
+            T item{};
+            if (chan.tryPop(item)) {
+                return item;
+            }
+            return std::nullopt;
+        }
+    };
+
+    /// @brief Pop an item from the channel asynchronously.
+    /// @return Awaiter resolving to std::optional<T> (std::nullopt when closed and drained).
+    [[nodiscard]] PopAwaiter pop() noexcept {
+        return PopAwaiter{*this};
+    }
+
+private:
+    std::array<T, Capacity> m_buffer{};
+    std::atomic<size_t> m_head{0};
+    std::atomic<size_t> m_tail{0};
+    std::atomic<size_t> m_count{0};
+    std::atomic<bool> m_closed{false};
+
+    std::atomic<std::coroutine_handle<>> m_recvWaiter{nullptr};
+    std::atomic<std::coroutine_handle<>> m_sendWaiter{nullptr};
+    std::optional<T> m_pendingPushVal{};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/Channel.hpp
+
+// >>> Begin: corium/async/Semaphore.hpp
+/**
+ * @file Semaphore.hpp
+ * @ingroup async
+ * @brief Zero-heap asynchronous counting semaphore for C++20 coroutines.
+ */
+
+
+#include <atomic>
+#include <coroutine>
+#include <cstddef>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Asynchronous counting semaphore for cooperative coroutine concurrency throttling.
+class AsyncSemaphore {
+public:
+    /// @brief Construct semaphore with initial available count.
+    /// @param initialCount Number of initial available permits.
+    explicit constexpr AsyncSemaphore(ptrdiff_t initialCount = 1) noexcept
+        : m_count(initialCount)
+    {}
+
+    ~AsyncSemaphore() = default;
+    AsyncSemaphore(const AsyncSemaphore&) = delete;
+    AsyncSemaphore& operator=(const AsyncSemaphore&) = delete;
+
+    /// @brief Non-blocking attempt to acquire a permit.
+    /// @return true if permit acquired; false if semaphore count is zero.
+    bool tryAcquire() noexcept {
+        ptrdiff_t current = m_count.load(std::memory_order_relaxed);
+        while (current > 0) {
+            if (m_count.compare_exchange_weak(current, current - 1,
+                                               std::memory_order_acquire,
+                                               std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @brief Release one or more permits and resume waiting coroutines.
+    /// @param update Number of permits to return (default: 1).
+    void release(ptrdiff_t update = 1) noexcept {
+        m_count.fetch_add(update, std::memory_order_release);
+        auto h = m_waiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (h && !h.done()) {
+            h.resume();
+        }
+    }
+
+    /// @brief Available permit count.
+    [[nodiscard]] ptrdiff_t available() const noexcept {
+        return m_count.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Awaiter for acquiring a permit asynchronously.
+    struct AcquireAwaiter {
+        AsyncSemaphore& sem;
+
+        [[nodiscard]] bool await_ready() const noexcept {
+            return sem.tryAcquire();
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept {
+            if (sem.tryAcquire()) {
+                return false;
+            }
+            sem.m_waiter.store(h, std::memory_order_release);
+            return !sem.tryAcquire();
+        }
+
+        constexpr void await_resume() const noexcept {}
+    };
+
+    /// @brief Acquire a permit asynchronously (suspends coroutine until permit is released).
+    [[nodiscard]] AcquireAwaiter acquire() noexcept {
+        return AcquireAwaiter{*this};
+    }
+
+private:
+    std::atomic<ptrdiff_t> m_count{1};
+    std::atomic<std::coroutine_handle<>> m_waiter{nullptr};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/Semaphore.hpp
+
 // <<< End: corium/async/async.hpp
 
 // >>> Begin: corium/wire/wire.hpp
@@ -7902,6 +8225,180 @@ private:
  */
 
 
+
+// >>> Begin: corium/profiler/Metrics.hpp
+/**
+ * @file Metrics.hpp
+ * @ingroup profiler
+ * @brief Zero-heap Prometheus-compatible metric counters, gauges, and histograms.
+ */
+
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <span>
+#include <string_view>
+
+namespace corium::profiler {
+
+/// @ingroup profiler
+/// @brief Atomic 64-bit monotonically increasing counter.
+class Counter {
+public:
+    explicit constexpr Counter(std::string_view name, std::string_view help = "") noexcept
+        : m_name(name), m_help(help)
+    {}
+
+    /// @brief Increment counter value.
+    /// @param val Increment amount (default: 1).
+    void increment(uint64_t val = 1) noexcept {
+        m_value.fetch_add(val, std::memory_order_relaxed);
+    }
+
+    /// @brief Current counter value.
+    [[nodiscard]] uint64_t get() const noexcept {
+        return m_value.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Reset counter to zero.
+    void reset() noexcept {
+        m_value.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept { return m_name; }
+    [[nodiscard]] std::string_view help() const noexcept { return m_help; }
+
+private:
+    std::string_view m_name;
+    std::string_view m_help;
+    std::atomic<uint64_t> m_value{0};
+};
+
+/// @ingroup profiler
+/// @brief Atomic 64-bit signed gauge metric representing instantaneous level.
+class Gauge {
+public:
+    explicit constexpr Gauge(std::string_view name, std::string_view help = "") noexcept
+        : m_name(name), m_help(help)
+    {}
+
+    /// @brief Set gauge to an absolute value.
+    void set(int64_t val) noexcept {
+        m_value.store(val, std::memory_order_relaxed);
+    }
+
+    /// @brief Increment gauge.
+    void increment(int64_t val = 1) noexcept {
+        m_value.fetch_add(val, std::memory_order_relaxed);
+    }
+
+    /// @brief Decrement gauge.
+    void decrement(int64_t val = 1) noexcept {
+        m_value.fetch_sub(val, std::memory_order_relaxed);
+    }
+
+    /// @brief Current gauge value.
+    [[nodiscard]] int64_t get() const noexcept {
+        return m_value.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept { return m_name; }
+    [[nodiscard]] std::string_view help() const noexcept { return m_help; }
+
+private:
+    std::string_view m_name;
+    std::string_view m_help;
+    std::atomic<int64_t> m_value{0};
+};
+
+/// @ingroup profiler
+/// @brief Statically bucketed latency distribution histogram.
+/// @tparam NumBuckets Number of upper boundary buckets (default: 8).
+template <size_t NumBuckets = 8>
+class Histogram {
+public:
+    constexpr Histogram(
+        std::string_view name,
+        std::array<double, NumBuckets> bounds,
+        std::string_view help = ""
+    ) noexcept
+        : m_name(name), m_bounds(bounds), m_help(help)
+    {}
+
+    /// @brief Record an observed value.
+    /// @param val Observation (e.g. latency in milliseconds or microseconds).
+    void observe(double val) noexcept {
+        m_count.fetch_add(1, std::memory_order_relaxed);
+
+        for (size_t i = 0; i < NumBuckets; ++i) {
+            if (val <= m_bounds[i]) {
+                m_buckets[i].fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    [[nodiscard]] uint64_t count() const noexcept {
+        return m_count.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t bucketCount(size_t index) const noexcept {
+        return index < NumBuckets ? m_buckets[index].load(std::memory_order_relaxed) : 0;
+    }
+
+    [[nodiscard]] double bucketBound(size_t index) const noexcept {
+        return index < NumBuckets ? m_bounds[index] : 0.0;
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept { return m_name; }
+    [[nodiscard]] std::string_view help() const noexcept { return m_help; }
+
+private:
+    std::string_view m_name;
+    std::array<double, NumBuckets> m_bounds;
+    std::string_view m_help;
+    std::array<std::atomic<uint64_t>, NumBuckets> m_buckets{};
+    std::atomic<uint64_t> m_count{0};
+};
+
+/// @ingroup profiler
+/// @brief Format counter in Prometheus exposition text format into a char buffer.
+inline size_t formatPrometheusCounter(const Counter& c, std::span<char> buf) noexcept {
+    if (buf.size() < 64) return 0;
+    int len = std::snprintf(
+        buf.data(), buf.size(),
+        "# HELP %.*s %.*s\n# TYPE %.*s counter\n%.*s %lu\n",
+        static_cast<int>(c.name().size()), c.name().data(),
+        static_cast<int>(c.help().size()), c.help().data(),
+        static_cast<int>(c.name().size()), c.name().data(),
+        static_cast<int>(c.name().size()), c.name().data(),
+        static_cast<unsigned long>(c.get())
+    );
+    return len > 0 ? static_cast<size_t>(len) : 0;
+}
+
+/// @ingroup profiler
+/// @brief Format gauge in Prometheus exposition text format into a char buffer.
+inline size_t formatPrometheusGauge(const Gauge& g, std::span<char> buf) noexcept {
+    if (buf.size() < 64) return 0;
+    int len = std::snprintf(
+        buf.data(), buf.size(),
+        "# HELP %.*s %.*s\n# TYPE %.*s gauge\n%.*s %ld\n",
+        static_cast<int>(g.name().size()), g.name().data(),
+        static_cast<int>(g.help().size()), g.help().data(),
+        static_cast<int>(g.name().size()), g.name().data(),
+        static_cast<int>(g.name().size()), g.name().data(),
+        static_cast<long>(g.get())
+    );
+    return len > 0 ? static_cast<size_t>(len) : 0;
+}
+
+} // namespace corium::profiler
+
+// <<< End: corium/profiler/Metrics.hpp
 
 // <<< End: corium/profiler/profiler.hpp
 
@@ -9778,6 +10275,137 @@ private:
 // <<< End: corium/net/StaticUdpChannel.hpp
 
 // <<< End: corium/net/net.hpp
+
+// >>> Begin: corium/EventRouter.hpp
+/**
+ * @file EventRouter.hpp
+ * @ingroup core
+ * @brief Zero-heap topic-based multi-subscriber event routing and fan-out dispatcher.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
+#include <utility>
+
+
+namespace corium {
+
+/// @ingroup core
+/// @brief Zero-heap static topic-based publish/subscribe router.
+/// Fans out events to multiple registered delegate subscribers per topic ID without dynamic memory allocation.
+/// @tparam EventVariant Variant containing all supported event types.
+/// @tparam MaxSubscribersPerTopic Maximum subscribers registered per topic (default: 8).
+/// @tparam MaxTopics Maximum distinct topics supported (default: 8).
+template <
+    typename EventVariant,
+    size_t MaxSubscribersPerTopic = 8,
+    size_t MaxTopics = 8
+>
+class EventRouter {
+public:
+    using DelegateType = internal::EventHandlerDelegate<EventVariant, 32>;
+
+    constexpr EventRouter() noexcept = default;
+
+    /// @brief Subscribe a delegate callback to a specific topic ID.
+    /// @param topicId Topic identifier.
+    /// @param subscriber Delegate callback to execute when an event is published to this topic.
+    /// @return true if subscriber was registered; false if topic or subscriber slots are full.
+    bool subscribe(uint32_t topicId, DelegateType subscriber) noexcept {
+        // Find existing topic slot
+        for (size_t i = 0; i < m_numTopics; ++i) {
+            if (m_topics[i].topicId == topicId) {
+                if (m_topics[i].subscriberCount >= MaxSubscribersPerTopic) {
+                    return false; // Topic subscriber capacity reached
+                }
+                m_topics[i].subscribers[m_topics[i].subscriberCount++] = std::move(subscriber);
+                return true;
+            }
+        }
+
+        // Allocate new topic slot
+        if (m_numTopics >= MaxTopics) {
+            return false; // Max topics reached
+        }
+
+        auto& newTopic = m_topics[m_numTopics++];
+        newTopic.topicId = topicId;
+        newTopic.subscriberCount = 1;
+        newTopic.subscribers[0] = std::move(subscriber);
+        return true;
+    }
+
+    /// @brief Subscribe a typed event handler lambda to a specific topic ID.
+    /// @tparam Event Concrete event type to filter on.
+    /// @tparam Callable Lambda/Functor accepting `const Event&`.
+    /// @param topicId Topic identifier.
+    /// @param callable Handler function.
+    /// @return true if subscribed successfully.
+    template <typename Event, typename Callable>
+    bool subscribeEvent(uint32_t topicId, Callable callable) noexcept {
+        return subscribe(topicId, DelegateType([c = std::move(callable)](const EventVariant& var) {
+            if (std::holds_alternative<Event>(var)) {
+                c(std::get<Event>(var));
+            }
+        }));
+    }
+
+    /// @brief Publish an event variant to all subscribers of a specific topic.
+    /// @param topicId Target topic ID.
+    /// @param event Event instance to dispatch.
+    /// @return Number of subscribers invoked.
+    size_t publish(uint32_t topicId, const EventVariant& event) const noexcept {
+        for (size_t i = 0; i < m_numTopics; ++i) {
+            if (m_topics[i].topicId == topicId) {
+                for (size_t j = 0; j < m_topics[i].subscriberCount; ++j) {
+                    m_topics[i].subscribers[j](event);
+                }
+                return m_topics[i].subscriberCount;
+            }
+        }
+        return 0;
+    }
+
+    /// @brief Publish a concrete event to all subscribers of a specific topic.
+    /// @tparam Event Concrete event type.
+    /// @param topicId Target topic ID.
+    /// @param event Event instance to dispatch.
+    /// @return Number of subscribers invoked.
+    template <typename Event>
+    size_t publishEvent(uint32_t topicId, const Event& event) const noexcept {
+        return publish(topicId, EventVariant{event});
+    }
+
+    /// @brief Reset all topic subscriptions.
+    void clear() noexcept {
+        m_numTopics = 0;
+        for (auto& topic : m_topics) {
+            topic.subscriberCount = 0;
+        }
+    }
+
+    /// @brief Total active topics currently configured.
+    [[nodiscard]] size_t topicCount() const noexcept {
+        return m_numTopics;
+    }
+
+private:
+    struct TopicSlot {
+        uint32_t topicId{0};
+        size_t subscriberCount{0};
+        std::array<DelegateType, MaxSubscribersPerTopic> subscribers{};
+    };
+
+    std::array<TopicSlot, MaxTopics> m_topics{};
+    size_t m_numTopics{0};
+};
+
+} // namespace corium
+
+// <<< End: corium/EventRouter.hpp
 // IWYU pragma: end_exports
 
 // <<< End: corium/corium.hpp

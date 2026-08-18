@@ -78,6 +78,10 @@ if(CORIUM_BUILD_TESTS)
         tests/test_event_journal.cpp
         tests/test_embedded_spi_i2c.cpp
         tests/test_static_udp_channel.cpp
+        tests/test_async_channel.cpp
+        tests/test_fsm_guards.cpp
+        tests/test_metrics_prometheus.cpp
+        tests/test_event_router.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

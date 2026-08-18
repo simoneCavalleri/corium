@@ -8,3 +8,4 @@
 
 #include "corium/profiler/FlightRecorder.hpp"
 #include "corium/profiler/ProfilerPolicies.hpp"
+#include "corium/profiler/Metrics.hpp"
