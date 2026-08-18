@@ -16,6 +16,7 @@
 #include "corium/Application.hpp"
 #include "corium/BackgroundService.hpp"
 #include "corium/Runtime.hpp"
+#include "corium/embedded/CanAdapter.hpp"
 #include "corium/profiler/FlightRecorder.hpp"
 #include "corium/safety/CircuitBreaker.hpp"
 #include "corium/safety/SafetyEvents.hpp"
@@ -41,6 +42,8 @@ struct StabilityInterventionEvent {
 
 using AutomotiveEvents = std::variant<
     corium::QuitEvent,
+    corium::embedded::CanFrame,
+    corium::embedded::CanFdFrame,
     BrakePedalAngleEvent,
     InverterTorqueCommandEvent,
     StabilityInterventionEvent,
@@ -65,6 +68,8 @@ class BrakeActuatorService : public corium::ProducerBackgroundService<Automotive
 public:
     void run(const std::stop_token& stopToken)
     {
+        corium::embedded::CanIsrAdapter<AutomotiveEvents> canAdapter(mainSink());
+
         uint32_t cycle = 1;
         while (!stopToken.stop_requested() && cycle <= 4) {
             // Task cycle: nominal 25ms
@@ -74,6 +79,17 @@ public:
             if (cycle == 3) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(55)); // Deadline violation!
             }
+
+            // Simulate incoming CAN-FD Wheel Speed & Pedal Frame from vehicle bus (ID: 0x180)
+            corium::embedded::CanFdFrame canMsg{
+                .id = 0x180,
+                .len = 8,
+                .isExtended = false,
+                .bitRateSwitch = true,
+                .errorStateIndicator = false,
+                .data = {0x00, 0x01, static_cast<uint8_t>(cycle * 10), 0x50, 0, 0, 0, 0}
+            };
+            canAdapter.postFromIsr(canMsg, corium::EventPriority::Normal);
 
             post(InverterTorqueCommandEvent{.targetTorqueNm = 150.0f - cycle * 10.0f, .currentRpm = 2400.0f});
             cycle++;
@@ -95,6 +111,7 @@ public:
     corium::safety::CircuitBreaker<FaultTripThreshold, RecoveryCooldownMs> circuitBreaker;
 
     uint32_t torqueCommandsProcessed = 0;
+    uint32_t canFramesReceived = 0;
     bool emergencyFallbackActivated = false;
 
     template <typename Registry>
@@ -106,7 +123,14 @@ public:
 
     void onRegisterHandlers()
     {
-        // 1. Nominal Torque Demand Handler
+        // 1. Hardware CAN-FD Sensor Frame Handler (STM32 FDCAN Bus)
+        on([this](const corium::embedded::CanFdFrame& frame) {
+            canFramesReceived++;
+            std::cout << "  [\033[36mCAN-FD ISR\033[0m] Ingested CAN-FD Frame 0x"
+                      << std::hex << frame.id << std::dec << " | DLC: " << static_cast<int>(frame.len) << " bytes\n";
+        });
+
+        // 2. Nominal Torque Demand Handler
         on([this](const InverterTorqueCommandEvent& cmd) {
             torqueCommandsProcessed++;
             watchdogService.beat(TASK_ID_BRAKE_ACTUATOR); // Heartbeat reported
@@ -120,7 +144,7 @@ public:
             }
         });
 
-        // 2. Watchdog Deadline Violation Emergency Handler
+        // 3. Watchdog Deadline Violation Emergency Handler
         on([this](const corium::safety::WatchdogTimeoutEvent& timeout) {
             emergencyFallbackActivated = true;
             circuitBreaker.recordFailure();
@@ -171,12 +195,14 @@ int main()
         app.watchdogService.beat(TASK_ID_PEDAL_SENSOR);
         app.watchdogService.beat(TASK_ID_STABILITY_CTRL);
 
-        // Process incoming actuator events
-        runtime.pump();
+        // Process incoming actuator and CAN events
+        runtime.drain();
     }
 
     std::cout << "\n=======================================================\n";
     std::cout << " [Automotive Safety Supervisor Summary]\n";
+    std::cout << "  - CAN-FD Frames Processed   : " << app.canFramesReceived << " (Sensor telemetry)\n";
+    std::cout << "  - Torque Commands Handled   : " << app.torqueCommandsProcessed << " (Actuator demands)\n";
     std::cout << "  - Hardware Watchdog Kicks   : " << app.watchdogService.supervisor().totalKicks() << " (Nominal execution)\n";
     std::cout << "  - Watchdog Suppressions     : " << app.watchdogService.supervisor().totalSuppressions() << " (Fault isolated)\n";
     std::cout << "  - Circuit Breaker State     : "

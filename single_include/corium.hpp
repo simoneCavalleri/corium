@@ -4451,6 +4451,12 @@ public:
         return _incomingBus.sink();
     }
 
+    /// @brief Get an EventSink handle targeting the main application event queue.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept
+    {
+        return _context.mainSink();
+    }
+
     /// @brief Register an event handler for incoming events with explicit event type parameter.
     template <typename EventType, typename Handler>
     bool registerHandler(Handler&& handler)
@@ -4498,9 +4504,6 @@ public:
 protected:
     [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
     [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
-
-    /// @brief Access main application EventSink handle.
-    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept { return _context.mainSink(); }
 
     /// @brief Post an event into the main application event queue.
     template <typename EventType>
