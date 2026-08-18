@@ -16,11 +16,15 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#else
+#define CORIUM_HAS_POSIX_SHM 0
+#elif __has_include(<sys/mman.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#define CORIUM_HAS_POSIX_SHM 1
+#else
+#define CORIUM_HAS_POSIX_SHM 0
 #endif
 
 namespace corium::ipc {
@@ -75,7 +79,7 @@ public:
           _isCreator(other._isCreator)
 #if defined(_WIN32) || defined(_WIN64)
         , _handle(other._handle)
-#else
+#elif CORIUM_HAS_POSIX_SHM
         , _fd(other._fd)
 #endif
     {
@@ -84,7 +88,7 @@ public:
         other._isCreator = false;
 #if defined(_WIN32) || defined(_WIN64)
         other._handle = nullptr;
-#else
+#elif CORIUM_HAS_POSIX_SHM
         other._fd = -1;
 #endif
     }
@@ -100,7 +104,7 @@ public:
 #if defined(_WIN32) || defined(_WIN64)
             _handle = other._handle;
             other._handle = nullptr;
-#else
+#elif CORIUM_HAS_POSIX_SHM
             _fd = other._fd;
             other._fd = -1;
 #endif
@@ -154,7 +158,7 @@ public:
             return false;
         }
         return true;
-#else
+#elif CORIUM_HAS_POSIX_SHM
         int oflag = 0;
         mode_t permissions = 0666;
 
@@ -192,6 +196,9 @@ public:
             return false;
         }
         return true;
+#else
+        (void)mode;
+        return false;
 #endif
     }
 
@@ -205,7 +212,7 @@ public:
                 CloseHandle(_handle);
                 _handle = nullptr;
             }
-#else
+#elif CORIUM_HAS_POSIX_SHM
             ::munmap(_address, _size);
             if (_fd >= 0) {
                 ::close(_fd);
@@ -221,7 +228,7 @@ public:
     /// @brief Remove shared memory identifier from OS namespace (POSIX shm_unlink).
     static void unlink(const std::string& name) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SHM
         std::string n = normalizeName(name);
         ::shm_unlink(n.c_str());
 #else
@@ -263,7 +270,7 @@ private:
 
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE _handle{nullptr};
-#else
+#elif CORIUM_HAS_POSIX_SHM
     int _fd{-1};
 #endif
 };

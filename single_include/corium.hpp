@@ -6485,11 +6485,15 @@ private:
 #include <windows.h>
 #include <winsock2.h>
 #include <afunix.h>
-#else
+#define CORIUM_HAS_POSIX_SOCKETS 0
+#elif __has_include(<sys/socket.h>) && __has_include(<sys/un.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#define CORIUM_HAS_POSIX_SOCKETS 1
+#else
+#define CORIUM_HAS_POSIX_SOCKETS 0
 #endif
 
 namespace corium::ipc {
@@ -6537,7 +6541,7 @@ public:
     {
         close();
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         ::unlink(socketPath.c_str());
 
         _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -6572,7 +6576,7 @@ public:
     {
         close();
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
         if (_fd < 0) {
             return false;
@@ -6612,7 +6616,7 @@ public:
     /// @brief Set socket non-blocking mode.
     void setNonBlocking(bool nonBlocking) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd >= 0) {
             int flags = ::fcntl(_fd, F_GETFL, 0);
             if (flags >= 0) {
@@ -6635,7 +6639,7 @@ public:
     /// @return Number of bytes sent, or -1 on error.
     int send(const void* buffer, std::size_t length) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd < 0) return -1;
         return static_cast<int>(::send(_fd, buffer, length, 0));
 #else
@@ -6651,7 +6655,7 @@ public:
     /// @return Number of bytes received, or -1 on error/EWOULDBLOCK.
     int receive(void* buffer, std::size_t maxLength) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd < 0) return -1;
         return static_cast<int>(::recv(_fd, buffer, maxLength, 0));
 #else
@@ -6664,7 +6668,7 @@ public:
     /// @brief Close socket and unlink bound file if server.
     void close() noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd >= 0) {
             ::close(_fd);
             _fd = -1;
@@ -6724,11 +6728,15 @@ private:
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#else
+#define CORIUM_HAS_POSIX_SHM 0
+#elif __has_include(<sys/mman.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#define CORIUM_HAS_POSIX_SHM 1
+#else
+#define CORIUM_HAS_POSIX_SHM 0
 #endif
 
 namespace corium::ipc {
@@ -6783,7 +6791,7 @@ public:
           _isCreator(other._isCreator)
 #if defined(_WIN32) || defined(_WIN64)
         , _handle(other._handle)
-#else
+#elif CORIUM_HAS_POSIX_SHM
         , _fd(other._fd)
 #endif
     {
@@ -6792,7 +6800,7 @@ public:
         other._isCreator = false;
 #if defined(_WIN32) || defined(_WIN64)
         other._handle = nullptr;
-#else
+#elif CORIUM_HAS_POSIX_SHM
         other._fd = -1;
 #endif
     }
@@ -6808,7 +6816,7 @@ public:
 #if defined(_WIN32) || defined(_WIN64)
             _handle = other._handle;
             other._handle = nullptr;
-#else
+#elif CORIUM_HAS_POSIX_SHM
             _fd = other._fd;
             other._fd = -1;
 #endif
@@ -6862,7 +6870,7 @@ public:
             return false;
         }
         return true;
-#else
+#elif CORIUM_HAS_POSIX_SHM
         int oflag = 0;
         mode_t permissions = 0666;
 
@@ -6900,6 +6908,9 @@ public:
             return false;
         }
         return true;
+#else
+        (void)mode;
+        return false;
 #endif
     }
 
@@ -6913,7 +6924,7 @@ public:
                 CloseHandle(_handle);
                 _handle = nullptr;
             }
-#else
+#elif CORIUM_HAS_POSIX_SHM
             ::munmap(_address, _size);
             if (_fd >= 0) {
                 ::close(_fd);
@@ -6929,7 +6940,7 @@ public:
     /// @brief Remove shared memory identifier from OS namespace (POSIX shm_unlink).
     static void unlink(const std::string& name) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SHM
         std::string n = normalizeName(name);
         ::shm_unlink(n.c_str());
 #else
@@ -6971,7 +6982,7 @@ private:
 
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE _handle{nullptr};
-#else
+#elif CORIUM_HAS_POSIX_SHM
     int _fd{-1};
 #endif
 };

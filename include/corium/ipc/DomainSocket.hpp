@@ -19,11 +19,15 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <afunix.h>
-#else
+#define CORIUM_HAS_POSIX_SOCKETS 0
+#elif __has_include(<sys/socket.h>) && __has_include(<sys/un.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#define CORIUM_HAS_POSIX_SOCKETS 1
+#else
+#define CORIUM_HAS_POSIX_SOCKETS 0
 #endif
 
 namespace corium::ipc {
@@ -71,7 +75,7 @@ public:
     {
         close();
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         ::unlink(socketPath.c_str());
 
         _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -106,7 +110,7 @@ public:
     {
         close();
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         _fd = ::socket(AF_UNIX, SOCK_DGRAM, 0);
         if (_fd < 0) {
             return false;
@@ -146,7 +150,7 @@ public:
     /// @brief Set socket non-blocking mode.
     void setNonBlocking(bool nonBlocking) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd >= 0) {
             int flags = ::fcntl(_fd, F_GETFL, 0);
             if (flags >= 0) {
@@ -169,7 +173,7 @@ public:
     /// @return Number of bytes sent, or -1 on error.
     int send(const void* buffer, std::size_t length) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd < 0) return -1;
         return static_cast<int>(::send(_fd, buffer, length, 0));
 #else
@@ -185,7 +189,7 @@ public:
     /// @return Number of bytes received, or -1 on error/EWOULDBLOCK.
     int receive(void* buffer, std::size_t maxLength) noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd < 0) return -1;
         return static_cast<int>(::recv(_fd, buffer, maxLength, 0));
 #else
@@ -198,7 +202,7 @@ public:
     /// @brief Close socket and unlink bound file if server.
     void close() noexcept
     {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if CORIUM_HAS_POSIX_SOCKETS
         if (_fd >= 0) {
             ::close(_fd);
             _fd = -1;
