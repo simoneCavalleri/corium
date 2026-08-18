@@ -7,9 +7,7 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <span>
 
 #include "corium/EventSink.hpp"
@@ -26,7 +24,7 @@ struct CanFrame {
     std::array<uint8_t, 8> data{}; ///< Payload bytes
 
     [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
-        return std::span<const uint8_t>(data.data(), dlc > 8 ? 8 : dlc);
+        return {data.data(), static_cast<std::size_t>(dlc > 8 ? 8 : dlc)};
     }
 };
 
@@ -40,7 +38,7 @@ struct CanFdFrame {
     std::array<uint8_t, 64> data{}; ///< Payload bytes (up to 64B)
 
     [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
-        return std::span<const uint8_t>(data.data(), len > 64 ? 64 : len);
+        return {data.data(), static_cast<std::size_t>(len > 64 ? 64 : len)};
     }
 };
 
