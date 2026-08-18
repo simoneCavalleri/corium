@@ -49,6 +49,7 @@ HTML_DYNAMIC_MENUS     = YES
 HTML_DYNAMIC_SECTIONS  = YES
 
 # Modern Custom Theme & Mermaid.js Integration
+HTML_HEADER            = docs/header.html
 HTML_EXTRA_STYLESHEET  = docs/custom.css
 HTML_EXTRA_FILES       = docs/mermaid_init.js docs/custom.css
 HTML_EXTRA_SCRIPTS     = docs/mermaid_init.js

@@ -1,55 +1,41 @@
 /**
- * Mermaid.js Dynamic Renderer for Doxygen HTML Documentation
+ * Mermaid.js Dynamic Renderer for Doxygen Documentation
  * Converts Doxygen-rendered code fragments containing Mermaid diagrams into interactive SVGs.
  */
 
 (function () {
-    // 1. Dynamically load Mermaid.js ES module from CDN
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-    
-    script.onload = () => {
-        // Render mermaid diagrams once DOM and script are ready
-        renderMermaidDiagrams();
-    };
-    
-    document.head.appendChild(script);
-
     function isMermaidSyntax(text) {
+        if (!text) return false;
         const trimmed = text.trim();
-        return (
-            trimmed.startsWith('flowchart') ||
-            trimmed.startsWith('graph') ||
-            trimmed.startsWith('sequenceDiagram') ||
-            trimmed.startsWith('classDiagram') ||
-            trimmed.startsWith('stateDiagram') ||
-            trimmed.startsWith('stateDiagram-v2') ||
-            trimmed.startsWith('erDiagram') ||
-            trimmed.startsWith('gantt') ||
-            trimmed.startsWith('pie') ||
-            trimmed.startsWith('gitGraph') ||
-            trimmed.startsWith('C4Context') ||
-            trimmed.startsWith('mindmap') ||
-            trimmed.startsWith('timeline')
-        );
+        return /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|stateDiagram-v2|erDiagram|gantt|pie|gitGraph|C4Context|mindmap|timeline)\b/m.test(trimmed);
     }
 
-    async function renderMermaidDiagrams() {
-        if (!window.mermaid) {
-            try {
-                const module = await import('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs');
-                window.mermaid = module.default;
-            } catch (e) {
-                console.warn('Could not load Mermaid.js module:', e);
-                return;
-            }
-        }
+    function extractCleanText(container) {
+        const clone = container.cloneNode(true);
+        // Remove line numbers if Doxygen added them
+        clone.querySelectorAll('.lineno').forEach(el => el.remove());
+        return clone.textContent.trim();
+    }
 
-        const isDarkMode = document.documentElement.classList.contains('dark-mode') || 
+    async function initMermaidRenderer() {
+        if (typeof mermaid === 'undefined') {
+            // Load fallback if not yet in head
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+            script.onload = () => processAllMermaidBlocks();
+            document.head.appendChild(script);
+        } else {
+            processAllMermaidBlocks();
+        }
+    }
+
+    async function processAllMermaidBlocks() {
+        if (typeof mermaid === 'undefined') return;
+
+        const isDarkMode = document.documentElement.classList.contains('dark-mode') ||
                            window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-        window.mermaid.initialize({
+        mermaid.initialize({
             startOnLoad: false,
             theme: isDarkMode ? 'dark' : 'default',
             securityLevel: 'loose',
@@ -60,51 +46,43 @@
             }
         });
 
-        // Query all potential Doxygen code elements
         const candidates = document.querySelectorAll(
-            'div.fragment, pre.fragment, code.language-mermaid, pre.language-mermaid, div.line'
+            'div.fragment, pre.fragment, code.language-mermaid, pre.language-mermaid'
         );
 
-        const processedBlocks = new Set();
+        const blocksToRender = [];
 
-        candidates.forEach((el) => {
-            // Traverse up to find the outermost fragment container
-            let container = el;
-            if (el.classList.contains('line')) {
-                container = el.closest('div.fragment') || el.closest('pre.fragment');
-            }
-
-            if (!container || processedBlocks.has(container)) {
-                return;
-            }
-
-            const rawText = container.textContent || '';
-            if (isMermaidSyntax(rawText)) {
-                processedBlocks.add(container);
-
+        candidates.forEach((container, index) => {
+            const cleanText = extractCleanText(container);
+            if (isMermaidSyntax(cleanText)) {
                 const pre = document.createElement('pre');
                 pre.className = 'mermaid';
+                pre.id = `corium-mermaid-${index}`;
                 pre.style.background = 'transparent';
                 pre.style.border = 'none';
                 pre.style.textAlign = 'center';
-                pre.style.margin = '1.5rem 0';
-                pre.textContent = rawText.trim();
+                pre.style.margin = '2rem 0';
+                pre.textContent = cleanText;
 
                 container.parentNode.replaceChild(pre, container);
+                blocksToRender.push(pre);
             }
         });
 
-        try {
-            await window.mermaid.run();
-        } catch (err) {
-            console.warn('Mermaid rendering failed for block:', err);
+        if (blocksToRender.length > 0) {
+            try {
+                await mermaid.run({
+                    nodes: blocksToRender
+                });
+            } catch (err) {
+                console.warn('Mermaid rendering warning:', err);
+            }
         }
     }
 
-    // Run when DOM content is fully loaded
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', renderMermaidDiagrams);
+        document.addEventListener('DOMContentLoaded', initMermaidRenderer);
     } else {
-        renderMermaidDiagrams();
+        initMermaidRenderer();
     }
 })();
