@@ -252,6 +252,8 @@ jobs:
       - name: Create Release and Upload Single Header
         uses: softprops/action-gh-release@v2
         with:
+          name: "Corium ${{ github.ref_name }} — Production-Ready Zero-Heap C++20 Event Engine"
+          body_path: docs/RELEASE_NOTES.md
           files: |
             single_include/corium.hpp
-          generate_release_notes: true
+          generate_release_notes: false
