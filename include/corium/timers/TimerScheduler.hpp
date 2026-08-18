@@ -1,3 +1,9 @@
+/**
+ * @file TimerScheduler.hpp
+ * @ingroup timers
+ * @brief Fixed-capacity static timer scheduler for delayed and periodic events.
+ */
+
 #pragma once
 
 #include <array>

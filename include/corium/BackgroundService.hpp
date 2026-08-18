@@ -1,3 +1,9 @@
+/**
+ * @file BackgroundService.hpp
+ * @ingroup core
+ * @brief Managed worker thread using C++20 std::jthread and std::stop_token.
+ */
+
 #pragma once
 
 #include "corium/Service.hpp"

@@ -10,13 +10,21 @@
 
 
 // >>> Begin: corium/corium.hpp
+/**
+ * @file corium.hpp
+ * @ingroup core
+ * @brief Master umbrella header for the entire Corium runtime framework.
+ */
 
-/// @file corium.hpp
-/// @brief Umbrella header for the Corium C++20 Header-Only Application Runtime.
-/// Including this file provides access to Runtime, Application, Events, BackgroundServices, and Policies.
 
 
 // >>> Begin: corium/Runtime.hpp
+/**
+ * @file Runtime.hpp
+ * @ingroup core
+ * @brief Deterministic single-consumer event loop coordinator and runner.
+ */
+
 
 #include <atomic>
 #include <chrono>
@@ -26,6 +34,12 @@
 
 
 // >>> Begin: corium/ApplicationContext.hpp
+/**
+ * @file ApplicationContext.hpp
+ * @ingroup core
+ * @brief Type-erased context for application runtime introspection and lifecycle control.
+ */
+
 
 #include <array>
 #include <chrono>
@@ -36,6 +50,12 @@
 
 
 // >>> Begin: corium/Events.hpp
+/**
+ * @file Events.hpp
+ * @ingroup core
+ * @brief Standard lifecycle events (QuitEvent, ErrorEvent, TimerEvent).
+ */
+
 
 #include <cstdint>
 #include <variant>
@@ -100,11 +120,23 @@ using Event = DefaultEvents;
 // <<< End: corium/Events.hpp
 
 // >>> Begin: corium/EventSink.hpp
+/**
+ * @file EventSink.hpp
+ * @ingroup core
+ * @brief Non-allocating type-erased fat pointer handle for lock-free event posting.
+ */
+
 
 #include <type_traits>
 #include <utility>
 
 // >>> Begin: corium/policies/QueuePolicies.hpp
+/**
+ * @file QueuePolicies.hpp
+ * @ingroup policies
+ * @brief Bounded and multi-tier priority MPSC queueing policies.
+ */
+
 
 #include <cstddef>
 #include <cstdint>
@@ -115,6 +147,12 @@ using Event = DefaultEvents;
 
 
 // >>> Begin: corium/internal/MpscRingBuffer.hpp
+/**
+ * @file MpscRingBuffer.hpp
+ * @ingroup core
+ * @brief Dmitry Vyukov's lock-free multi-producer single-consumer ring buffer algorithm.
+ */
+
 
 #include <array>
 #include <atomic>
@@ -566,6 +604,12 @@ using EventSinkT = BasicEventSink<EventVariant>;
 // <<< End: corium/EventSink.hpp
 
 // >>> Begin: corium/internal/CallableTraits.hpp
+/**
+ * @file CallableTraits.hpp
+ * @ingroup core
+ * @brief Compile-time introspection traits for callable objects and event handlers.
+ */
+
 
 #include <type_traits>
 
@@ -637,6 +681,12 @@ using callable_event_type_t = typename get_callable_event_type<Callable>::type;
 // <<< End: corium/internal/CallableTraits.hpp
 
 // >>> Begin: corium/internal/FastDelegate.hpp
+/**
+ * @file FastDelegate.hpp
+ * @ingroup core
+ * @brief Zero-allocating Small Buffer Optimized (SBO) static delegate dispatcher.
+ */
+
 
 #include <cassert>
 #include <cstddef>
@@ -816,6 +866,12 @@ private:
 // <<< End: corium/internal/FastDelegate.hpp
 
 // >>> Begin: corium/internal/VariantIndex.hpp
+/**
+ * @file VariantIndex.hpp
+ * @ingroup core
+ * @brief Compile-time type index resolution for std::variant alternative types.
+ */
+
 
 #include <type_traits>
 #include <variant>
@@ -898,6 +954,12 @@ using extract_event_variant_t = typename extract_event_variant<T>::type;
 // <<< End: corium/internal/VariantIndex.hpp
 
 // >>> Begin: corium/policies/SignalPolicies.hpp
+/**
+ * @file SignalPolicies.hpp
+ * @ingroup policies
+ * @brief Thread wake-up policies (NoSignalPolicy, ConditionVariableSignalPolicy).
+ */
+
 
 #include <atomic>
 #include <chrono>
@@ -1122,6 +1184,12 @@ private:
 // <<< End: corium/policies/SignalPolicies.hpp
 
 // >>> Begin: corium/timers/TimerScheduler.hpp
+/**
+ * @file TimerScheduler.hpp
+ * @ingroup timers
+ * @brief Fixed-capacity static timer scheduler for delayed and periodic events.
+ */
+
 
 #include <array>
 #include <chrono>
@@ -1132,6 +1200,12 @@ private:
 
 
 // >>> Begin: corium/timers/ClockPolicies.hpp
+/**
+ * @file ClockPolicies.hpp
+ * @ingroup timers
+ * @brief Hardware and simulated clock policies (Chrono, Manual, Tick, EspTimer, FreeRTOS).
+ */
+
 
 #include <chrono>
 #include <cstdint>
@@ -1731,15 +1805,33 @@ private:
 // <<< End: corium/ApplicationContext.hpp
 
 // >>> Begin: corium/EventBus.hpp
+/**
+ * @file EventBus.hpp
+ * @ingroup core
+ * @brief Multi-producer single-consumer lock-free event bus coordinator.
+ */
+
 
 
 // >>> Begin: corium/internal/EventQueue.hpp
+/**
+ * @file EventQueue.hpp
+ * @ingroup core
+ * @brief Internal priority and bounded lock-free event queue adapter.
+ */
+
 
 #include <optional>
 #include <utility>
 
 
 // >>> Begin: corium/policies/OverflowPolicies.hpp
+/**
+ * @file OverflowPolicies.hpp
+ * @ingroup policies
+ * @brief Queue saturation policies (DropNewest, DropOldest, Audit, Panic).
+ */
+
 
 #include <atomic>
 #include <cassert>
@@ -1929,6 +2021,12 @@ private:
 // <<< End: corium/internal/EventQueue.hpp
 
 // >>> Begin: corium/internal/Reactor.hpp
+/**
+ * @file Reactor.hpp
+ * @ingroup core
+ * @brief Internal static event handler registry and compile-time dispatcher.
+ */
+
 
 #include <array>
 #include <cassert>
@@ -1940,6 +2038,12 @@ private:
 
 
 // >>> Begin: corium/internal/Panic.hpp
+/**
+ * @file Panic.hpp
+ * @ingroup core
+ * @brief Zero-heap assertion and panic handling utilities.
+ */
+
 
 #include <cstdio>
 #include <cstdlib>
@@ -1999,6 +2103,12 @@ inline void setPanicHandler(PanicHandlerFn fn) noexcept {
 // <<< End: corium/internal/Panic.hpp
 
 // >>> Begin: corium/policies/StoragePolicies.hpp
+/**
+ * @file StoragePolicies.hpp
+ * @ingroup policies
+ * @brief Static storage capacity policies for FastDelegate SBO inline buffers.
+ */
+
 
 #include <cstddef>
 
@@ -2155,6 +2265,12 @@ using ReactorT = BasicReactor<EventVariant, StoragePolicy>;
 // <<< End: corium/internal/Reactor.hpp
 
 // >>> Begin: corium/profiler/ProfilerPolicies.hpp
+/**
+ * @file ProfilerPolicies.hpp
+ * @ingroup profiler
+ * @brief Latency tracking and flight recording policies with runtime toggle.
+ */
+
 
 #include <atomic>
 #include <chrono>
@@ -2164,6 +2280,12 @@ using ReactorT = BasicReactor<EventVariant, StoragePolicy>;
 
 
 // >>> Begin: corium/profiler/FlightRecorder.hpp
+/**
+ * @file FlightRecorder.hpp
+ * @ingroup profiler
+ * @brief Circular in-memory telemetry buffer with Chrome Tracing JSON export.
+ */
+
 
 #include <array>
 #include <atomic>
@@ -2616,6 +2738,10 @@ public:
     BasicEventBus() = default;
 
     /// @brief Post an event into the queue with optional priority (rvalue overload).
+    /// @param event Movable event variant instance.
+    /// @param priority Priority tier (EventPriority::High, Normal, Low).
+    /// @note Thread-safe, lock-free, zero heap allocation.
+    /// @see EventSinkT for non-owning posting handle.
     void post(EventVariant&& event, EventPriority priority = EventPriority::Normal)
     {
         _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
@@ -2624,6 +2750,9 @@ public:
     }
 
     /// @brief Post an event into the queue with optional priority (const lvalue overload).
+    /// @param event Const reference to event variant instance.
+    /// @param priority Priority tier (EventPriority::High, Normal, Low).
+    /// @note Thread-safe, lock-free, zero heap allocation.
     void post(const EventVariant& event, EventPriority priority = EventPriority::Normal)
     {
         _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
@@ -2632,6 +2761,9 @@ public:
     }
 
     /// @brief Convenience helper for posting high-priority events.
+    /// @tparam Event Concrete event type convertible to EventVariant.
+    /// @param event Event payload to forward at EventPriority::High.
+    /// @note Guaranteed to be dispatched ahead of standard Normal/Low priority events.
     template <typename Event>
     void postHighPriority(Event&& event)
     {
@@ -2797,6 +2929,12 @@ using EventBusT = BasicEventBus<EventVariantType, QueuePolicy, SignalPolicy, Sto
 // <<< End: corium/EventBus.hpp
 
 // >>> Begin: corium/policies/TimerPolicies.hpp
+/**
+ * @file TimerPolicies.hpp
+ * @ingroup policies
+ * @brief Timer scheduler static capacity and storage policies.
+ */
+
 
 #include <cstddef>
 
@@ -3162,6 +3300,12 @@ using RuntimeT = BasicRuntime<EventVariant, QueuePolicy, SignalPolicy, StoragePo
 
 
 // >>> Begin: corium/RuntimeBuilder.hpp
+/**
+ * @file RuntimeBuilder.hpp
+ * @ingroup core
+ * @brief Fluent compile-time builder for custom policy-configured runtimes.
+ */
+
 
 #include <cstddef>
 
@@ -3460,9 +3604,21 @@ struct RuntimeBuilder : BasicRuntimeBuilder<> {};
 // <<< End: corium/Runtime.hpp
 
 // >>> Begin: corium/Application.hpp
+/**
+ * @file Application.hpp
+ * @ingroup core
+ * @brief CRTP static polymorphism application base class with auto-deduced event handlers.
+ */
+
 
 
 // >>> Begin: corium/ServiceRegistry.hpp
+/**
+ * @file ServiceRegistry.hpp
+ * @ingroup core
+ * @brief Fixed-capacity static container for background worker services.
+ */
+
 
 #include <array>
 #include <cstddef>
@@ -3470,6 +3626,12 @@ struct RuntimeBuilder : BasicRuntimeBuilder<> {};
 
 
 // >>> Begin: corium/ServiceContext.hpp
+/**
+ * @file ServiceContext.hpp
+ * @ingroup core
+ * @brief Dependency injection context for background services.
+ */
+
 
 
 namespace corium {
@@ -3926,6 +4088,12 @@ private:
 // <<< End: corium/Application.hpp
 
 // >>> Begin: corium/Service.hpp
+/**
+ * @file Service.hpp
+ * @ingroup core
+ * @brief Lightweight thread-safe background service interface.
+ */
+
 
 
 #include <cstddef>
@@ -4085,6 +4253,12 @@ using ConsumerService = Service<
 // <<< End: corium/Service.hpp
 
 // >>> Begin: corium/BackgroundService.hpp
+/**
+ * @file BackgroundService.hpp
+ * @ingroup core
+ * @brief Managed worker thread using C++20 std::jthread and std::stop_token.
+ */
+
 
 
 #include <chrono>
@@ -4233,20 +4407,32 @@ using ConsumerBackgroundService = BackgroundService<
 // <<< End: corium/BackgroundService.hpp
 
 // >>> Begin: corium/policies/Policies.hpp
+/**
+ * @file Policies.hpp
+ * @ingroup policies
+ * @brief Umbrella header for compile-time runtime strategy policies.
+ */
 
-/// @file Policies.hpp
-/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
 
 
 // <<< End: corium/policies/Policies.hpp
 
 // >>> Begin: corium/logging/logging.hpp
+/**
+ * @file logging.hpp
+ * @ingroup logging
+ * @brief Umbrella header for the zero-heap structured logging framework.
+ */
 
-/// @file logging.hpp
-/// @brief Umbrella header for the Corium zero-heap logging framework.
 
 
 // >>> Begin: corium/logging/LogLevel.hpp
+/**
+ * @file LogLevel.hpp
+ * @ingroup logging
+ * @brief Log severity enumeration and ANSI color formatting utilities.
+ */
+
 
 #include <cstdint>
 
@@ -4301,6 +4487,12 @@ constexpr const char* LOG_COLOR_RESET = "\033[0m";
 // <<< End: corium/logging/LogLevel.hpp
 
 // >>> Begin: corium/logging/LogEvent.hpp
+/**
+ * @file LogEvent.hpp
+ * @ingroup logging
+ * @brief Zero-heap fixed-capacity inline buffer log event record.
+ */
+
 
 #include <array>
 #include <cstddef>
@@ -4355,6 +4547,12 @@ using LogEvent = LogEventT<256>;
 // <<< End: corium/logging/LogEvent.hpp
 
 // >>> Begin: corium/logging/sinks/ConsoleLogSink.hpp
+/**
+ * @file ConsoleLogSink.hpp
+ * @ingroup logging
+ * @brief Standard console output log sink with ANSI color support.
+ */
+
 
 #include <iostream>
 
@@ -4407,6 +4605,12 @@ private:
 // <<< End: corium/logging/sinks/ConsoleLogSink.hpp
 
 // >>> Begin: corium/logging/sinks/FileLogSink.hpp
+/**
+ * @file FileLogSink.hpp
+ * @ingroup logging
+ * @brief Synchronous append-only file logging sink.
+ */
+
 
 #include <cstdio>
 
@@ -4497,6 +4701,12 @@ private:
 // <<< End: corium/logging/sinks/FileLogSink.hpp
 
 // >>> Begin: corium/logging/sinks/JsonLogSink.hpp
+/**
+ * @file JsonLogSink.hpp
+ * @ingroup logging
+ * @brief Structured JSON Lines (NDJSON) output log sink for observability.
+ */
+
 
 #include <ostream>
 #include <string_view>
@@ -4550,6 +4760,12 @@ private:
 // <<< End: corium/logging/sinks/JsonLogSink.hpp
 
 // >>> Begin: corium/logging/sinks/NullLogSink.hpp
+/**
+ * @file NullLogSink.hpp
+ * @ingroup logging
+ * @brief No-op compile-time disabled log sink for zero overhead.
+ */
+
 
 
 namespace corium::logging::sinks {
@@ -4571,6 +4787,12 @@ public:
 // <<< End: corium/logging/sinks/NullLogSink.hpp
 
 // >>> Begin: corium/logging/Logger.hpp
+/**
+ * @file Logger.hpp
+ * @ingroup logging
+ * @brief Static logger frontend with compile-time formatting and severity filtering.
+ */
+
 
 #include <cstdio>
 #include <utility>
@@ -4705,6 +4927,12 @@ using NullLogger = LoggerT<sinks::NullLogSink>;
 // <<< End: corium/logging/Logger.hpp
 
 // >>> Begin: corium/logging/LogBackgroundService.hpp
+/**
+ * @file LogBackgroundService.hpp
+ * @ingroup logging
+ * @brief Asynchronous background worker service for flushing log events to disk.
+ */
+
 
 #include <chrono>
 #include <stop_token>
@@ -4760,12 +4988,21 @@ private:
 // <<< End: corium/logging/logging.hpp
 
 // >>> Begin: corium/embedded/embedded.hpp
+/**
+ * @file embedded.hpp
+ * @ingroup embedded
+ * @brief Umbrella header for embedded and RTOS integration primitives.
+ */
 
-/// @file embedded.hpp
-/// @brief Umbrella header for Corium embedded microcontrollers and RTOS support.
 
 
 // >>> Begin: corium/embedded/InterruptLock.hpp
+/**
+ * @file InterruptLock.hpp
+ * @ingroup embedded
+ * @brief Zero-overhead RAII critical section masking across ARM, ESP32, and host.
+ */
+
 
 #include <cstdint>
 
@@ -4846,6 +5083,12 @@ private:
 // <<< End: corium/embedded/InterruptLock.hpp
 
 // >>> Begin: corium/embedded/IsrSink.hpp
+/**
+ * @file IsrSink.hpp
+ * @ingroup embedded
+ * @brief Safe non-blocking event posting handle for hardware interrupt service routines.
+ */
+
 
 #include <utility>
 
@@ -4917,6 +5160,12 @@ template <typename EventSinkType>
 // <<< End: corium/embedded/IsrSink.hpp
 
 // >>> Begin: corium/embedded/FreeRtos.hpp
+/**
+ * @file FreeRtos.hpp
+ * @ingroup embedded
+ * @brief FreeRTOS ISR event sink and hardware context-switching helpers.
+ */
+
 
 #include <utility>
 
@@ -5000,12 +5249,21 @@ template <typename EventSinkType>
 // <<< End: corium/embedded/embedded.hpp
 
 // >>> Begin: corium/fsm/fsm.hpp
+/**
+ * @file fsm.hpp
+ * @ingroup fsm
+ * @brief Umbrella header for compile-time finite state machines.
+ */
 
-/// @file fsm.hpp
-/// @brief Zero-heap compile-time Finite State Machine (FSM) module for Corium.
 
 
 // >>> Begin: corium/fsm/Transition.hpp
+/**
+ * @file Transition.hpp
+ * @ingroup fsm
+ * @brief Declarative compile-time transition rules, internal transitions, and action lists.
+ */
+
 
 #include <tuple>
 #include <utility>
@@ -5110,6 +5368,12 @@ struct TransitionTable {
 // <<< End: corium/fsm/Transition.hpp
 
 // >>> Begin: corium/fsm/HistoryState.hpp
+/**
+ * @file HistoryState.hpp
+ * @ingroup fsm
+ * @brief Tag type for shallow history pseudostate in hierarchical state machines.
+ */
+
 
 namespace corium::fsm {
 
@@ -5128,6 +5392,12 @@ struct ShallowHistory {
 // <<< End: corium/fsm/HistoryState.hpp
 
 // >>> Begin: corium/fsm/StateMachine.hpp
+/**
+ * @file StateMachine.hpp
+ * @ingroup fsm
+ * @brief Zero-heap variant-based active finite state machine coordinator.
+ */
+
 
 #include <type_traits>
 #include <utility>
@@ -5305,12 +5575,21 @@ private:
 // <<< End: corium/fsm/fsm.hpp
 
 // >>> Begin: corium/async/async.hpp
+/**
+ * @file async.hpp
+ * @ingroup async
+ * @brief Umbrella header for C++20 coroutine primitives.
+ */
 
-/// @file async.hpp
-/// @brief C++20 coroutine Task and awaitable support for Corium.
 
 
 // >>> Begin: corium/async/Task.hpp
+/**
+ * @file Task.hpp
+ * @ingroup async
+ * @brief Lazy awaitable C++20 coroutine task with zero dynamic heap allocation.
+ */
+
 
 #include <coroutine>
 #include <exception>
@@ -5541,6 +5820,12 @@ private:
 // <<< End: corium/async/Task.hpp
 
 // >>> Begin: corium/async/Delay.hpp
+/**
+ * @file Delay.hpp
+ * @ingroup async
+ * @brief Non-blocking timer delay and yield awaitables for C++20 coroutines.
+ */
+
 
 #include <chrono>
 #include <coroutine>
@@ -5590,6 +5875,12 @@ template <typename Rep, typename Period>
 // <<< End: corium/async/Delay.hpp
 
 // >>> Begin: corium/async/CancellationToken.hpp
+/**
+ * @file CancellationToken.hpp
+ * @ingroup async
+ * @brief Lock-free atomic cooperative cancellation token with coroutine awaiter.
+ */
+
 
 #include <atomic>
 #include <coroutine>
@@ -5603,6 +5894,7 @@ public:
     constexpr CancellationToken() noexcept = default;
 
     /// @brief Signal cancellation to all observing tasks.
+    /// @note Wakes any suspended coroutine awaiting `whenCancelled()` immediately.
     void cancel() noexcept
     {
         _cancelled.store(true, std::memory_order_release);
@@ -5613,12 +5905,14 @@ public:
     }
 
     /// @brief Check if cancellation has been requested.
+    /// @return True if cancel() has been invoked, false otherwise.
     [[nodiscard]] bool isCancelled() const noexcept
     {
         return _cancelled.load(std::memory_order_acquire);
     }
 
     /// @brief Reset token state to uncancelled.
+    /// @note Allows reusing the token for subsequent asynchronous task executions.
     void reset() noexcept
     {
         _cancelled.store(false, std::memory_order_release);
@@ -5647,6 +5941,12 @@ public:
     };
 
     /// @brief Helper to suspend the current coroutine until cancel() is called.
+    /// @return WhenCancelledAwaiter that suspends until token cancellation.
+    /// @example
+    /// Task<void> worker(CancellationToken token) {
+    ///     co_await token.whenCancelled();
+    ///     // Clean up resources on shutdown signal
+    /// }
     [[nodiscard]] WhenCancelledAwaiter whenCancelled() noexcept
     {
         return WhenCancelledAwaiter{*this};
@@ -5662,6 +5962,12 @@ private:
 // <<< End: corium/async/CancellationToken.hpp
 
 // >>> Begin: corium/async/WhenAll.hpp
+/**
+ * @file WhenAll.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator awaiting completion of multiple parallel tasks.
+ */
+
 
 #include <tuple>
 #include <type_traits>
@@ -5708,6 +6014,12 @@ auto whenAll(Tasks&&... tasks)
 // <<< End: corium/async/WhenAll.hpp
 
 // >>> Begin: corium/async/WhenAny.hpp
+/**
+ * @file WhenAny.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator resolving on the first completed task.
+ */
+
 
 #include <cstddef>
 #include <type_traits>
@@ -5806,6 +6118,12 @@ auto whenAny(Tasks&&... tasks)
 // <<< End: corium/async/WhenAny.hpp
 
 // >>> Begin: corium/async/Generator.hpp
+/**
+ * @file Generator.hpp
+ * @ingroup async
+ * @brief Pull-based zero-heap lazy sequence generator compatible with C++20 ranges.
+ */
+
 
 #include <coroutine>
 #include <exception>
@@ -5973,12 +6291,21 @@ private:
 // <<< End: corium/async/async.hpp
 
 // >>> Begin: corium/wire/wire.hpp
+/**
+ * @file wire.hpp
+ * @ingroup wire
+ * @brief Umbrella header for binary wire protocol framing and serialization.
+ */
 
-/// @file wire.hpp
-/// @brief Zero-copy, zero-heap binary wire serialization and packet framing protocol for Corium.
 
 
 // >>> Begin: corium/wire/WirePacket.hpp
+/**
+ * @file WirePacket.hpp
+ * @ingroup wire
+ * @brief Binary packet framing with CRC-16 checksum and schema versioning.
+ */
+
 
 #include <array>
 #include <cstddef>
@@ -6070,6 +6397,12 @@ struct WirePacket {
 // <<< End: corium/wire/WirePacket.hpp
 
 // >>> Begin: corium/wire/Serializer.hpp
+/**
+ * @file Serializer.hpp
+ * @ingroup wire
+ * @brief Type-safe serialization and direct event sink deserialization.
+ */
+
 
 #include <cstring>
 #include <type_traits>
@@ -6180,14 +6513,32 @@ private:
 // <<< End: corium/wire/wire.hpp
 
 // >>> Begin: corium/profiler/profiler.hpp
+/**
+ * @file profiler.hpp
+ * @ingroup profiler
+ * @brief Umbrella header for real-time latency telemetry and flight recorder.
+ */
+
 
 
 // <<< End: corium/profiler/profiler.hpp
 
 // >>> Begin: corium/safety/safety.hpp
+/**
+ * @file safety.hpp
+ * @ingroup safety
+ * @brief Umbrella header for safety, supervision, and fault recovery primitives.
+ */
+
 
 
 // >>> Begin: corium/safety/CircuitBreaker.hpp
+/**
+ * @file CircuitBreaker.hpp
+ * @ingroup safety
+ * @brief Lock-free circuit breaker state machine for active fault isolation.
+ */
+
 
 #include <atomic>
 #include <chrono>
@@ -6347,6 +6698,12 @@ private:
 // <<< End: corium/safety/CircuitBreaker.hpp
 
 // >>> Begin: corium/safety/HeartbeatMonitor.hpp
+/**
+ * @file HeartbeatMonitor.hpp
+ * @ingroup safety
+ * @brief Lock-free SLA deadline tracker for multi-service heartbeats.
+ */
+
 
 #include <array>
 #include <atomic>
@@ -6463,6 +6820,12 @@ private:
 // <<< End: corium/safety/HeartbeatMonitor.hpp
 
 // >>> Begin: corium/safety/SafetyEvents.hpp
+/**
+ * @file SafetyEvents.hpp
+ * @ingroup safety
+ * @brief Heartbeat and fault notification event structures.
+ */
+
 
 #include <cstddef>
 #include <cstdint>
@@ -6496,6 +6859,12 @@ struct CircuitBreakerTrippedEvent {
 // <<< End: corium/safety/SafetyEvents.hpp
 
 // >>> Begin: corium/safety/WatchdogSupervisor.hpp
+/**
+ * @file WatchdogSupervisor.hpp
+ * @ingroup safety
+ * @brief Multi-task SLA deadline monitor controlling hardware watchdog refresh.
+ */
+
 
 #include <atomic>
 #include <chrono>
@@ -6624,6 +6993,12 @@ private:
 // <<< End: corium/safety/WatchdogSupervisor.hpp
 
 // >>> Begin: corium/safety/WatchdogService.hpp
+/**
+ * @file WatchdogService.hpp
+ * @ingroup safety
+ * @brief Autonomous background service for hardware watchdog supervision.
+ */
+
 
 #include <chrono>
 #include <cstddef>
@@ -6704,9 +7079,21 @@ private:
 // <<< End: corium/safety/safety.hpp
 
 // >>> Begin: corium/ipc/ipc.hpp
+/**
+ * @file ipc.hpp
+ * @ingroup ipc
+ * @brief Umbrella header for inter-process communication primitives.
+ */
+
 
 
 // >>> Begin: corium/ipc/DomainSocket.hpp
+/**
+ * @file DomainSocket.hpp
+ * @ingroup ipc
+ * @brief UNIX Domain Socket datagram listener and client implementation.
+ */
+
 
 #include <cstddef>
 #include <cstdint>
@@ -6930,6 +7317,12 @@ private:
 // <<< End: corium/ipc/DomainSocket.hpp
 
 // >>> Begin: corium/ipc/IpcChannel.hpp
+/**
+ * @file IpcChannel.hpp
+ * @ingroup ipc
+ * @brief Zero-copy typed event exchange over POSIX shared memory.
+ */
+
 
 #include <cstddef>
 #include <string>
@@ -6937,6 +7330,12 @@ private:
 
 
 // >>> Begin: corium/ipc/SharedMemory.hpp
+/**
+ * @file SharedMemory.hpp
+ * @ingroup ipc
+ * @brief RAII wrapper for POSIX shared memory and Windows file mappings.
+ */
+
 
 #include <cstddef>
 #include <cstdint>
@@ -7205,6 +7604,12 @@ private:
 // <<< End: corium/ipc/SharedMemory.hpp
 
 // >>> Begin: corium/ipc/ShmMpscQueue.hpp
+/**
+ * @file ShmMpscQueue.hpp
+ * @ingroup ipc
+ * @brief Lock-free multi-producer single-consumer queue located in shared memory.
+ */
+
 
 #include <atomic>
 #include <cassert>
@@ -7535,6 +7940,12 @@ private:
 // <<< End: corium/ipc/IpcChannel.hpp
 
 // >>> Begin: corium/ipc/UdsChannel.hpp
+/**
+ * @file UdsChannel.hpp
+ * @ingroup ipc
+ * @brief UNIX Domain Socket datagram inter-process event channel.
+ */
+
 
 #include <cstddef>
 #include <cstring>
@@ -7653,6 +8064,12 @@ private:
 // <<< End: corium/ipc/UdsChannel.hpp
 
 // >>> Begin: corium/ipc/PlatformChannel.hpp
+/**
+ * @file PlatformChannel.hpp
+ * @ingroup ipc
+ * @brief Cross-platform portable IPC channel alias.
+ */
+
 
 
 namespace corium::ipc {

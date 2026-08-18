@@ -1,7 +1,10 @@
-#pragma once
+/**
+ * @file logging.hpp
+ * @ingroup logging
+ * @brief Umbrella header for the zero-heap structured logging framework.
+ */
 
-/// @file logging.hpp
-/// @brief Umbrella header for the Corium zero-heap logging framework.
+#pragma once
 
 #include "corium/logging/LogLevel.hpp"
 #include "corium/logging/LogEvent.hpp"

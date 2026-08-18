@@ -1,7 +1,10 @@
-#pragma once
+/**
+ * @file fsm.hpp
+ * @ingroup fsm
+ * @brief Umbrella header for compile-time finite state machines.
+ */
 
-/// @file fsm.hpp
-/// @brief Zero-heap compile-time Finite State Machine (FSM) module for Corium.
+#pragma once
 
 #include "corium/fsm/Transition.hpp"
 #include "corium/fsm/HistoryState.hpp"

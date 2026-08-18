@@ -1,3 +1,9 @@
+/**
+ * @file EventQueue.hpp
+ * @ingroup core
+ * @brief Internal priority and bounded lock-free event queue adapter.
+ */
+
 #pragma once
 
 #include <optional>

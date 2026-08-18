@@ -1,3 +1,9 @@
+/**
+ * @file ShmMpscQueue.hpp
+ * @ingroup ipc
+ * @brief Lock-free multi-producer single-consumer queue located in shared memory.
+ */
+
 #pragma once
 
 #include <atomic>

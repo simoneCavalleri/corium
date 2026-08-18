@@ -1,3 +1,9 @@
+/**
+ * @file SharedMemory.hpp
+ * @ingroup ipc
+ * @brief RAII wrapper for POSIX shared memory and Windows file mappings.
+ */
+
 #pragma once
 
 #include <cstddef>

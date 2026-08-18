@@ -1,3 +1,9 @@
+/**
+ * @file StoragePolicies.hpp
+ * @ingroup policies
+ * @brief Static storage capacity policies for FastDelegate SBO inline buffers.
+ */
+
 #pragma once
 
 #include <cstddef>

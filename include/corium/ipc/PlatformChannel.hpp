@@ -1,3 +1,9 @@
+/**
+ * @file PlatformChannel.hpp
+ * @ingroup ipc
+ * @brief Cross-platform portable IPC channel alias.
+ */
+
 #pragma once
 
 #include "corium/ipc/UdsChannel.hpp"

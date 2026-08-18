@@ -1,3 +1,9 @@
+/**
+ * @file UdsChannel.hpp
+ * @ingroup ipc
+ * @brief UNIX Domain Socket datagram inter-process event channel.
+ */
+
 #pragma once
 
 #include <cstddef>

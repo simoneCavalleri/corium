@@ -1,3 +1,9 @@
+/**
+ * @file InterruptLock.hpp
+ * @ingroup embedded
+ * @brief Zero-overhead RAII critical section masking across ARM, ESP32, and host.
+ */
+
 #pragma once
 
 #include <cstdint>

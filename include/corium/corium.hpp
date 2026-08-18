@@ -1,8 +1,10 @@
-#pragma once
+/**
+ * @file corium.hpp
+ * @ingroup core
+ * @brief Master umbrella header for the entire Corium runtime framework.
+ */
 
-/// @file corium.hpp
-/// @brief Umbrella header for the Corium C++20 Header-Only Application Runtime.
-/// Including this file provides access to Runtime, Application, Events, BackgroundServices, and Policies.
+#pragma once
 
 #include "corium/Runtime.hpp"
 #include "corium/Application.hpp"

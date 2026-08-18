@@ -1,3 +1,9 @@
+/**
+ * @file EventBus.hpp
+ * @ingroup core
+ * @brief Multi-producer single-consumer lock-free event bus coordinator.
+ */
+
 #pragma once
 
 #include "corium/EventSink.hpp"
@@ -35,6 +41,10 @@ public:
     BasicEventBus() = default;
 
     /// @brief Post an event into the queue with optional priority (rvalue overload).
+    /// @param event Movable event variant instance.
+    /// @param priority Priority tier (EventPriority::High, Normal, Low).
+    /// @note Thread-safe, lock-free, zero heap allocation.
+    /// @see EventSinkT for non-owning posting handle.
     void post(EventVariant&& event, EventPriority priority = EventPriority::Normal)
     {
         _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
@@ -43,6 +53,9 @@ public:
     }
 
     /// @brief Post an event into the queue with optional priority (const lvalue overload).
+    /// @param event Const reference to event variant instance.
+    /// @param priority Priority tier (EventPriority::High, Normal, Low).
+    /// @note Thread-safe, lock-free, zero heap allocation.
     void post(const EventVariant& event, EventPriority priority = EventPriority::Normal)
     {
         _profilerPolicy.onEventPosted(event, static_cast<uint8_t>(priority));
@@ -51,6 +64,9 @@ public:
     }
 
     /// @brief Convenience helper for posting high-priority events.
+    /// @tparam Event Concrete event type convertible to EventVariant.
+    /// @param event Event payload to forward at EventPriority::High.
+    /// @note Guaranteed to be dispatched ahead of standard Normal/Low priority events.
     template <typename Event>
     void postHighPriority(Event&& event)
     {

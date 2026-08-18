@@ -1,3 +1,9 @@
+/**
+ * @file ServiceRegistry.hpp
+ * @ingroup core
+ * @brief Fixed-capacity static container for background worker services.
+ */
+
 #pragma once
 
 #include <array>

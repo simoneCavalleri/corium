@@ -1,3 +1,9 @@
+/**
+ * @file IsrSink.hpp
+ * @ingroup embedded
+ * @brief Safe non-blocking event posting handle for hardware interrupt service routines.
+ */
+
 #pragma once
 
 #include <utility>

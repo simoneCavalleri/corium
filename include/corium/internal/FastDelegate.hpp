@@ -1,3 +1,9 @@
+/**
+ * @file FastDelegate.hpp
+ * @ingroup core
+ * @brief Zero-allocating Small Buffer Optimized (SBO) static delegate dispatcher.
+ */
+
 #pragma once
 
 #include <cassert>

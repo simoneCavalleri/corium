@@ -1,3 +1,9 @@
+/**
+ * @file StateMachine.hpp
+ * @ingroup fsm
+ * @brief Zero-heap variant-based active finite state machine coordinator.
+ */
+
 #pragma once
 
 #include <type_traits>

@@ -1,3 +1,9 @@
+/**
+ * @file IpcChannel.hpp
+ * @ingroup ipc
+ * @brief Zero-copy typed event exchange over POSIX shared memory.
+ */
+
 #pragma once
 
 #include <cstddef>

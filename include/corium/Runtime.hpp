@@ -1,3 +1,9 @@
+/**
+ * @file Runtime.hpp
+ * @ingroup core
+ * @brief Deterministic single-consumer event loop coordinator and runner.
+ */
+
 #pragma once
 
 #include <atomic>

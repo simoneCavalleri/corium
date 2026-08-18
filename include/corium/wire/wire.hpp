@@ -1,7 +1,10 @@
-#pragma once
+/**
+ * @file wire.hpp
+ * @ingroup wire
+ * @brief Umbrella header for binary wire protocol framing and serialization.
+ */
 
-/// @file wire.hpp
-/// @brief Zero-copy, zero-heap binary wire serialization and packet framing protocol for Corium.
+#pragma once
 
 #include "corium/wire/WirePacket.hpp"
 #include "corium/wire/Serializer.hpp"

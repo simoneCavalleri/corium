@@ -1,3 +1,9 @@
+/**
+ * @file FileLogSink.hpp
+ * @ingroup logging
+ * @brief Synchronous append-only file logging sink.
+ */
+
 #pragma once
 
 #include <cstdio>

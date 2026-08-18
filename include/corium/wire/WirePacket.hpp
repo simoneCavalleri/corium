@@ -1,3 +1,9 @@
+/**
+ * @file WirePacket.hpp
+ * @ingroup wire
+ * @brief Binary packet framing with CRC-16 checksum and schema versioning.
+ */
+
 #pragma once
 
 #include <array>

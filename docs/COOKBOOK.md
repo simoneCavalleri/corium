@@ -120,7 +120,7 @@ corium::logging::sinks::JsonLogSink jsonSink(logFile);
 corium::logging::LogEventT<128> event;
 event.timestampNs = 1700000000000000ULL;
 event.level = corium::logging::LogLevel::Info;
-event.setCategory("SAFETY_SUPERVISOR");
+event.category = "SAFETY_SUPERVISOR";
 event.setMessage("Hardware watchdog refreshed successfully.");
 
 jsonSink.write(event);
@@ -156,4 +156,91 @@ FlightIpcEvents received;
 if (consumerChannel.tryPop(received)) {
     // Process received zero-copy event
 }
+```
+
+---
+
+## 6. Deterministic Periodic Sampling with Manual Clock Simulation
+
+Parameterize timers with `ManualClockPolicy` to step time deterministically in unit tests without wall-clock sleep delays.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/timers/ClockPolicies.hpp>
+
+struct SampleTickEvent {};
+using SensorEvents = std::variant<corium::QuitEvent, SampleTickEvent>;
+
+using SimulatedRuntime = corium::RuntimeBuilder<SensorEvents>
+    ::WithClockPolicy<corium::ManualClockPolicy>
+    ::Build;
+
+SimulatedRuntime runtime;
+int sampleCount = 0;
+runtime.reactor().template registerHandler<SampleTickEvent>([&](const SampleTickEvent&) {
+    ++sampleCount;
+});
+
+// Schedule recurring timer every 100ms
+runtime.timerScheduler().template postPeriodic<SampleTickEvent>(
+    std::chrono::milliseconds(100),
+    SampleTickEvent{}
+);
+
+// Fast-forward simulated clock by 350ms without waiting:
+runtime.clockPolicy().advance(std::chrono::milliseconds(350));
+runtime.pump(); // Exactly 3 ticks dispatched deterministically!
+assert(sampleCount == 3);
+```
+
+---
+
+## 7. Fault Isolation with Active Circuit Breaker
+
+Protect critical systems against cascading failures using a zero-heap lock-free Circuit Breaker.
+
+```cpp
+#include <corium/safety/CircuitBreaker.hpp>
+
+corium::safety::CircuitBreaker breaker(
+    /* failureThreshold = */ 3,
+    /* cooldownPeriodNs = */ 500'000'000ULL // 500ms
+);
+
+void handleRemoteRpc() {
+    if (!breaker.allowExecution()) {
+        // Fallback: Degraded local mode without blocking
+        return;
+    }
+
+    bool success = executeHardwareI2cRead();
+    if (success) {
+        breaker.recordSuccess();
+    } else {
+        breaker.recordFailure(); // Trips to Open after 3 consecutive failures
+    }
+}
+```
+
+---
+
+## 8. Telemetry Recording & Chrome Tracing JSON Export
+
+Profile execution latencies in-memory and export full timeline traces for visualization in Perfetto or Google Chrome (`chrome://tracing`).
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/profiler/ProfilerPolicies.hpp>
+#include <fstream>
+
+using ProfiledRuntime = corium::RuntimeBuilder<AppEvents>
+    ::WithProfiler<corium::profiler::FlightRecorderProfiler<1024>>
+    ::Build;
+
+ProfiledRuntime runtime;
+// Run application workload...
+
+// Export traces directly to Chrome Tracing JSON file:
+std::ofstream traceFile("benchmark_trace.json");
+runtime.profiler().exportChromeTracingJson(traceFile);
 ```

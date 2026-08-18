@@ -1,3 +1,9 @@
+/**
+ * @file WhenAny.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator resolving on the first completed task.
+ */
+
 #pragma once
 
 #include <cstddef>

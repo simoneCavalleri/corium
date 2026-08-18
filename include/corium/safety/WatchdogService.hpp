@@ -1,3 +1,9 @@
+/**
+ * @file WatchdogService.hpp
+ * @ingroup safety
+ * @brief Autonomous background service for hardware watchdog supervision.
+ */
+
 #pragma once
 
 #include <chrono>

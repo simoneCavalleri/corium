@@ -1,3 +1,9 @@
+/**
+ * @file ConsoleLogSink.hpp
+ * @ingroup logging
+ * @brief Standard console output log sink with ANSI color support.
+ */
+
 #pragma once
 
 #include <iostream>

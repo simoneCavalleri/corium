@@ -1,3 +1,9 @@
+/**
+ * @file Events.hpp
+ * @ingroup core
+ * @brief Standard lifecycle events (QuitEvent, ErrorEvent, TimerEvent).
+ */
+
 #pragma once
 
 #include <cstdint>

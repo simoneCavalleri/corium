@@ -1,3 +1,9 @@
+/**
+ * @file Panic.hpp
+ * @ingroup core
+ * @brief Zero-heap assertion and panic handling utilities.
+ */
+
 #pragma once
 
 #include <cstdio>

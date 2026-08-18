@@ -1,3 +1,9 @@
+/**
+ * @file TimerPolicies.hpp
+ * @ingroup policies
+ * @brief Timer scheduler static capacity and storage policies.
+ */
+
 #pragma once
 
 #include <cstddef>

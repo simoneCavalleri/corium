@@ -1,3 +1,9 @@
+/**
+ * @file FlightRecorder.hpp
+ * @ingroup profiler
+ * @brief Circular in-memory telemetry buffer with Chrome Tracing JSON export.
+ */
+
 #pragma once
 
 #include <array>

@@ -1,3 +1,9 @@
+/**
+ * @file JsonLogSink.hpp
+ * @ingroup logging
+ * @brief Structured JSON Lines (NDJSON) output log sink for observability.
+ */
+
 #pragma once
 
 #include <ostream>

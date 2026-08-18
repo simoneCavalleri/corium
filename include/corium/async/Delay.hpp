@@ -1,3 +1,9 @@
+/**
+ * @file Delay.hpp
+ * @ingroup async
+ * @brief Non-blocking timer delay and yield awaitables for C++20 coroutines.
+ */
+
 #pragma once
 
 #include <chrono>

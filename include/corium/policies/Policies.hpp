@@ -1,7 +1,10 @@
-#pragma once
+/**
+ * @file Policies.hpp
+ * @ingroup policies
+ * @brief Umbrella header for compile-time runtime strategy policies.
+ */
 
-/// @file Policies.hpp
-/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
+#pragma once
 
 #include "corium/policies/QueuePolicies.hpp"
 #include "corium/policies/SignalPolicies.hpp"

@@ -1,3 +1,9 @@
+/**
+ * @file Task.hpp
+ * @ingroup async
+ * @brief Lazy awaitable C++20 coroutine task with zero dynamic heap allocation.
+ */
+
 #pragma once
 
 #include <coroutine>

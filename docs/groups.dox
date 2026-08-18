@@ -14,9 +14,11 @@
  * - corium::Application: CRTP base class for domain logic.
  * - corium::BasicRuntime: Deterministic lifecycle and event pump coordinator.
  * - corium::BasicEventBus: Multi-producer single-consumer lock-free event bus.
- * - corium::BasicEventSink: Non-allocating type-erased fat pointer for thread-safe posting.
+ * - corium::BasicEventSink / corium::EventSinkT: Non-allocating type-erased fat pointer for thread-safe posting.
  * - corium::BasicServiceRegistry: Fixed-capacity background service container.
  * - corium::Service / corium::BackgroundService: Managed worker threads using std::jthread.
+ * - corium::ServiceContext: Thread-safe runtime injection context for services.
+ * - corium::RuntimeBuilder: Fluent compile-time builder for custom policy runtimes.
  */
 
 /**
@@ -29,7 +31,7 @@
  * Key components:
  * - corium::embedded::IsrEventSink: Safe non-blocking event posting from hardware ISRs.
  * - corium::embedded::FreeRtosIsrSink: FreeRTOS ISR sink managing task unblocking and context switching.
- * - corium::embedded::InterruptLock: Zero-overhead RAII critical section masking.
+ * - corium::embedded::InterruptLock: Zero-overhead RAII critical section masking across ARM, ESP32, and host.
  */
 
 /**
@@ -53,8 +55,8 @@
  * - corium::BoundedMpscQueuePolicy: Dmitry Vyukov's lock-free MPSC ring buffer algorithm.
  * - corium::PriorityMpscQueuePolicy: Multi-tier priority queueing (High, Normal, Low).
  * - corium::FixedStoragePolicy: FastDelegate SBO inline size and handler capacity.
- * - corium::DropNewestOverflowPolicy / corium::DropOldestOverflowPolicy / corium::AuditOverflowPolicy / corium::PanicOverflowPolicy.
- * - corium::NoSignalPolicy / corium::ConditionVariableSignalPolicy.
+ * - corium::DropNewestOverflowPolicy / corium::DropOldestOverflowPolicy / corium::AuditOverflowPolicy / corium::PanicOverflowPolicy: Queue saturation policies.
+ * - corium::NoSignalPolicy / corium::ConditionVariableSignalPolicy: Thread wake-up strategies.
  */
 
 /**
@@ -63,8 +65,10 @@
  * @details
  * Key components:
  * - corium::safety::WatchdogSupervisor: Multi-subsystem SLA monitor controlling hardware watchdog refresh.
+ * - corium::safety::WatchdogService: Autonomous background watchdog supervisor thread.
  * - corium::safety::HeartbeatMonitor: Lock-free per-service heartbeat deadline tracking.
  * - corium::safety::CircuitBreaker: Lock-free state machine for fault detection and graceful degradation.
+ * - corium::safety::PanicHandler: Global critical fault assertion and shutdown hook.
  */
 
 /**
@@ -73,7 +77,8 @@
  * @details
  * Key components:
  * - corium::profiler::FlightRecorder: Circular telemetry buffer capturing timestamps with zero heap allocation.
- * - corium::profiler::LatencyTracker: Real-time per-event latency statistics (min, max, average).
+ * - corium::profiler::LatencyTracker: Real-time per-event latency statistics (min, max, average) with runtime enable/disable.
+ * - corium::profiler::FlightRecorderProfiler: Combined flight recorder and latency tracking policy.
  * - corium::profiler::exportChromeTracingJson(): Google Chrome Tracing and Perfetto JSON visualizer exporter.
  */
 
@@ -84,6 +89,8 @@
  * Key components:
  * - corium::ipc::IpcChannel: Zero-copy POSIX Shared Memory typed event exchange.
  * - corium::ipc::UdsChannel: UNIX Domain Datagram Socket inter-process event transmission.
+ * - corium::ipc::PlatformChannel: Cross-platform portable datagram channel alias.
+ * - corium::ipc::SharedMemory: RAII wrapper for POSIX shm / Windows file mapping.
  * - corium::ipc::ShmMpscQueue: Multi-producer single-consumer ring buffer in shared memory.
  */
 
@@ -92,8 +99,9 @@
  * @brief CRC-16 validated binary packet framing and serialization over UART/CAN/TCP.
  * @details
  * Key components:
+ * - corium::wire::WireHeader: Packed protocol header with magic, schema version, type index, flags, and CRC.
  * - corium::wire::WirePacket: Fixed-size binary frame with header, payload, and CRC-16 checksum.
- * - corium::wire::WireSerializer: Type-safe serialization and direct event sink deserialization.
+ * - corium::wire::WireSerializer: Type-safe serialization and direct event sink deserialization with version validation.
  */
 
 /**
@@ -102,7 +110,11 @@
  * @details
  * Key components:
  * - corium::fsm::StateMachine: Zero-heap variant-based active state machine.
- * - corium::fsm::TransitionTable / corium::fsm::Transition: Declarative transition mappings.
+ * - corium::fsm::Transition: Declarative state transition rule with guards and actions.
+ * - corium::fsm::InternalTransition: In-place internal transition without onExit/onEnter overhead.
+ * - corium::fsm::ActionList: Sequential composite action runner.
+ * - corium::fsm::ShallowHistory: Pseudostate remembering previous state in composite groups.
+ * - corium::fsm::TransitionTable: Typelist of valid state transitions.
  */
 
 /**
@@ -111,6 +123,10 @@
  * @details
  * Key components:
  * - corium::async::Task: C++20 lazy awaitable coroutine task.
+ * - corium::async::CancellationToken: Lock-free atomic cancellation token with whenCancelled() awaiter.
+ * - corium::async::whenAll(): Non-blocking parallel task combinator (value & void).
+ * - corium::async::whenAny(): Fastest-wins non-blocking task combinator.
+ * - corium::async::Generator: Pull-based zero-heap lazy sequence generator.
  * - corium::async::delay() / corium::async::yield(): Non-blocking asynchronous awaitables.
  */
 
@@ -120,6 +136,10 @@
  * @details
  * Key components:
  * - corium::logging::LoggerT: Static logger wrapper with compile-time formatting.
- * - corium::logging::sinks::ConsoleLogSink / corium::logging::sinks::FileLogSink / corium::logging::sinks::NullLogSink.
+ * - corium::logging::LogEventT: Zero-heap fixed-buffer log record.
+ * - corium::logging::sinks::ConsoleLogSink: ANSI-color enabled console sink.
+ * - corium::logging::sinks::FileLogSink: Low-overhead synchronous file sink.
+ * - corium::logging::sinks::JsonLogSink: Structured JSON Lines (NDJSON) telemetry sink.
+ * - corium::logging::sinks::NullLogSink: Zero-overhead compile-time disabled sink.
  * - corium::logging::LogBackgroundService: Async background disk flush worker.
  */

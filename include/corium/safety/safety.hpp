@@ -1,3 +1,9 @@
+/**
+ * @file safety.hpp
+ * @ingroup safety
+ * @brief Umbrella header for safety, supervision, and fault recovery primitives.
+ */
+
 #pragma once
 
 #include "corium/safety/CircuitBreaker.hpp"

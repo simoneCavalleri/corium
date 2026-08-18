@@ -1,3 +1,9 @@
+/**
+ * @file CallableTraits.hpp
+ * @ingroup core
+ * @brief Compile-time introspection traits for callable objects and event handlers.
+ */
+
 #pragma once
 
 #include <type_traits>

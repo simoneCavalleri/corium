@@ -1,3 +1,9 @@
+/**
+ * @file Logger.hpp
+ * @ingroup logging
+ * @brief Static logger frontend with compile-time formatting and severity filtering.
+ */
+
 #pragma once
 
 #include <cstdio>

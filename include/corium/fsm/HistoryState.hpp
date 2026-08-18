@@ -1,3 +1,9 @@
+/**
+ * @file HistoryState.hpp
+ * @ingroup fsm
+ * @brief Tag type for shallow history pseudostate in hierarchical state machines.
+ */
+
 #pragma once
 
 namespace corium::fsm {

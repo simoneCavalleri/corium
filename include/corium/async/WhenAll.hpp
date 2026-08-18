@@ -1,3 +1,9 @@
+/**
+ * @file WhenAll.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator awaiting completion of multiple parallel tasks.
+ */
+
 #pragma once
 
 #include <tuple>

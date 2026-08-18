@@ -1,3 +1,9 @@
+/**
+ * @file SafetyEvents.hpp
+ * @ingroup safety
+ * @brief Heartbeat and fault notification event structures.
+ */
+
 #pragma once
 
 #include <cstddef>

@@ -1,3 +1,9 @@
+/**
+ * @file EventSink.hpp
+ * @ingroup core
+ * @brief Non-allocating type-erased fat pointer handle for lock-free event posting.
+ */
+
 #pragma once
 
 #include <type_traits>

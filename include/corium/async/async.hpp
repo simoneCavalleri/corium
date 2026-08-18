@@ -1,7 +1,10 @@
-#pragma once
+/**
+ * @file async.hpp
+ * @ingroup async
+ * @brief Umbrella header for C++20 coroutine primitives.
+ */
 
-/// @file async.hpp
-/// @brief C++20 coroutine Task and awaitable support for Corium.
+#pragma once
 
 #include "corium/async/Task.hpp"
 #include "corium/async/Delay.hpp"

@@ -1,3 +1,9 @@
+/**
+ * @file ClockPolicies.hpp
+ * @ingroup timers
+ * @brief Hardware and simulated clock policies (Chrono, Manual, Tick, EspTimer, FreeRTOS).
+ */
+
 #pragma once
 
 #include <chrono>

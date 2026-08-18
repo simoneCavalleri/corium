@@ -1,3 +1,9 @@
+/**
+ * @file Generator.hpp
+ * @ingroup async
+ * @brief Pull-based zero-heap lazy sequence generator compatible with C++20 ranges.
+ */
+
 #pragma once
 
 #include <coroutine>

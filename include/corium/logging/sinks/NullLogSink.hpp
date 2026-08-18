@@ -1,3 +1,9 @@
+/**
+ * @file NullLogSink.hpp
+ * @ingroup logging
+ * @brief No-op compile-time disabled log sink for zero overhead.
+ */
+
 #pragma once
 
 #include "corium/logging/LogEvent.hpp"

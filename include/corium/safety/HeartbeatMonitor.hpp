@@ -1,3 +1,9 @@
+/**
+ * @file HeartbeatMonitor.hpp
+ * @ingroup safety
+ * @brief Lock-free SLA deadline tracker for multi-service heartbeats.
+ */
+
 #pragma once
 
 #include <array>

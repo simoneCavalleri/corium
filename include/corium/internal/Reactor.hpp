@@ -1,3 +1,9 @@
+/**
+ * @file Reactor.hpp
+ * @ingroup core
+ * @brief Internal static event handler registry and compile-time dispatcher.
+ */
+
 #pragma once
 
 #include <array>

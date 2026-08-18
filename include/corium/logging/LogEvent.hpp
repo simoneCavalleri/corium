@@ -1,3 +1,9 @@
+/**
+ * @file LogEvent.hpp
+ * @ingroup logging
+ * @brief Zero-heap fixed-capacity inline buffer log event record.
+ */
+
 #pragma once
 
 #include <array>

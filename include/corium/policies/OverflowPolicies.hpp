@@ -1,3 +1,9 @@
+/**
+ * @file OverflowPolicies.hpp
+ * @ingroup policies
+ * @brief Queue saturation policies (DropNewest, DropOldest, Audit, Panic).
+ */
+
 #pragma once
 
 #include <atomic>

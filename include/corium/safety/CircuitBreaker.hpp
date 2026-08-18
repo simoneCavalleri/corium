@@ -1,3 +1,9 @@
+/**
+ * @file CircuitBreaker.hpp
+ * @ingroup safety
+ * @brief Lock-free circuit breaker state machine for active fault isolation.
+ */
+
 #pragma once
 
 #include <atomic>

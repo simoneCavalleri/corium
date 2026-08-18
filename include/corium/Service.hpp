@@ -1,3 +1,9 @@
+/**
+ * @file Service.hpp
+ * @ingroup core
+ * @brief Lightweight thread-safe background service interface.
+ */
+
 #pragma once
 
 #include "corium/EventBus.hpp"

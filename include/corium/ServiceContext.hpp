@@ -1,3 +1,9 @@
+/**
+ * @file ServiceContext.hpp
+ * @ingroup core
+ * @brief Dependency injection context for background services.
+ */
+
 #pragma once
 
 #include "corium/EventSink.hpp"

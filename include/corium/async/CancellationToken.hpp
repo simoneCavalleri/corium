@@ -1,3 +1,9 @@
+/**
+ * @file CancellationToken.hpp
+ * @ingroup async
+ * @brief Lock-free atomic cooperative cancellation token with coroutine awaiter.
+ */
+
 #pragma once
 
 #include <atomic>
@@ -12,6 +18,7 @@ public:
     constexpr CancellationToken() noexcept = default;
 
     /// @brief Signal cancellation to all observing tasks.
+    /// @note Wakes any suspended coroutine awaiting `whenCancelled()` immediately.
     void cancel() noexcept
     {
         _cancelled.store(true, std::memory_order_release);
@@ -22,12 +29,14 @@ public:
     }
 
     /// @brief Check if cancellation has been requested.
+    /// @return True if cancel() has been invoked, false otherwise.
     [[nodiscard]] bool isCancelled() const noexcept
     {
         return _cancelled.load(std::memory_order_acquire);
     }
 
     /// @brief Reset token state to uncancelled.
+    /// @note Allows reusing the token for subsequent asynchronous task executions.
     void reset() noexcept
     {
         _cancelled.store(false, std::memory_order_release);
@@ -56,6 +65,12 @@ public:
     };
 
     /// @brief Helper to suspend the current coroutine until cancel() is called.
+    /// @return WhenCancelledAwaiter that suspends until token cancellation.
+    /// @example
+    /// Task<void> worker(CancellationToken token) {
+    ///     co_await token.whenCancelled();
+    ///     // Clean up resources on shutdown signal
+    /// }
     [[nodiscard]] WhenCancelledAwaiter whenCancelled() noexcept
     {
         return WhenCancelledAwaiter{*this};

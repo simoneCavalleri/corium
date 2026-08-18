@@ -1,3 +1,9 @@
+/**
+ * @file SignalPolicies.hpp
+ * @ingroup policies
+ * @brief Thread wake-up policies (NoSignalPolicy, ConditionVariableSignalPolicy).
+ */
+
 #pragma once
 
 #include <atomic>

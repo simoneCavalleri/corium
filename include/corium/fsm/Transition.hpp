@@ -1,3 +1,9 @@
+/**
+ * @file Transition.hpp
+ * @ingroup fsm
+ * @brief Declarative compile-time transition rules, internal transitions, and action lists.
+ */
+
 #pragma once
 
 #include <tuple>

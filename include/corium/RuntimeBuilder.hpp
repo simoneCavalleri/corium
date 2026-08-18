@@ -1,3 +1,9 @@
+/**
+ * @file RuntimeBuilder.hpp
+ * @ingroup core
+ * @brief Fluent compile-time builder for custom policy-configured runtimes.
+ */
+
 #pragma once
 
 #include <cstddef>

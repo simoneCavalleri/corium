@@ -1,3 +1,9 @@
+/**
+ * @file DomainSocket.hpp
+ * @ingroup ipc
+ * @brief UNIX Domain Socket datagram listener and client implementation.
+ */
+
 #pragma once
 
 #include <cstddef>

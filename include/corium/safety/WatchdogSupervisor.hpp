@@ -1,3 +1,9 @@
+/**
+ * @file WatchdogSupervisor.hpp
+ * @ingroup safety
+ * @brief Multi-task SLA deadline monitor controlling hardware watchdog refresh.
+ */
+
 #pragma once
 
 #include <atomic>

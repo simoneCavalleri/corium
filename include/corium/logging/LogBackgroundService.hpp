@@ -1,3 +1,9 @@
+/**
+ * @file LogBackgroundService.hpp
+ * @ingroup logging
+ * @brief Asynchronous background worker service for flushing log events to disk.
+ */
+
 #pragma once
 
 #include <chrono>

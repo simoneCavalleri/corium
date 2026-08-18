@@ -1,3 +1,9 @@
+/**
+ * @file Serializer.hpp
+ * @ingroup wire
+ * @brief Type-safe serialization and direct event sink deserialization.
+ */
+
 #pragma once
 
 #include <cstring>

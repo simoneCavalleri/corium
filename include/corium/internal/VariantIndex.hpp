@@ -1,3 +1,9 @@
+/**
+ * @file VariantIndex.hpp
+ * @ingroup core
+ * @brief Compile-time type index resolution for std::variant alternative types.
+ */
+
 #pragma once
 
 #include <type_traits>

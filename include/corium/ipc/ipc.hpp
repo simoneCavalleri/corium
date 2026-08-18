@@ -1,3 +1,9 @@
+/**
+ * @file ipc.hpp
+ * @ingroup ipc
+ * @brief Umbrella header for inter-process communication primitives.
+ */
+
 #pragma once
 
 #include "corium/ipc/DomainSocket.hpp"

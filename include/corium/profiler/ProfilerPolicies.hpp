@@ -1,3 +1,9 @@
+/**
+ * @file ProfilerPolicies.hpp
+ * @ingroup profiler
+ * @brief Latency tracking and flight recording policies with runtime toggle.
+ */
+
 #pragma once
 
 #include <atomic>

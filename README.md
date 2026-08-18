@@ -74,8 +74,23 @@ flowchart TD
 ### Timers, Services & Safety
 - **Zero-Heap Timer Scheduler**: Schedule single-shot delayed events (`postDelayed()`) or recurring periodic events (`postPeriodic()`) with cancellation handles (`cancelTimer()`) using static fixed-capacity storage.
 - **Multi-Threaded Background Services**: Managed worker loops using C++20 `std::jthread` and `std::stop_token`, posting events concurrently with zero heap allocation.
-- **Safety, Watchdogs & Profiling**: Hardware Watchdog supervision (`WatchdogSupervisor`), lock-free circuit breaker (`CircuitBreaker`), and circular in-memory flight recorder (`FlightRecorder`) exporting to Perfetto / Chrome Tracing.
-- **Zero-Heap Structured Logging**: Fast structured zero-heap logging sinks (`corium/logging/`).
+- **C++20 Coroutine Combinators**: Zero-heap asynchronous `Task<T>`, `whenAll()` parallel awaiter, `whenAny()` fastest-wins awaiter, atomic `CancellationToken`, and pull-based `Generator<T>` lazy sequences.
+- **Active FSM Engine**: Variant-based compile-time `StateMachine`, `InternalTransition` (in-place actions without state exit/entry overhead), composite `ActionList`, and `ShallowHistory`.
+- **Safety, Watchdogs & Profiling**: Hardware Watchdog supervision (`WatchdogSupervisor`), lock-free circuit breaker (`CircuitBreaker`), and circular in-memory flight recorder (`FlightRecorderProfiler`) with runtime `enable()`/`disable()` toggle exporting to Perfetto / Chrome Tracing.
+- **Zero-Heap Structured Logging**: Fast structured zero-heap logging sinks including ANSI console, file, and structured JSON Lines (`JsonLogSink`).
+
+---
+
+## 📚 Documentation & Guides
+
+| Guide | Description |
+| :--- | :--- |
+| 🏗️ [**Architecture Guide**](docs/ARCHITECTURE.md) | In-depth design philosophy, layer breakdown, lock-free queue mechanics, and module topology. |
+| 🍳 [**Cookbook & Patterns**](docs/COOKBOOK.md) | 8 battle-tested design patterns (Request-Response, Parallel Coroutines, FSM, JSON Logging, Zero-Copy IPC, Periodic Sampling, Circuit Breakers, Flight Recorder). |
+| 🔄 [**Migration Guide**](docs/MIGRATION.md) | Transitioning from `std::function`, thread pools, `boost::asio`, or `boost::sml` to Corium. |
+| ❓ [**Frequently Asked Questions (FAQ)**](docs/FAQ.md) | Answers to common architecture, capacity sizing, and bare-metal embedded questions. |
+| 🛠️ [**Contributing Guidelines**](CONTRIBUTING.md) | Code standards, zero-heap verification, testing workflows, and commit conventions. |
+| 📋 [**Changelog**](CHANGELOG.md) | Complete version history and release notes. |
 
 ---
 
@@ -90,6 +105,9 @@ flowchart TD
 | **Hardware Clock Policies** | **Customizable Clock Sources** (Microsecond, Millisecond, ESP32, FreeRTOS, Manual) | Hardcoded `std::chrono::steady_clock` |
 | **Priority Channels** | **Strict Multi-RingBuffer Priority Draining** | Dynamic Sorting / Heap Priority Queues |
 | **Timer Scheduling** | **Zero-Heap Static Scheduler** | Dynamic Heap Timer Wheels / Heap Min-Heaps |
+| **Async Coroutines** | **Zero-Heap Tasks, WhenAll, WhenAny, CancellationToken, Generator** | Dynamic Coroutine Frame Allocations / Heap Callbacks |
+| **Finite State Machine** | **Compile-Time Table, Internal Transitions, ActionList, History** | Dynamic Virtual State Objects / Heap Transitions |
+| **Structured Logging** | **Zero-Heap ANSI, File, and JSON Lines (NDJSON)** | Heap-allocated string streams / formatting buffers |
 | **Bare-Metal Support** | **Full Support** (`-fno-rtti -fno-exceptions`) | Poor / Requires Heap & RTTI |
 
 ---

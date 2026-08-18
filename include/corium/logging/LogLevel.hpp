@@ -1,3 +1,9 @@
+/**
+ * @file LogLevel.hpp
+ * @ingroup logging
+ * @brief Log severity enumeration and ANSI color formatting utilities.
+ */
+
 #pragma once
 
 #include <cstdint>

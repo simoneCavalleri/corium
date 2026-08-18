@@ -1,3 +1,9 @@
+/**
+ * @file Application.hpp
+ * @ingroup core
+ * @brief CRTP static polymorphism application base class with auto-deduced event handlers.
+ */
+
 #pragma once
 
 #include "corium/ApplicationContext.hpp"

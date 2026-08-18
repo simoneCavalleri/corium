@@ -1,3 +1,9 @@
+/**
+ * @file QueuePolicies.hpp
+ * @ingroup policies
+ * @brief Bounded and multi-tier priority MPSC queueing policies.
+ */
+
 #pragma once
 
 #include <cstddef>

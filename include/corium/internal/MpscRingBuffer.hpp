@@ -1,3 +1,9 @@
+/**
+ * @file MpscRingBuffer.hpp
+ * @ingroup core
+ * @brief Dmitry Vyukov's lock-free multi-producer single-consumer ring buffer algorithm.
+ */
+
 #pragma once
 
 #include <array>

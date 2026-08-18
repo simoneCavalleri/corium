@@ -1,3 +1,9 @@
+/**
+ * @file FreeRtos.hpp
+ * @ingroup embedded
+ * @brief FreeRTOS ISR event sink and hardware context-switching helpers.
+ */
+
 #pragma once
 
 #include <utility>

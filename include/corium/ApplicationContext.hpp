@@ -1,3 +1,9 @@
+/**
+ * @file ApplicationContext.hpp
+ * @ingroup core
+ * @brief Type-erased context for application runtime introspection and lifecycle control.
+ */
+
 #pragma once
 
 #include <array>
