@@ -81,7 +81,7 @@ if(CORIUM_BUILD_TESTS)
 
     option(CORIUM_ENABLE_COVERAGE "Enable gcov code coverage" OFF)
     if(CORIUM_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(corium_tests PRIVATE --coverage)
+        target_compile_options(corium_tests PRIVATE --coverage -fprofile-update=atomic)
         target_link_options(corium_tests PRIVATE --coverage)
     endif()
 

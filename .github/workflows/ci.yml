@@ -146,9 +146,9 @@ jobs:
 
       - name: Generate Coverage Report
         run: |
-          lcov --gcov-tool gcov-14 --directory build-cov --capture --output-file coverage.info --ignore-errors mismatch,unused,empty,inconsistent
-          lcov --gcov-tool gcov-14 --remove coverage.info '/usr/*' '*/_deps/*' '*/tests/*' '*/samples/*' --output-file coverage_filtered.info --ignore-errors mismatch,unused,empty,inconsistent
-          lcov --gcov-tool gcov-14 --list coverage_filtered.info --ignore-errors mismatch,unused,empty,inconsistent
+          lcov --gcov-tool gcov-14 --directory build-cov --capture --output-file coverage.info --ignore-errors mismatch,unused,empty,inconsistent,negative,gcov --rc geninfo_unexecuted_blocks=1
+          lcov --gcov-tool gcov-14 --remove coverage.info '/usr/*' '*/_deps/*' '*/tests/*' '*/samples/*' --output-file coverage_filtered.info --ignore-errors mismatch,unused,empty,inconsistent,negative,gcov --rc geninfo_unexecuted_blocks=1
+          lcov --gcov-tool gcov-14 --list coverage_filtered.info --ignore-errors mismatch,unused,empty,inconsistent,negative,gcov --rc geninfo_unexecuted_blocks=1
 
       - name: Upload Coverage Artifact
         uses: actions/upload-artifact@v4
