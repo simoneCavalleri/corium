@@ -9,6 +9,7 @@
 #include <type_traits>
 
 namespace corium {
+namespace internal {
 
 template <typename T>
 struct callable_event_type;
@@ -70,5 +71,9 @@ struct get_callable_event_type<R(*)(EventType)> {
 /// @brief Helper trait to deduce the concrete EventType argument from a callable (lambda, function pointer, or functor).
 template <typename Callable>
 using callable_event_type_t = typename get_callable_event_type<Callable>::type;
+
+} // namespace internal
+
+using internal::callable_event_type_t;
 
 } // namespace corium

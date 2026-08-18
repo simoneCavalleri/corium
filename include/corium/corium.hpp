@@ -9,6 +9,7 @@
 #include "corium/Runtime.hpp"
 #include "corium/Application.hpp"
 #include "corium/ApplicationContext.hpp"
+#include "corium/MpscRingBuffer.hpp"
 #include "corium/Service.hpp"
 #include "corium/BackgroundService.hpp"
 #include "corium/ServiceRegistry.hpp"

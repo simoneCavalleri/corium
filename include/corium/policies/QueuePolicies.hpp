@@ -14,7 +14,7 @@
 #include <utility>
 
 #include "corium/Events.hpp"
-#include "corium/internal/MpscRingBuffer.hpp"
+#include "corium/MpscRingBuffer.hpp"
 
 namespace corium {
 

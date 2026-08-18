@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <ostream>
 
-#include "corium/internal/MpscRingBuffer.hpp"
+#include "corium/MpscRingBuffer.hpp"
 #include "corium/profiler/FlightRecorder.hpp"
 
 namespace corium::profiler {

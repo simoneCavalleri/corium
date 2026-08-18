@@ -13,6 +13,7 @@
 #include <utility>
 
 namespace corium {
+namespace internal {
 
 /// @brief Lightweight non-allocating delegate wrapper with 32-byte Small Buffer Optimization (SBO).
 /// Eliminates std::function heap allocations and virtual table overhead for event handlers.
@@ -179,5 +180,9 @@ private:
     DestroyFn _destroy = nullptr;
     MoveFn _move = nullptr;
 };
+
+} // namespace internal
+
+using internal::EventHandlerDelegate;
 
 } // namespace corium

@@ -10,6 +10,7 @@
 #include <variant>
 
 namespace corium {
+namespace internal {
 
 template <typename T, typename... Types>
 constexpr std::size_t get_variant_index_impl() {
@@ -51,8 +52,6 @@ struct has_variant_type<T, std::variant<Types...>> {
 template <typename T, typename Variant>
 inline constexpr bool has_variant_type_v = has_variant_type<T, Variant>::value;
 
-namespace internal {
-
 template <typename T>
 struct TypeId {
     static inline const char id = 0;
@@ -80,6 +79,10 @@ template <typename T>
 using extract_event_variant_t = typename extract_event_variant<T>::type;
 
 } // namespace internal
+
+using internal::variant_index_v;
+using internal::has_variant_type_v;
+using internal::extract_event_variant_t;
 
 } // namespace corium
 

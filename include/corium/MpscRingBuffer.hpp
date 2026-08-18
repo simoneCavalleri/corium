@@ -1,7 +1,7 @@
 /**
  * @file MpscRingBuffer.hpp
  * @ingroup core
- * @brief Dmitry Vyukov's lock-free multi-producer single-consumer ring buffer algorithm.
+ * @brief Lock-free Multi-Producer Single-Consumer (MPSC) bounded ring buffer based on Dmitry Vyukov's algorithm.
  */
 
 #pragma once
@@ -15,17 +15,18 @@
 
 namespace corium {
 
+/// @ingroup core
 /// @brief Lock-free Multiple-Producer, Single-Consumer (MPSC) RingBuffer.
 /// Implements Dmitry Vyukov's algorithm with zero heap allocations (uses std::array).
 /// Cache-line aligned (alignas(64)) to eliminate false sharing.
 /// @tparam T Event element type stored in ring cells.
 /// @tparam Capacity Buffer capacity (must be a power of 2).
-template <typename T, size_t Capacity>
+template <typename T, std::size_t Capacity>
 class MpscRingBuffer {
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of 2.");
 
     struct alignas(64) Cell {
-        std::atomic<size_t> sequence;
+        std::atomic<std::size_t> sequence;
         alignas(alignof(T)) std::byte storage[sizeof(T)];
 
         template <typename... Args>
@@ -53,7 +54,7 @@ public:
     };
 
     MpscRingBuffer() {
-        for (size_t i = 0; i < Capacity; ++i) {
+        for (std::size_t i = 0; i < Capacity; ++i) {
             _buffer[i].sequence.store(i, std::memory_order_relaxed);
         }
         _enqueuePos.store(0, std::memory_order_relaxed);
@@ -61,84 +62,92 @@ public:
     }
 
     ~MpscRingBuffer() {
-        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
-        size_t end = _enqueuePos.load(std::memory_order_relaxed);
-        while (pos < end) {
-            _buffer[pos & Mask].destroy();
-            pos++;
-        }
+        T dummy;
+        while (tryPop(dummy)) {}
     }
 
     MpscRingBuffer(const MpscRingBuffer&) = delete;
     MpscRingBuffer& operator=(const MpscRingBuffer&) = delete;
 
-    /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers, const lvalue overload).
-    PushResult tryPush(const T& value) {
-        T copy = value;
-        return tryPush(std::move(copy));
-    }
+    MpscRingBuffer(MpscRingBuffer&&) = delete;
+    MpscRingBuffer& operator=(MpscRingBuffer&&) = delete;
 
-    /// @brief Try to push an item into the ring buffer (thread-safe for multiple producers).
-    PushResult tryPush(T&& value) {
-        size_t pos = _enqueuePos.load(std::memory_order_relaxed);
-        Cell* cell;
+    /// @brief Push an item into the queue (Multi-Producer thread safe).
+    /// @return PushResult indicating success and whether queue was empty before push.
+    template <typename... Args>
+    PushResult tryPush(Args&&... args) {
+        Cell* cell = nullptr;
+        std::size_t pos = _enqueuePos.load(std::memory_order_relaxed);
+
         for (;;) {
             cell = &_buffer[pos & Mask];
-            size_t seq = cell->sequence.load(std::memory_order_acquire);
+            std::size_t seq = cell->sequence.load(std::memory_order_acquire);
             intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+
             if (diff == 0) {
                 if (_enqueuePos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
-                    break;
+                    break; // Reserved cell
                 }
             } else if (diff < 0) {
-                return {false, false};
+                return {false, false}; // Full
             } else {
                 pos = _enqueuePos.load(std::memory_order_relaxed);
             }
         }
 
-        // Calculate wasEmpty based on whether the dequeue cell is empty.
-        bool wasEmpty = empty();
-
-        cell->construct(std::move(value));
+        cell->construct(std::forward<Args>(args)...);
         cell->sequence.store(pos + 1, std::memory_order_release);
 
+        const bool wasEmpty = (pos == _dequeuePos.load(std::memory_order_relaxed));
         return {true, wasEmpty};
     }
 
-    /// @brief Try to pop an item from the ring buffer (single consumer thread).
-    bool tryPop(T& value) {
-        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
-        Cell* cell = &_buffer[pos & Mask];
-        size_t seq = cell->sequence.load(std::memory_order_acquire);
+    /// @brief Pop an item from the queue (Single-Consumer only).
+    /// @return true if an item was successfully popped; false if empty.
+    bool tryPop(T& result) {
+        Cell* cell = nullptr;
+        std::size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+
+        cell = &_buffer[pos & Mask];
+        std::size_t seq = cell->sequence.load(std::memory_order_acquire);
         intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
 
         if (diff == 0) {
-            value = std::move(cell->value());
-            cell->sequence.store(pos + Mask + 1, std::memory_order_release);
             _dequeuePos.store(pos + 1, std::memory_order_relaxed);
+            result = std::move(cell->value());
+            cell->destroy();
+            cell->sequence.store(pos + Mask + 1, std::memory_order_release);
             return true;
         }
 
         return false;
     }
 
-    /// @brief Check if ring buffer is empty (safe for single consumer).
-    /// Returns true if the next cell to dequeue is not yet published with a valid sequence.
+    /// @brief Check if the queue is empty (approximate if concurrent producers are active).
     [[nodiscard]] bool empty() const noexcept {
-        size_t pos = _dequeuePos.load(std::memory_order_relaxed);
+        const std::size_t pos = _dequeuePos.load(std::memory_order_relaxed);
         const Cell* cell = &_buffer[pos & Mask];
-        size_t seq = cell->sequence.load(std::memory_order_acquire);
-        intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+        const std::size_t seq = cell->sequence.load(std::memory_order_acquire);
+        const intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
         return diff != 0;
     }
 
+    /// @brief Return fixed capacity of this ring buffer.
+    [[nodiscard]] static constexpr std::size_t capacity() noexcept {
+        return Capacity;
+    }
+
 private:
-    static constexpr size_t Mask = Capacity - 1;
+    static constexpr std::size_t Mask = Capacity - 1;
 
     alignas(64) std::array<Cell, Capacity> _buffer;
-    alignas(64) std::atomic<size_t> _enqueuePos;
-    alignas(64) std::atomic<size_t> _dequeuePos;
+    alignas(64) std::atomic<std::size_t> _enqueuePos;
+    alignas(64) std::atomic<std::size_t> _dequeuePos;
 };
+
+namespace internal {
+    template <typename T, std::size_t Capacity>
+    using MpscRingBuffer = ::corium::MpscRingBuffer<T, Capacity>;
+} // namespace internal
 
 } // namespace corium

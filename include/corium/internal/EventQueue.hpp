@@ -15,6 +15,7 @@
 #include "corium/policies/SignalPolicies.hpp"
 
 namespace corium {
+namespace internal {
 
 /// @brief Event queue composing QueuePolicy, SignalPolicy, and OverflowPolicy strategy types.
 /// @tparam QueuePolicy Queueing policy strategy.
@@ -111,5 +112,9 @@ private:
     [[no_unique_address]] SignalPolicy _signalPolicy;
     [[no_unique_address]] OverflowPolicy _overflowPolicy;
 };
+
+} // namespace internal
+
+using internal::EventQueue;
 
 } // namespace corium

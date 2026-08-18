@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <corium/internal/MpscRingBuffer.hpp>
+#include <corium/MpscRingBuffer.hpp>
 
 #include <atomic>
 #include <thread>
