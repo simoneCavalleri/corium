@@ -59,7 +59,7 @@ public:
     }
 };
 
-int main() {
+static int run_baremetal_test() {
     printf("=========================================================\n");
     printf(" Corium ARM Cortex-M Bare-Metal Verification (QEMU)\n");
     printf(" Zero-Heap | Zero-RTTI | Compile-Time Static Dispatch\n");
@@ -90,6 +90,10 @@ int main() {
     runtime.shutdown();
     printf("SUCCESS: Corium bare-metal execution on ARM Cortex-M verified.\n");
     return 0;
+}
+
+int main() {
+    return run_baremetal_test();
 }
 
 // -----------------------------------------------------------------------------
@@ -137,7 +141,7 @@ extern "C" {
         }
 
         // 4. Execute application entry point
-        int rc = main();
+        int rc = run_baremetal_test();
 
         // 5. Cleanly exit QEMU via ARM Semihosting SYS_EXIT call
 #if defined(__arm__) || defined(__thumb__)

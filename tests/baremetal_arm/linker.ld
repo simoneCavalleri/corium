@@ -98,6 +98,7 @@ SECTIONS
         . = ALIGN(8);
         PROVIDE ( end = . );
         PROVIDE ( _end = . );
+        PROVIDE ( __end__ = . );
         . = . + 0x2000;
         . = ALIGN(8);
     } > RAM
