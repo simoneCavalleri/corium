@@ -118,7 +118,29 @@ extern "C" {
         }
     }
 
+    void HardFault_Handler() {
+        printf("\n[ARM FAULT] HardFault exception triggered in QEMU!\n");
+        fflush(stdout);
+#if defined(__arm__) || defined(__thumb__)
+        register uint32_t r0 __asm__("r0") = 0x18; // SYS_EXIT
+        register uint32_t r1 __asm__("r1") = 0x20024; // ADP_Stopped_RunTimeErrorUnknown
+        __asm__ volatile ("bkpt 0xab" : : "r"(r0), "r"(r1) : "memory");
+#endif
+        while (true) {
+#if defined(__arm__) || defined(__thumb__)
+            __asm__ volatile ("wfi");
+#endif
+        }
+    }
+
     void Reset_Handler() {
+        // 0. Enable Hardware FPU Coprocessor (CP10 and CP11) on Cortex-M4/M7
+#if defined(__ARM_FP) && (__ARM_FP > 0)
+        volatile uint32_t* cpacr = reinterpret_cast<volatile uint32_t*>(0xE000ED88);
+        *cpacr |= (0xFu << 20);
+        __asm__ volatile ("dsb\n\tisb" : : : "memory");
+#endif
+
         // 1. Copy initialized .data section from Flash to SRAM
         uint32_t* src = &_sidata;
         uint32_t* dst = &_sdata;
@@ -142,6 +164,7 @@ extern "C" {
 
         // 4. Execute application entry point
         int rc = run_baremetal_test();
+        fflush(stdout);
 
         // 5. Cleanly exit QEMU via ARM Semihosting SYS_EXIT call
 #if defined(__arm__) || defined(__thumb__)
@@ -166,7 +189,7 @@ void (*const g_pfnVectors[])() = {
     reinterpret_cast<void (*)()>(&_estack),     // 0: Initial Stack Pointer
     Reset_Handler,                              // 1: Reset Handler
     Default_Handler,                            // 2: NMI Handler
-    Default_Handler,                            // 3: Hard Fault Handler
+    HardFault_Handler,                          // 3: Hard Fault Handler
     Default_Handler,                            // 4: MPU Fault Handler
     Default_Handler,                            // 5: Bus Fault Handler
     Default_Handler,                            // 6: Usage Fault Handler
