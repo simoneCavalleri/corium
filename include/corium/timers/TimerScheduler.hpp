@@ -131,7 +131,10 @@ public:
                 posted++;
 
                 if (entry.isPeriodic) {
-                    entry.expiryTime = ClockPolicy::add(now, entry.interval);
+                    entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
+                    while (ClockPolicy::isDue(now, entry.expiryTime)) {
+                        entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
+                    }
                 } else {
                     entry.active = false;
                     entry.id = INVALID_TIMER_ID;

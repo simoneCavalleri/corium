@@ -13,19 +13,27 @@
 #include <new>
 #include <utility>
 
+#if !defined(CORIUM_CACHE_LINE_SIZE)
+#if defined(CORIUM_COMPACT_MEMORY) || defined(CORIUM_DISABLE_CACHE_ALIGNMENT)
+#define CORIUM_CACHE_LINE_SIZE alignof(std::max_align_t)
+#else
+#define CORIUM_CACHE_LINE_SIZE 64
+#endif
+#endif
+
 namespace corium {
 
 /// @ingroup core
 /// @brief Lock-free Multiple-Producer, Single-Consumer (MPSC) RingBuffer.
 /// Implements Dmitry Vyukov's algorithm with zero heap allocations (uses std::array).
-/// Cache-line aligned (alignas(64)) to eliminate false sharing.
+/// Cache-line aligned (alignas(CORIUM_CACHE_LINE_SIZE)) to eliminate false sharing.
 /// @tparam T Event element type stored in ring cells.
 /// @tparam Capacity Buffer capacity (must be a power of 2).
 template <typename T, std::size_t Capacity>
 class MpscRingBuffer {
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of 2.");
 
-    struct alignas(64) Cell {
+    struct alignas(CORIUM_CACHE_LINE_SIZE) Cell {
         std::atomic<std::size_t> sequence;
         alignas(alignof(T)) std::byte storage[sizeof(T)];
 
@@ -140,9 +148,9 @@ public:
 private:
     static constexpr std::size_t Mask = Capacity - 1;
 
-    alignas(64) std::array<Cell, Capacity> _buffer;
-    alignas(64) std::atomic<std::size_t> _enqueuePos;
-    alignas(64) std::atomic<std::size_t> _dequeuePos;
+    alignas(CORIUM_CACHE_LINE_SIZE) std::array<Cell, Capacity> _buffer;
+    alignas(CORIUM_CACHE_LINE_SIZE) std::atomic<std::size_t> _enqueuePos;
+    alignas(CORIUM_CACHE_LINE_SIZE) std::atomic<std::size_t> _dequeuePos;
 };
 
 namespace internal {
