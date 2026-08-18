@@ -103,8 +103,7 @@ extern "C" {
     extern uint32_t _ebss;
     extern uint32_t _estack;
 
-    // NOLINTNEXTLINE(bugprone-reserved-identifier)
-    void __libc_init_array() __attribute__((weak));
+    void __libc_init_array() __attribute__((weak)); // NOLINT
     void initialise_monitor_handles() __attribute__((weak));
 
     void Default_Handler() {
