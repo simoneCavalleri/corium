@@ -145,4 +145,27 @@ TEST(RuntimeTest, CustomMaxServicesApplication) {
     runtime.shutdown();
 }
 
+TEST(RuntimeTest, AppDestructedBeforeRuntimeSafe) {
+    Runtime runtime;
+    {
+        TestApp<> innerApp;
+        runtime.initialize(innerApp);
+        EXPECT_TRUE(innerApp.initialized);
+        // innerApp is destroyed here, triggering two-way RAII detach!
+    }
+    // runtime destructor runs here -> must NOT crash or access innerApp!
+    runtime.shutdown();
+}
+
+TEST(RuntimeTest, RuntimeDestructedBeforeAppSafe) {
+    TestApp<> app;
+    {
+        Runtime innerRuntime;
+        innerRuntime.initialize(app);
+        EXPECT_TRUE(app.initialized);
+        // innerRuntime is destroyed here, shutting down and resetting app context!
+    }
+    // app destructor runs here -> must NOT touch dead innerRuntime!
+}
+
 

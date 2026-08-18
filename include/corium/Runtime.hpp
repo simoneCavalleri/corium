@@ -83,6 +83,12 @@ public:
         return _state.load(std::memory_order_acquire);
     }
 
+    /// @brief Detach application to prevent dangling callbacks on shutdown.
+    void detachApplication() noexcept
+    {
+        _appShutdownCb = StaticCallback{};
+    }
+
     /// @brief Initialize runtime with target application using static CRTP dispatch.
     /// @tparam Derived Application core type deriving from Application<Derived, AppEvents, MaxServices>.
     /// @tparam AppEvents Event variant or event bus type defined on the application.
@@ -101,12 +107,16 @@ public:
                 auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, AppEvents, MaxServices>*>(appPtr));
                 app->shutdownServices();
                 app->shutdown();
+                app->resetContext();
             },
             &application
         };
 
         auto ctx = applicationContext();
         ctx.setTimerScheduler(_timerScheduler);
+        ctx.setRuntimeDetach(this, [](void* rt) noexcept {
+            static_cast<BasicRuntime*>(rt)->detachApplication();
+        });
         application.setContext(ctx);
 
         registerCoreHandlers();
@@ -237,7 +247,9 @@ public:
 
         _state.store(State::Stopping, std::memory_order_release);
         if (_appShutdownCb) {
-            _appShutdownCb();
+            auto cb = _appShutdownCb;
+            _appShutdownCb = StaticCallback{};
+            cb();
         }
         _state.store(State::Terminated, std::memory_order_release);
     }

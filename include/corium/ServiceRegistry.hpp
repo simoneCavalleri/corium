@@ -174,6 +174,7 @@ public:
                 _services[i].joinFn(_services[i].instance);
             }
         }
+        _count = 0;
     }
 
     /// @brief Access number of registered services.

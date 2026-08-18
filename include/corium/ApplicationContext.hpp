@@ -149,6 +149,36 @@ public:
         }
     }
 
+    /// @brief Attach runtime detachment handle.
+    void setRuntimeDetach(void* runtimePtr, void (*detachFn)(void*) noexcept) noexcept
+    {
+        _runtimePtr = runtimePtr;
+        _detachFn = detachFn;
+    }
+
+    /// @brief Detach application from runtime to prevent dangling callbacks on shutdown.
+    void detachFromRuntime() noexcept
+    {
+        if (_detachFn && _runtimePtr) {
+            _detachFn(_runtimePtr);
+            _detachFn = nullptr;
+            _runtimePtr = nullptr;
+        }
+    }
+
+    /// @brief Reset context state to empty.
+    void reset() noexcept
+    {
+        _busPtr = nullptr;
+        _runtimePtr = nullptr;
+        _detachFn = nullptr;
+        _timerSchedulerPtr = nullptr;
+        _scheduleDelayedFn = nullptr;
+        _schedulePeriodicFn = nullptr;
+        _cancelTimerFn = nullptr;
+        _quitCallback = StaticCallback{};
+    }
+
     explicit operator bool() const noexcept
     {
         return _busPtr != nullptr;
@@ -191,6 +221,9 @@ private:
     ScheduleDelayedFn _scheduleDelayedFn = nullptr;
     SchedulePeriodicFn _schedulePeriodicFn = nullptr;
     CancelTimerFn _cancelTimerFn = nullptr;
+
+    void* _runtimePtr = nullptr;
+    void (*_detachFn)(void*) noexcept = nullptr;
 };
 
 } // namespace corium

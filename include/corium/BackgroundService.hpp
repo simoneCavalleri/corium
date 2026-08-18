@@ -111,10 +111,12 @@ public:
         });
     }
 
-    /// @brief Request graceful stop of the background thread via std::stop_token.
+    /// @brief Request cancellation on worker std::jthread.
     void stop() noexcept
     {
-        _thread.request_stop();
+        if (_thread.joinable()) {
+            _thread.request_stop();
+        }
     }
 
     /// @brief Join background std::jthread cleanly.

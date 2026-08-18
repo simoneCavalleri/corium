@@ -42,7 +42,11 @@ public:
     using ContextType = ApplicationContext<EventVariant>;
 
     Application() = default;
-    ~Application() = default;
+    ~Application()
+    {
+        shutdownServices();
+        _context.detachFromRuntime();
+    }
 
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
@@ -167,6 +171,11 @@ private:
         if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
             static_cast<Derived*>(this)->onSetContext(context);
         }
+    }
+
+    void resetContext() noexcept
+    {
+        _context.reset();
     }
 
     ApplicationContext<EventVariant> _context;

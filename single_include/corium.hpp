@@ -1756,6 +1756,36 @@ public:
         }
     }
 
+    /// @brief Attach runtime detachment handle.
+    void setRuntimeDetach(void* runtimePtr, void (*detachFn)(void*) noexcept) noexcept
+    {
+        _runtimePtr = runtimePtr;
+        _detachFn = detachFn;
+    }
+
+    /// @brief Detach application from runtime to prevent dangling callbacks on shutdown.
+    void detachFromRuntime() noexcept
+    {
+        if (_detachFn && _runtimePtr) {
+            _detachFn(_runtimePtr);
+            _detachFn = nullptr;
+            _runtimePtr = nullptr;
+        }
+    }
+
+    /// @brief Reset context state to empty.
+    void reset() noexcept
+    {
+        _busPtr = nullptr;
+        _runtimePtr = nullptr;
+        _detachFn = nullptr;
+        _timerSchedulerPtr = nullptr;
+        _scheduleDelayedFn = nullptr;
+        _schedulePeriodicFn = nullptr;
+        _cancelTimerFn = nullptr;
+        _quitCallback = StaticCallback{};
+    }
+
     explicit operator bool() const noexcept
     {
         return _busPtr != nullptr;
@@ -1798,6 +1828,9 @@ private:
     ScheduleDelayedFn _scheduleDelayedFn = nullptr;
     SchedulePeriodicFn _schedulePeriodicFn = nullptr;
     CancelTimerFn _cancelTimerFn = nullptr;
+
+    void* _runtimePtr = nullptr;
+    void (*_detachFn)(void*) noexcept = nullptr;
 };
 
 } // namespace corium
@@ -3018,6 +3051,12 @@ public:
         return _state.load(std::memory_order_acquire);
     }
 
+    /// @brief Detach application to prevent dangling callbacks on shutdown.
+    void detachApplication() noexcept
+    {
+        _appShutdownCb = StaticCallback{};
+    }
+
     /// @brief Initialize runtime with target application using static CRTP dispatch.
     /// @tparam Derived Application core type deriving from Application<Derived, AppEvents, MaxServices>.
     /// @tparam AppEvents Event variant or event bus type defined on the application.
@@ -3036,12 +3075,16 @@ public:
                 auto* app = static_cast<Derived*>(static_cast<corium::Application<Derived, AppEvents, MaxServices>*>(appPtr));
                 app->shutdownServices();
                 app->shutdown();
+                app->resetContext();
             },
             &application
         };
 
         auto ctx = applicationContext();
         ctx.setTimerScheduler(_timerScheduler);
+        ctx.setRuntimeDetach(this, [](void* rt) noexcept {
+            static_cast<BasicRuntime*>(rt)->detachApplication();
+        });
         application.setContext(ctx);
 
         registerCoreHandlers();
@@ -3172,7 +3215,9 @@ public:
 
         _state.store(State::Stopping, std::memory_order_release);
         if (_appShutdownCb) {
-            _appShutdownCb();
+            auto cb = _appShutdownCb;
+            _appShutdownCb = StaticCallback{};
+            cb();
         }
         _state.store(State::Terminated, std::memory_order_release);
     }
@@ -3897,6 +3942,7 @@ public:
                 _services[i].joinFn(_services[i].instance);
             }
         }
+        _count = 0;
     }
 
     /// @brief Access number of registered services.
@@ -3952,7 +3998,11 @@ public:
     using ContextType = ApplicationContext<EventVariant>;
 
     Application() = default;
-    ~Application() = default;
+    ~Application()
+    {
+        shutdownServices();
+        _context.detachFromRuntime();
+    }
 
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
@@ -4077,6 +4127,11 @@ private:
         if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
             static_cast<Derived*>(this)->onSetContext(context);
         }
+    }
+
+    void resetContext() noexcept
+    {
+        _context.reset();
     }
 
     ApplicationContext<EventVariant> _context;
@@ -4363,10 +4418,12 @@ public:
         });
     }
 
-    /// @brief Request graceful stop of the background thread via std::stop_token.
+    /// @brief Request cancellation on worker std::jthread.
     void stop() noexcept
     {
-        _thread.request_stop();
+        if (_thread.joinable()) {
+            _thread.request_stop();
+        }
     }
 
     /// @brief Join background std::jthread cleanly.
