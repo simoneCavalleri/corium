@@ -8,10 +8,20 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <queue>
 #include <type_traits>
 #include <utility>
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__unix__) || defined(__APPLE__) || (defined(_GLIBCXX_HAS_GTHREADS) && _GLIBCXX_HAS_GTHREADS) || defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+#include <mutex>
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 1
+#endif
+#else
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 0
+#endif
+#endif
 
 #include "corium/Events.hpp"
 #include "corium/MpscRingBuffer.hpp"
@@ -185,7 +195,9 @@ public:
     PushResult tryPush(EventVariant event, EventPriority priority = EventPriority::Normal)
     {
         (void)priority;
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         bool wasEmpty = _queue.empty();
         _queue.push(std::move(event));
         return {true, wasEmpty};
@@ -194,7 +206,9 @@ public:
     /// @brief Try to pop an event from the blocking queue.
     bool tryPop(EventVariant& event)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         if (_queue.empty()) {
             return false;
         }
@@ -206,13 +220,17 @@ public:
     /// @brief Check if queue is empty.
     [[nodiscard]] bool empty() const
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         return _queue.empty();
     }
 
 private:
     std::queue<EventVariant> _queue;
+#if CORIUM_HAS_STD_MUTEX
     mutable std::mutex _mutex;
+#endif
 };
 
 /// @brief Zero-overhead Queue Policy for services or buses that do not receive or queue incoming events.

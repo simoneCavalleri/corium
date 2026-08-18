@@ -141,10 +141,20 @@ using Event = DefaultEvents;
 
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <queue>
 #include <type_traits>
 #include <utility>
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__unix__) || defined(__APPLE__) || (defined(_GLIBCXX_HAS_GTHREADS) && _GLIBCXX_HAS_GTHREADS) || defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+#include <mutex>
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 1
+#endif
+#else
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 0
+#endif
+#endif
 
 
 // >>> Begin: corium/MpscRingBuffer.hpp
@@ -480,7 +490,9 @@ public:
     PushResult tryPush(EventVariant event, EventPriority priority = EventPriority::Normal)
     {
         (void)priority;
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         bool wasEmpty = _queue.empty();
         _queue.push(std::move(event));
         return {true, wasEmpty};
@@ -489,7 +501,9 @@ public:
     /// @brief Try to pop an event from the blocking queue.
     bool tryPop(EventVariant& event)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         if (_queue.empty()) {
             return false;
         }
@@ -501,13 +515,17 @@ public:
     /// @brief Check if queue is empty.
     [[nodiscard]] bool empty() const
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         return _queue.empty();
     }
 
 private:
     std::queue<EventVariant> _queue;
+#if CORIUM_HAS_STD_MUTEX
     mutable std::mutex _mutex;
+#endif
 };
 
 /// @brief Zero-overhead Queue Policy for services or buses that do not receive or queue incoming events.
@@ -994,10 +1012,20 @@ using internal::extract_event_variant_t;
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__unix__) || defined(__APPLE__) || (defined(_GLIBCXX_HAS_GTHREADS) && _GLIBCXX_HAS_GTHREADS) || defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+#include <condition_variable>
 #include <mutex>
 #include <thread>
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 1
+#endif
+#else
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 0
+#endif
+#endif
 
 #ifdef __linux__
 #include <poll.h>
@@ -1068,15 +1096,21 @@ class CallbackSignalPolicy {
 public:
     void setOnQueueNonEmpty(StaticCallback callback)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         _callback = callback;
     }
 
     void signal()
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
         _hasEvents = true;
         _cv.notify_one();
+#else
+        _hasEvents = true;
+#endif
         if (_callback) {
             _callback();
         }
@@ -1085,15 +1119,25 @@ public:
     template <typename Rep, typename Period>
     void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::unique_lock<std::mutex> lock(_mutex);
         _cv.wait_for(lock, timeout, [this]() { return _hasEvents; });
         _hasEvents = false;
+#else
+        (void)timeout;
+#if defined(__arm__) || defined(__aarch64__)
+        asm volatile("yield");
+#endif
+        _hasEvents = false;
+#endif
     }
 
 private:
     StaticCallback _callback;
+#if CORIUM_HAS_STD_MUTEX
     std::mutex _mutex;
     std::condition_variable _cv;
+#endif
     bool _hasEvents = false;
 };
 
@@ -1108,7 +1152,9 @@ public:
     void signal()
     {
         _flag.store(true, std::memory_order_release);
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
         _flag.notify_one();
+#endif
         if (_userCallback) {
             _userCallback();
         }
@@ -1126,7 +1172,11 @@ public:
             if (std::chrono::steady_clock::now() >= deadline) {
                 return;
             }
+#if CORIUM_HAS_STD_MUTEX
             std::this_thread::yield();
+#elif defined(__arm__) || defined(__aarch64__)
+            asm volatile("yield");
+#endif
         }
         _flag.store(false, std::memory_order_relaxed);
     }
@@ -3618,7 +3668,9 @@ constexpr std::size_t next_power_of_two() {
     val |= val >> 4;
     val |= val >> 8;
     val |= val >> 16;
-    val |= val >> 32;
+    if constexpr (sizeof(std::size_t) > 4) {
+        val |= val >> 32;
+    }
     return val + 1;
 }
 

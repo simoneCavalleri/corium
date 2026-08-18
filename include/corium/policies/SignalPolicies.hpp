@@ -8,10 +8,20 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__unix__) || defined(__APPLE__) || (defined(_GLIBCXX_HAS_GTHREADS) && _GLIBCXX_HAS_GTHREADS) || defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+#include <condition_variable>
 #include <mutex>
 #include <thread>
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 1
+#endif
+#else
+#ifndef CORIUM_HAS_STD_MUTEX
+#define CORIUM_HAS_STD_MUTEX 0
+#endif
+#endif
 
 #ifdef __linux__
 #include <poll.h>
@@ -82,15 +92,21 @@ class CallbackSignalPolicy {
 public:
     void setOnQueueNonEmpty(StaticCallback callback)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
+#endif
         _callback = callback;
     }
 
     void signal()
     {
+#if CORIUM_HAS_STD_MUTEX
         std::lock_guard<std::mutex> lock(_mutex);
         _hasEvents = true;
         _cv.notify_one();
+#else
+        _hasEvents = true;
+#endif
         if (_callback) {
             _callback();
         }
@@ -99,15 +115,25 @@ public:
     template <typename Rep, typename Period>
     void wait_for(const std::chrono::duration<Rep, Period>& timeout)
     {
+#if CORIUM_HAS_STD_MUTEX
         std::unique_lock<std::mutex> lock(_mutex);
         _cv.wait_for(lock, timeout, [this]() { return _hasEvents; });
         _hasEvents = false;
+#else
+        (void)timeout;
+#if defined(__arm__) || defined(__aarch64__)
+        asm volatile("yield");
+#endif
+        _hasEvents = false;
+#endif
     }
 
 private:
     StaticCallback _callback;
+#if CORIUM_HAS_STD_MUTEX
     std::mutex _mutex;
     std::condition_variable _cv;
+#endif
     bool _hasEvents = false;
 };
 
@@ -122,7 +148,9 @@ public:
     void signal()
     {
         _flag.store(true, std::memory_order_release);
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
         _flag.notify_one();
+#endif
         if (_userCallback) {
             _userCallback();
         }
@@ -140,7 +168,11 @@ public:
             if (std::chrono::steady_clock::now() >= deadline) {
                 return;
             }
+#if CORIUM_HAS_STD_MUTEX
             std::this_thread::yield();
+#elif defined(__arm__) || defined(__aarch64__)
+            asm volatile("yield");
+#endif
         }
         _flag.store(false, std::memory_order_relaxed);
     }

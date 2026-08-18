@@ -40,7 +40,9 @@ constexpr std::size_t next_power_of_two() {
     val |= val >> 4;
     val |= val >> 8;
     val |= val >> 16;
-    val |= val >> 32;
+    if constexpr (sizeof(std::size_t) > 4) {
+        val |= val >> 32;
+    }
     return val + 1;
 }
 

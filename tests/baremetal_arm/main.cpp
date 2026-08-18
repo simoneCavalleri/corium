@@ -11,7 +11,7 @@
 #include "corium/corium.hpp"
 
 struct HardwareTickProvider {
-    static uint64_t getTicks() noexcept {
+    static uint64_t nowUs() noexcept {
         static uint64_t tick = 0;
         return tick += 1000;
     }
