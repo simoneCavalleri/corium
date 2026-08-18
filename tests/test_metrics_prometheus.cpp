@@ -2,7 +2,7 @@
 #include <array>
 #include <string>
 
-#include "corium/corium.hpp"
+#include "corium/profiler/Metrics.hpp"
 
 TEST(MetricsPrometheusTest, CounterOperationsAndExport) {
     corium::profiler::Counter counter("events_processed_total", "Total count of processed events");

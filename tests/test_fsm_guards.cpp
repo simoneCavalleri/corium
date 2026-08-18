@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <string>
 
-#include "corium/corium.hpp"
+#include "corium/fsm/StateMachine.hpp"
 
 namespace {
 

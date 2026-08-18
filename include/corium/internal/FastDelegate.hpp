@@ -187,8 +187,13 @@ private:
     MoveFn _move = nullptr;
 };
 
+/// @brief Alias for EventHandlerDelegate.
+template <typename EventType, std::size_t InlineSize = 32>
+using FastDelegate = EventHandlerDelegate<EventType, InlineSize>;
+
 } // namespace internal
 
 using internal::EventHandlerDelegate;
+using internal::FastDelegate;
 
 } // namespace corium
