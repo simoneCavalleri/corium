@@ -1,7 +1,26 @@
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <chrono>
+#include <thread>
 #include <variant>
 #include <vector>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+using test_socklen_t = int;
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+using test_socklen_t = socklen_t;
+#endif
 
 #include "corium/corium.hpp"
 
@@ -46,8 +65,12 @@ TEST(StaticUdpChannelTest, OpenBindSendAndReceiveEvent) {
 
     // Get bound port
     sockaddr_in sin{};
-    socklen_t len = sizeof(sin);
+    test_socklen_t len = static_cast<test_socklen_t>(sizeof(sin));
+#if defined(_WIN32) || defined(_WIN64)
+    ASSERT_EQ(getsockname(static_cast<SOCKET>(serverChannel.nativeHandle()), reinterpret_cast<sockaddr*>(&sin), &len), 0);
+#else
     ASSERT_EQ(getsockname(serverChannel.nativeHandle(), reinterpret_cast<sockaddr*>(&sin), &len), 0);
+#endif
     uint16_t serverPort = ntohs(sin.sin_port);
 
     // Send typed event via clientChannel

@@ -9,6 +9,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Header-only library target
 add_library(corium INTERFACE)
 target_include_directories(corium INTERFACE include)
+if(WIN32)
+    target_link_libraries(corium INTERFACE ws2_32)
+endif()
 
 # Showcase Sample Targets
 add_executable(sample_01_smart_grid_substation samples/01_smart_grid_substation/main.cpp)

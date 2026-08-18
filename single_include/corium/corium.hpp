@@ -10021,6 +10021,7 @@ using PlatformChannel = UdsChannel<EventVariant>;
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
 #define CORIUM_HAS_UDP_SOCKETS 1
 #elif __has_include(<sys/socket.h>) && __has_include(<netinet/in.h>) && __has_include(<arpa/inet.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
 #include <arpa/inet.h>
