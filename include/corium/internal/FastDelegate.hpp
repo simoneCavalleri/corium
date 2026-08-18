@@ -8,7 +8,7 @@
 
 #include <cassert>
 #include <cstddef>
-#include <new>
+#include <new> // IWYU pragma: keep
 #include <type_traits>
 #include <utility>
 

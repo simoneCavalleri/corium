@@ -17,6 +17,7 @@
  */
 
 
+// IWYU pragma: begin_exports
 
 // >>> Begin: corium/Runtime.hpp
 /**
@@ -704,7 +705,7 @@ using internal::callable_event_type_t;
 
 #include <cassert>
 #include <cstddef>
-#include <new>
+#include <new> // IWYU pragma: keep
 #include <type_traits>
 #include <utility>
 
@@ -8169,5 +8170,6 @@ using PlatformChannel = UdsChannel<EventVariant>;
 // <<< End: corium/ipc/PlatformChannel.hpp
 
 // <<< End: corium/ipc/ipc.hpp
+// IWYU pragma: end_exports
 
 // <<< End: corium/corium.hpp

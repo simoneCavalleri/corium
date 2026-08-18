@@ -6,6 +6,7 @@
 
 #pragma once
 
+// IWYU pragma: begin_exports
 #include "corium/Runtime.hpp"
 #include "corium/Application.hpp"
 #include "corium/ApplicationContext.hpp"
@@ -23,3 +24,4 @@
 #include "corium/profiler/profiler.hpp"
 #include "corium/safety/safety.hpp"
 #include "corium/ipc/ipc.hpp"
+// IWYU pragma: end_exports
