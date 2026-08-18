@@ -103,16 +103,19 @@ extern "C" {
     extern uint32_t _ebss;
     extern uint32_t _estack;
 
-    void __libc_init_array(void) __attribute__((weak));
-    void initialise_monitor_handles(void) __attribute__((weak));
+    // NOLINTNEXTLINE(bugprone-reserved-identifier)
+    void __libc_init_array() __attribute__((weak));
+    void initialise_monitor_handles() __attribute__((weak));
 
-    void Default_Handler(void) {
-        while (1) {
+    void Default_Handler() {
+        while (true) {
+#if defined(__arm__) || defined(__thumb__)
             __asm__ volatile ("wfi");
+#endif
         }
     }
 
-    void Reset_Handler(void) {
+    void Reset_Handler() {
         // 1. Copy initialized .data section from Flash to SRAM
         uint32_t* src = &_sidata;
         uint32_t* dst = &_sdata;
@@ -138,20 +141,26 @@ extern "C" {
         int rc = main();
 
         // 5. Cleanly exit QEMU via ARM Semihosting SYS_EXIT call
+#if defined(__arm__) || defined(__thumb__)
         register uint32_t r0 __asm__("r0") = 0x18; // SYS_EXIT
         register uint32_t r1 __asm__("r1") = (rc == 0) ? 0x20026 : 0x20024; // ADP_Stopped_ApplicationExit
         __asm__ volatile ("bkpt 0xab" : : "r"(r0), "r"(r1) : "memory");
+#else
+        (void)rc;
+#endif
 
-        while (1) {
+        while (true) {
+#if defined(__arm__) || defined(__thumb__)
             __asm__ volatile ("wfi");
+#endif
         }
     }
 }
 
 // Hardware Interrupt Vector Table at address 0x00000000
 __attribute__((section(".vector_table"), used))
-void (*const g_pfnVectors[])(void) = {
-    reinterpret_cast<void (*)(void)>(&_estack), // 0: Initial Stack Pointer
+void (*const g_pfnVectors[])() = {
+    reinterpret_cast<void (*)()>(&_estack),     // 0: Initial Stack Pointer
     Reset_Handler,                              // 1: Reset Handler
     Default_Handler,                            // 2: NMI Handler
     Default_Handler,                            // 3: Hard Fault Handler
