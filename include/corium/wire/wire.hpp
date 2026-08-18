@@ -8,3 +8,4 @@
 
 #include "corium/wire/WirePacket.hpp"
 #include "corium/wire/Serializer.hpp"
+#include "corium/wire/EventJournal.hpp"

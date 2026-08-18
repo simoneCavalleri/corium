@@ -11,3 +11,5 @@
 #include "corium/embedded/FreeRtos.hpp"      // IWYU pragma: export
 #include "corium/embedded/CanAdapter.hpp"    // IWYU pragma: export
 #include "corium/embedded/DmaUartAdapter.hpp" // IWYU pragma: export
+#include "corium/embedded/SpiAdapter.hpp"    // IWYU pragma: export
+#include "corium/embedded/I2cAdapter.hpp"    // IWYU pragma: export

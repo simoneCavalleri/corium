@@ -5815,6 +5815,199 @@ private:
 
 // <<< End: corium/embedded/DmaUartAdapter.hpp
 
+// >>> Begin: corium/embedded/SpiAdapter.hpp
+/**
+ * @file SpiAdapter.hpp
+ * @ingroup embedded
+ * @brief Zero-heap SPI hardware ISR and DMA completion adapter for embedded sensors (IMU, ADC, Flash).
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+
+
+namespace corium::embedded {
+
+/// @brief Fixed-capacity SPI transfer frame structure for zero-heap ISR and DMA ingestion.
+/// @tparam MaxRxSize Maximum receive buffer size in bytes (default: 32).
+template <size_t MaxRxSize = 32>
+struct SpiFrame {
+    uint8_t chipSelectId{0};       ///< Chip-select / device channel identifier
+    uint16_t length{0};            ///< Number of valid received bytes
+    uint8_t status{0};             ///< Hardware status flags (0: Success, 1: Error/Timeout)
+    std::array<uint8_t, MaxRxSize> rxData{}; ///< Static receive buffer
+
+    [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
+        return {rxData.data(), static_cast<size_t>(length > MaxRxSize ? MaxRxSize : length)};
+    }
+};
+
+/// @ingroup embedded
+/// @brief Non-blocking hardware ISR adapter for SPI controllers and DMA completion interrupts.
+/// Ingests SPI frames from interrupt context and posts typed events into Corium lock-free ring buffer.
+template <typename EventVariant>
+class SpiIsrAdapter {
+public:
+    explicit SpiIsrAdapter(EventSinkT<EventVariant> sink) noexcept
+        : m_sink(sink)
+    {}
+
+    /// @brief Post an SPI frame directly from ISR context into the event sink.
+    /// @tparam TargetEvent User event type constructible from SpiFrame or SpiFrame itself.
+    /// @tparam MaxRxSize Buffer capacity of the SPI frame.
+    /// @param frame The completed SPI hardware frame.
+    /// @param priority Priority to assign (default: Normal).
+    template <typename TargetEvent = SpiFrame<32>, size_t MaxRxSize = 32>
+    void postFromIsr(const SpiFrame<MaxRxSize>& frame, EventPriority priority = EventPriority::Normal) noexcept {
+        if constexpr (std::is_same_v<TargetEvent, SpiFrame<MaxRxSize>>) {
+            m_sink.post(EventVariant{frame}, priority);
+        } else {
+            m_sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+    /// @brief Ingest raw SPI RX bytes from a DMA buffer into a typed event and post into sink.
+    /// @tparam TargetEvent User event type constructible from SpiFrame.
+    /// @param csId Chip-select ID of the SPI slave.
+    /// @param rxBytes Span of received bytes.
+    /// @param status Hardware status code.
+    /// @param priority Event priority.
+    template <typename TargetEvent = SpiFrame<32>>
+    void postBufferFromIsr(
+        uint8_t csId,
+        std::span<const uint8_t> rxBytes,
+        uint8_t status = 0,
+        EventPriority priority = EventPriority::Normal
+    ) noexcept {
+        SpiFrame<32> frame{};
+        frame.chipSelectId = csId;
+        frame.status = status;
+        frame.length = static_cast<uint16_t>(rxBytes.size() > 32 ? 32 : rxBytes.size());
+        std::memcpy(frame.rxData.data(), rxBytes.data(), frame.length);
+
+        if constexpr (std::is_same_v<TargetEvent, SpiFrame<32>>) {
+            m_sink.post(EventVariant{frame}, priority);
+        } else {
+            m_sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+private:
+    EventSinkT<EventVariant> m_sink;
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/SpiAdapter.hpp
+
+// >>> Begin: corium/embedded/I2cAdapter.hpp
+/**
+ * @file I2cAdapter.hpp
+ * @ingroup embedded
+ * @brief Zero-heap I2C bus hardware ISR adapter for sensors and peripherals.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+
+
+namespace corium::embedded {
+
+/// @brief I2C transaction direction/operation type.
+enum class I2cOpType : uint8_t {
+    Read = 0,
+    Write = 1,
+    WriteRead = 2
+};
+
+/// @brief Zero-heap I2C transaction result frame.
+/// @tparam MaxPayload Maximum payload capacity in bytes (default: 32).
+template <size_t MaxPayload = 32>
+struct I2cFrame {
+    uint16_t deviceAddress{0};     ///< 7-bit or 10-bit I2C target slave address
+    uint8_t registerAddress{0};    ///< Internal register address (if applicable)
+    I2cOpType opType{I2cOpType::Read}; ///< Read, Write, or WriteRead
+    uint8_t status{0};             ///< Hardware status (0: ACK/Success, 1: NACK, 2: Bus Error)
+    uint8_t length{0};             ///< Number of valid data bytes
+    std::array<uint8_t, MaxPayload> data{}; ///< Payload buffer
+
+    [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
+        return {data.data(), static_cast<size_t>(length > MaxPayload ? MaxPayload : length)};
+    }
+};
+
+/// @ingroup embedded
+/// @brief Non-blocking hardware ISR adapter for I2C master/slave controllers.
+/// Dispatches completed I2C read/write transactions directly into the Corium lock-free ring buffer.
+template <typename EventVariant>
+class I2cIsrAdapter {
+public:
+    explicit I2cIsrAdapter(EventSinkT<EventVariant> sink) noexcept
+        : m_sink(sink)
+    {}
+
+    /// @brief Post an I2C frame from ISR context into the event sink.
+    /// @tparam TargetEvent User event type constructible from I2cFrame or I2cFrame itself.
+    /// @tparam MaxPayload Payload capacity of the frame.
+    /// @param frame The completed I2C transaction frame.
+    /// @param priority Priority to assign.
+    template <typename TargetEvent = I2cFrame<32>, size_t MaxPayload = 32>
+    void postFromIsr(const I2cFrame<MaxPayload>& frame, EventPriority priority = EventPriority::Normal) noexcept {
+        if constexpr (std::is_same_v<TargetEvent, I2cFrame<MaxPayload>>) {
+            m_sink.post(EventVariant{frame}, priority);
+        } else {
+            m_sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+    /// @brief Construct and post an I2C read result frame from ISR context.
+    /// @tparam TargetEvent User event type.
+    /// @param devAddr Slave device address.
+    /// @param regAddr Register address read from.
+    /// @param readBytes Span of received bytes.
+    /// @param status Hardware status code.
+    /// @param priority Event priority.
+    template <typename TargetEvent = I2cFrame<32>>
+    void postReadFromIsr(
+        uint16_t devAddr,
+        uint8_t regAddr,
+        std::span<const uint8_t> readBytes,
+        uint8_t status = 0,
+        EventPriority priority = EventPriority::Normal
+    ) noexcept {
+        I2cFrame<32> frame{};
+        frame.deviceAddress = devAddr;
+        frame.registerAddress = regAddr;
+        frame.opType = I2cOpType::Read;
+        frame.status = status;
+        frame.length = static_cast<uint8_t>(readBytes.size() > 32 ? 32 : readBytes.size());
+        std::memcpy(frame.data.data(), readBytes.data(), frame.length);
+
+        if constexpr (std::is_same_v<TargetEvent, I2cFrame<32>>) {
+            m_sink.post(EventVariant{frame}, priority);
+        } else {
+            m_sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+private:
+    EventSinkT<EventVariant> m_sink;
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/I2cAdapter.hpp
+
 // <<< End: corium/embedded/embedded.hpp
 
 // >>> Begin: corium/fsm/fsm.hpp
@@ -7399,6 +7592,305 @@ private:
 } // namespace corium::wire
 
 // <<< End: corium/wire/Serializer.hpp
+
+// >>> Begin: corium/wire/EventJournal.hpp
+/**
+ * @file EventJournal.hpp
+ * @ingroup wire
+ * @brief Zero-heap binary event journal for deterministic recording and replay.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+namespace corium::wire {
+
+/// @brief Magic identifier for Corium binary event journals ("JOUR" in hex: 0x4a4f5552).
+inline constexpr uint32_t CORIUM_JOURNAL_MAGIC = 0x4a4f5552;
+
+/// @brief Current schema version for Corium event journals.
+inline constexpr uint32_t CORIUM_JOURNAL_VERSION = 1;
+
+/// @brief Computes a deterministic 64-bit ABI hash for an EventVariant type.
+template <typename EventVariant>
+[[nodiscard]] constexpr uint64_t computeVariantSchemaHash() noexcept {
+    constexpr size_t numTypes = std::variant_size_v<EventVariant>;
+    uint64_t hash = 0xcbf29ce484222325ULL; // FNV-1a 64-bit basis
+    hash ^= static_cast<uint64_t>(numTypes);
+    hash *= 0x100000001b3ULL;
+    return hash;
+}
+
+#pragma pack(push, 1)
+
+/// @brief Header placed at the beginning of an event journal binary stream.
+struct JournalHeader {
+    uint32_t magic{CORIUM_JOURNAL_MAGIC};
+    uint32_t version{CORIUM_JOURNAL_VERSION};
+    uint64_t schemaHash{0};
+    uint32_t recordCount{0};
+    uint32_t reserved{0};
+};
+
+/// @brief Header preceding every serialized event record in the journal.
+struct JournalRecordHeader {
+    uint64_t timestampUs{0};
+    uint32_t typeIndex{0};
+    uint32_t payloadLength{0};
+    uint16_t checksum{0};
+    uint8_t priority{static_cast<uint8_t>(EventPriority::Normal)};
+    uint8_t typeSignature{0};
+};
+
+#pragma pack(pop)
+
+/// @ingroup wire
+/// @brief Statically allocated binary event journal writer for zero-heap post-mortem logging and record playback.
+/// @tparam EventVariant Variant of supported event types.
+/// @tparam BufferCapacity Total byte capacity of the journal storage buffer.
+template <typename EventVariant, size_t BufferCapacity = 4096>
+class EventJournalWriter {
+public:
+    constexpr EventJournalWriter() noexcept {
+        initHeader();
+    }
+
+    /// @brief Reset journal to initial empty state.
+    void reset() noexcept {
+        m_offset = 0;
+        m_recordCount = 0;
+        initHeader();
+    }
+
+    /// @brief Record a concrete typed event into the journal.
+    /// @tparam Event Concrete event struct type (must be trivially copyable).
+    /// @param event Event instance to record.
+    /// @param timestampUs Timestamp in microseconds.
+    /// @param priority Priority of the event.
+    /// @return true if record was successfully written; false if journal is full.
+    template <typename Event>
+    bool record(const Event& event, uint64_t timestampUs, EventPriority priority = EventPriority::Normal) noexcept {
+        static_assert(std::is_trivially_copyable_v<Event>, "Event must be trivially copyable for journal serialization.");
+        constexpr size_t typeIdx = corium::variant_index_v<Event, EventVariant>;
+        static_assert(typeIdx != static_cast<size_t>(-1), "Event type is not in the specified EventVariant.");
+
+        constexpr size_t recordSize = sizeof(JournalRecordHeader) + sizeof(Event);
+        if (m_offset + recordSize > BufferCapacity) {
+            return false;
+        }
+
+        JournalRecordHeader recHeader{};
+        recHeader.timestampUs = timestampUs;
+        recHeader.typeIndex = static_cast<uint32_t>(typeIdx);
+        recHeader.payloadLength = static_cast<uint32_t>(sizeof(Event));
+        recHeader.priority = static_cast<uint8_t>(priority);
+        recHeader.typeSignature = computeTypeSignature<Event>();
+        recHeader.checksum = calculateCrc16(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(&event), sizeof(Event)));
+
+        // Write record header
+        std::memcpy(&m_buffer[m_offset], &recHeader, sizeof(JournalRecordHeader));
+        m_offset += sizeof(JournalRecordHeader);
+
+        // Write event payload
+        std::memcpy(&m_buffer[m_offset], &event, sizeof(Event));
+        m_offset += sizeof(Event);
+
+        m_recordCount++;
+        updateHeaderCount();
+        return true;
+    }
+
+    /// @brief Number of records written.
+    [[nodiscard]] size_t recordCount() const noexcept {
+        return m_recordCount;
+    }
+
+    /// @brief Total bytes written into buffer (header + all records).
+    [[nodiscard]] size_t bytesWritten() const noexcept {
+        return m_offset;
+    }
+
+    /// @brief Read-only view of the serialized journal data.
+    [[nodiscard]] std::span<const uint8_t> data() const noexcept {
+        return std::span<const uint8_t>(m_buffer.data(), m_offset);
+    }
+
+private:
+    void initHeader() noexcept {
+        JournalHeader hdr{};
+        hdr.magic = CORIUM_JOURNAL_MAGIC;
+        hdr.version = CORIUM_JOURNAL_VERSION;
+        hdr.schemaHash = computeVariantSchemaHash<EventVariant>();
+        hdr.recordCount = 0;
+        hdr.reserved = 0;
+        std::memcpy(&m_buffer[0], &hdr, sizeof(JournalHeader));
+        m_offset = sizeof(JournalHeader);
+    }
+
+    void updateHeaderCount() noexcept {
+        auto* hdr = reinterpret_cast<JournalHeader*>(&m_buffer[0]);
+        hdr->recordCount = static_cast<uint32_t>(m_recordCount);
+    }
+
+    std::array<uint8_t, BufferCapacity> m_buffer{};
+    size_t m_offset{0};
+    size_t m_recordCount{0};
+};
+
+/// @ingroup wire
+/// @brief Zero-heap event journal reader and deterministic player into Corium EventSinks.
+/// @tparam EventVariant Variant of supported event types.
+template <typename EventVariant>
+class EventJournalReader {
+public:
+    /// @brief Construct reader over a byte span.
+    explicit EventJournalReader(std::span<const uint8_t> journalData) noexcept
+        : m_data(journalData) {
+        validateAndParseHeader();
+    }
+
+    /// @brief Returns true if the journal header is valid (magic, version, schema match).
+    [[nodiscard]] bool isValid() const noexcept {
+        return m_valid;
+    }
+
+    /// @brief Total number of records declared in the header.
+    [[nodiscard]] size_t totalRecords() const noexcept {
+        return m_valid ? m_header.recordCount : 0;
+    }
+
+    /// @brief Rewind playback cursor to the first record.
+    void rewind() noexcept {
+        m_cursor = sizeof(JournalHeader);
+    }
+
+    /// @brief Replay all valid records in the journal directly into an EventSink.
+    /// @tparam Sink EventSink or EventBus handle type.
+    /// @param sink Target sink to receive replayed events.
+    /// @return Number of events successfully replayed.
+    template <typename Sink>
+    size_t replayInto(Sink& sink) noexcept {
+        if (!m_valid) {
+            return 0;
+        }
+
+        rewind();
+        size_t replayed = 0;
+
+        while (m_cursor + sizeof(JournalRecordHeader) <= m_data.size()) {
+            JournalRecordHeader recHeader{};
+            std::memcpy(&recHeader, &m_data[m_cursor], sizeof(JournalRecordHeader));
+
+            size_t payloadStart = m_cursor + sizeof(JournalRecordHeader);
+            if (payloadStart + recHeader.payloadLength > m_data.size()) {
+                break; // Truncated record
+            }
+
+            // Verify CRC
+            uint16_t expectedCrc = calculateCrc16(std::span<const uint8_t>(
+                &m_data[payloadStart], recHeader.payloadLength));
+            if (recHeader.checksum != expectedCrc) {
+                break; // Corrupted record
+            }
+
+            // Deserialize and push
+            constexpr size_t numTypes = std::variant_size_v<EventVariant>;
+            if (recHeader.typeIndex < numTypes) {
+                bool pushed = deserializeIndex<Sink>(
+                    recHeader,
+                    &m_data[payloadStart],
+                    sink,
+                    std::make_index_sequence<numTypes>{}
+                );
+                if (pushed) {
+                    replayed++;
+                }
+            }
+
+            m_cursor = payloadStart + recHeader.payloadLength;
+        }
+
+        return replayed;
+    }
+
+private:
+    void validateAndParseHeader() noexcept {
+        if (m_data.size() < sizeof(JournalHeader)) {
+            m_valid = false;
+            return;
+        }
+
+        std::memcpy(&m_header, m_data.data(), sizeof(JournalHeader));
+
+        if (m_header.magic != CORIUM_JOURNAL_MAGIC) {
+            m_valid = false;
+            return;
+        }
+        if (m_header.version != CORIUM_JOURNAL_VERSION) {
+            m_valid = false;
+            return;
+        }
+        if (m_header.schemaHash != computeVariantSchemaHash<EventVariant>()) {
+            m_valid = false;
+            return;
+        }
+
+        m_valid = true;
+        m_cursor = sizeof(JournalHeader);
+    }
+
+    template <typename Sink, size_t... Is>
+    bool deserializeIndex(
+        const JournalRecordHeader& recHeader,
+        const uint8_t* payload,
+        Sink& sink,
+        std::index_sequence<Is...>
+    ) noexcept {
+        bool handled = false;
+        (void)((recHeader.typeIndex == Is ? (handled = deserializeExact<Is, Sink>(recHeader, payload, sink), true) : false) || ...);
+        return handled;
+    }
+
+    template <size_t Index, typename Sink>
+    bool deserializeExact(
+        const JournalRecordHeader& recHeader,
+        const uint8_t* payload,
+        Sink& sink
+    ) noexcept {
+        using TargetEvent = std::variant_alternative_t<Index, EventVariant>;
+        if (recHeader.payloadLength != sizeof(TargetEvent)) {
+            return false;
+        }
+
+        if (recHeader.typeSignature != 0 && recHeader.typeSignature != computeTypeSignature<TargetEvent>()) {
+            return false;
+        }
+
+        TargetEvent evt{};
+        std::memcpy(&evt, payload, sizeof(TargetEvent));
+        auto prio = static_cast<EventPriority>(recHeader.priority);
+        sink.post(EventVariant{std::move(evt)}, prio);
+        return true;
+    }
+
+    std::span<const uint8_t> m_data;
+    JournalHeader m_header{};
+    size_t m_cursor{0};
+    bool m_valid{false};
+};
+
+} // namespace corium::wire
+
+// <<< End: corium/wire/EventJournal.hpp
 
 // <<< End: corium/wire/wire.hpp
 
@@ -8985,6 +9477,307 @@ using PlatformChannel = UdsChannel<EventVariant>;
 // <<< End: corium/ipc/PlatformChannel.hpp
 
 // <<< End: corium/ipc/ipc.hpp
+
+// >>> Begin: corium/net/net.hpp
+/**
+ * @file net.hpp
+ * @ingroup net
+ * @brief Umbrella header for zero-heap networking channels and protocols.
+ */
+
+
+
+// >>> Begin: corium/net/StaticUdpChannel.hpp
+/**
+ * @file StaticUdpChannel.hpp
+ * @ingroup net
+ * @brief Zero-heap UDP network channel for distributed event telemetry and IoT nodes.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+#include <utility>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define CORIUM_HAS_UDP_SOCKETS 1
+#elif __has_include(<sys/socket.h>) && __has_include(<netinet/in.h>) && __has_include(<arpa/inet.h>) && __has_include(<unistd.h>) && __has_include(<fcntl.h>)
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#define CORIUM_HAS_UDP_SOCKETS 1
+#else
+#define CORIUM_HAS_UDP_SOCKETS 0
+#endif
+
+
+namespace corium::net {
+
+/// @ingroup net
+/// @brief Statically buffered, zero-heap UDP communication channel for distributed Corium nodes.
+/// @tparam MaxPacketSize Maximum UDP datagram payload size in bytes (default: 512).
+template <size_t MaxPacketSize = 512>
+class StaticUdpChannel {
+public:
+    constexpr StaticUdpChannel() noexcept = default;
+
+    ~StaticUdpChannel() {
+        close();
+    }
+
+    StaticUdpChannel(const StaticUdpChannel&) = delete;
+    StaticUdpChannel& operator=(const StaticUdpChannel&) = delete;
+
+    StaticUdpChannel(StaticUdpChannel&& other) noexcept
+        : m_fd(other.m_fd) {
+        other.m_fd = -1;
+    }
+
+    StaticUdpChannel& operator=(StaticUdpChannel&& other) noexcept {
+        if (this != &other) {
+            close();
+            m_fd = other.m_fd;
+            other.m_fd = -1;
+        }
+        return *this;
+    }
+
+    /// @brief Open UDP socket and bind to a local port and IP address.
+    /// @param port Local port to bind to (0 for ephemeral).
+    /// @param ip Local interface IP address (default: "0.0.0.0").
+    /// @return true if socket was created and bound successfully.
+    bool openAndBind(uint16_t port = 0, const char* ip = "0.0.0.0") noexcept {
+#if CORIUM_HAS_UDP_SOCKETS
+        close();
+
+#if defined(_WIN32) || defined(_WIN64)
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        SOCKET sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock == INVALID_SOCKET) {
+            return false;
+        }
+        m_fd = static_cast<int>(sock);
+#else
+        m_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (m_fd < 0) {
+            return false;
+        }
+#endif
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+#if defined(_WIN32) || defined(_WIN64)
+        InetPtonA(AF_INET, ip, &addr.sin_addr);
+#else
+        inet_pton(AF_INET, ip, &addr.sin_addr);
+#endif
+
+        if (::bind(m_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) < 0) {
+            close();
+            return false;
+        }
+        return true;
+#else
+        (void)port;
+        (void)ip;
+        return false;
+#endif
+    }
+
+    /// @brief Set socket non-blocking mode.
+    /// @param nonBlocking true for non-blocking I/O.
+    /// @return true on success.
+    bool setNonBlocking(bool nonBlocking = true) noexcept {
+#if CORIUM_HAS_UDP_SOCKETS
+        if (m_fd < 0) {
+            return false;
+        }
+#if defined(_WIN32) || defined(_WIN64)
+        u_long mode = nonBlocking ? 1 : 0;
+        return ioctlsocket(static_cast<SOCKET>(m_fd), FIONBIO, &mode) == 0;
+#else
+        int flags = fcntl(m_fd, F_GETFL, 0);
+        if (flags < 0) return false;
+        flags = nonBlocking ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
+        return fcntl(m_fd, F_SETFL, flags) == 0;
+#endif
+#else
+        (void)nonBlocking;
+        return false;
+#endif
+    }
+
+    /// @brief Send raw payload to target UDP endpoint.
+    /// @param ip Target IPv4 address string (e.g. "127.0.0.1").
+    /// @param port Target port.
+    /// @param data Byte payload to transmit.
+    /// @return true if datagram was sent successfully.
+    bool sendTo(const char* ip, uint16_t port, std::span<const uint8_t> data) noexcept {
+#if CORIUM_HAS_UDP_SOCKETS
+        if (m_fd < 0) {
+            // Lazy socket creation if not bound
+            if (!openAndBind(0, "0.0.0.0")) {
+                return false;
+            }
+        }
+
+        sockaddr_in destAddr{};
+        destAddr.sin_family = AF_INET;
+        destAddr.sin_port = htons(port);
+#if defined(_WIN32) || defined(_WIN64)
+        InetPtonA(AF_INET, ip, &destAddr.sin_addr);
+        int sent = ::sendto(
+            static_cast<SOCKET>(m_fd),
+            reinterpret_cast<const char*>(data.data()),
+            static_cast<int>(data.size()),
+            0,
+            reinterpret_cast<const sockaddr*>(&destAddr),
+            sizeof(destAddr)
+        );
+#else
+        inet_pton(AF_INET, ip, &destAddr.sin_addr);
+        ssize_t sent = ::sendto(
+            m_fd,
+            data.data(),
+            data.size(),
+            0,
+            reinterpret_cast<const sockaddr*>(&destAddr),
+            sizeof(destAddr)
+        );
+#endif
+        return sent == static_cast<ssize_t>(data.size());
+#else
+        (void)ip;
+        (void)port;
+        (void)data;
+        return false;
+#endif
+    }
+
+    /// @brief Serialize and send a typed event over UDP using Corium WirePacket framing.
+    /// @tparam Event Concrete event type (must be trivially copyable).
+    /// @tparam EventVariant Variant list for type indexing.
+    /// @param ip Target IPv4 address.
+    /// @param port Target port.
+    /// @param event Event instance to transmit.
+    /// @return true if packet was serialized and sent.
+    template <typename Event, typename EventVariant>
+    bool sendEvent(const char* ip, uint16_t port, const Event& event) noexcept {
+        auto packet = corium::wire::WireSerializer::serialize<Event, EventVariant, MaxPacketSize>(event);
+        return sendTo(ip, port, std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(&packet), packet.totalWireSize()));
+    }
+
+    /// @brief Receive raw bytes from incoming UDP datagram.
+    /// @param bufferOut Output buffer.
+    /// @param bytesReceivedOut Number of bytes received.
+    /// @return true if datagram was received.
+    bool receive(std::span<uint8_t> bufferOut, size_t& bytesReceivedOut) noexcept {
+#if CORIUM_HAS_UDP_SOCKETS
+        if (m_fd < 0) {
+            bytesReceivedOut = 0;
+            return false;
+        }
+
+#if defined(_WIN32) || defined(_WIN64)
+        int recvd = ::recvfrom(
+            static_cast<SOCKET>(m_fd),
+            reinterpret_cast<char*>(bufferOut.data()),
+            static_cast<int>(bufferOut.size()),
+            0, nullptr, nullptr
+        );
+#else
+        ssize_t recvd = ::recvfrom(
+            m_fd,
+            bufferOut.data(),
+            bufferOut.size(),
+            0, nullptr, nullptr
+        );
+#endif
+        if (recvd <= 0) {
+            bytesReceivedOut = 0;
+            return false;
+        }
+        bytesReceivedOut = static_cast<size_t>(recvd);
+        return true;
+#else
+        (void)bufferOut;
+        bytesReceivedOut = 0;
+        return false;
+#endif
+    }
+
+    /// @brief Receive a WirePacket and deserialize directly into a Corium EventSink.
+    /// @tparam EventVariant Variant list of all supported events.
+    /// @tparam Sink Target EventSink or EventBus.
+    /// @param sink Target sink.
+    /// @param priority Priority to assign to the deserialized event.
+    /// @return true if a valid event packet was received and pushed into sink.
+    template <typename EventVariant, typename Sink>
+    bool receiveAndPush(Sink& sink, EventPriority priority = EventPriority::Normal) noexcept {
+        size_t recvd = 0;
+        if (!receive(std::span<uint8_t>(m_rxBuffer.data(), m_rxBuffer.size()), recvd)) {
+            return false;
+        }
+
+        if (recvd < sizeof(corium::wire::WireHeader)) {
+            return false;
+        }
+
+        corium::wire::WirePacket<MaxPacketSize> packet{};
+        std::memcpy(&packet, m_rxBuffer.data(), recvd > sizeof(packet) ? sizeof(packet) : recvd);
+        return corium::wire::WireSerializer::deserializeAndPush<EventVariant, MaxPacketSize, Sink>(
+            packet, sink, priority);
+    }
+
+    /// @brief Close underlying socket.
+    void close() noexcept {
+#if CORIUM_HAS_UDP_SOCKETS
+        if (m_fd >= 0) {
+#if defined(_WIN32) || defined(_WIN64)
+            closesocket(static_cast<SOCKET>(m_fd));
+#else
+            ::close(m_fd);
+#endif
+            m_fd = -1;
+        }
+#endif
+    }
+
+    /// @brief Returns true if socket is open and bound.
+    [[nodiscard]] bool isOpen() const noexcept {
+        return m_fd >= 0;
+    }
+
+    /// @brief Native socket file descriptor or handle.
+    [[nodiscard]] int nativeHandle() const noexcept {
+        return m_fd;
+    }
+
+private:
+    int m_fd{-1};
+    std::array<uint8_t, sizeof(corium::wire::WireHeader) + MaxPacketSize> m_rxBuffer{};
+};
+
+} // namespace corium::net
+
+// <<< End: corium/net/StaticUdpChannel.hpp
+
+// <<< End: corium/net/net.hpp
 // IWYU pragma: end_exports
 
 // <<< End: corium/corium.hpp

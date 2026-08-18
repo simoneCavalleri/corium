@@ -24,4 +24,5 @@
 #include "corium/profiler/profiler.hpp"
 #include "corium/safety/safety.hpp"
 #include "corium/ipc/ipc.hpp"
+#include "corium/net/net.hpp"
 // IWYU pragma: end_exports

@@ -75,6 +75,9 @@ if(CORIUM_BUILD_TESTS)
         tests/test_frame_pool.cpp
         tests/test_event_filtering.cpp
         tests/test_embedded_adapters.cpp
+        tests/test_event_journal.cpp
+        tests/test_embedded_spi_i2c.cpp
+        tests/test_static_udp_channel.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 
