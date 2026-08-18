@@ -6506,6 +6506,10 @@ public:
             return Allocator::allocate(size);
         }
 
+        static void operator delete(void* ptr) noexcept {
+            Allocator::deallocate(ptr, 0);
+        }
+
         static void operator delete(void* ptr, std::size_t size) noexcept {
             Allocator::deallocate(ptr, size);
         }
@@ -6625,6 +6629,10 @@ public:
 
         [[nodiscard]] static void* operator new(std::size_t size) {
             return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr) noexcept {
+            Allocator::deallocate(ptr, 0);
         }
 
         static void operator delete(void* ptr, std::size_t size) noexcept {
@@ -7063,6 +7071,10 @@ public:
 
         [[nodiscard]] static void* operator new(std::size_t size) {
             return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr) noexcept {
+            Allocator::deallocate(ptr, 0);
         }
 
         static void operator delete(void* ptr, std::size_t size) noexcept {
@@ -10360,7 +10372,7 @@ public:
     /// @param topicId Target topic ID.
     /// @param event Event instance to dispatch.
     /// @return Number of subscribers invoked.
-    size_t publish(uint32_t topicId, const EventVariant& event) const noexcept {
+    [[nodiscard]] size_t publish(uint32_t topicId, const EventVariant& event) const noexcept {
         for (size_t i = 0; i < m_numTopics; ++i) {
             if (m_topics[i].topicId == topicId) {
                 for (size_t j = 0; j < m_topics[i].subscriberCount; ++j) {
@@ -10378,7 +10390,7 @@ public:
     /// @param event Event instance to dispatch.
     /// @return Number of subscribers invoked.
     template <typename Event>
-    size_t publishEvent(uint32_t topicId, const Event& event) const noexcept {
+    [[nodiscard]] size_t publishEvent(uint32_t topicId, const Event& event) const noexcept {
         return publish(topicId, EventVariant{event});
     }
 

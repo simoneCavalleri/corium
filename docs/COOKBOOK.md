@@ -450,7 +450,8 @@ router.subscribeEvent<RadarTrack>(101, [](const RadarTrack& track) {
 });
 
 // Publish track event to Topic 101 (fans out to all 2 subscribers)
-router.publishEvent(101, RadarTrack{.targetId = 42, .rangeMeters = 35.0f});
+size_t delivered = router.publishEvent(101, RadarTrack{.targetId = 42, .rangeMeters = 35.0f});
+(void)delivered;
 ```
 
 ---

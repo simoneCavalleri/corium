@@ -33,6 +33,10 @@ public:
             return Allocator::allocate(size);
         }
 
+        static void operator delete(void* ptr) noexcept {
+            Allocator::deallocate(ptr, 0);
+        }
+
         static void operator delete(void* ptr, std::size_t size) noexcept {
             Allocator::deallocate(ptr, size);
         }
@@ -152,6 +156,10 @@ public:
 
         [[nodiscard]] static void* operator new(std::size_t size) {
             return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr) noexcept {
+            Allocator::deallocate(ptr, 0);
         }
 
         static void operator delete(void* ptr, std::size_t size) noexcept {
