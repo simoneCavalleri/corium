@@ -72,6 +72,10 @@ if(CORIUM_BUILD_TESTS)
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 
+    if(MSVC)
+        target_link_options(corium_tests PRIVATE /STACK:8388608)
+    endif()
+
     add_executable(corium_zero_heap_test tests/test_zero_heap_guarantee.cpp)
     target_link_libraries(corium_zero_heap_test PRIVATE corium)
 

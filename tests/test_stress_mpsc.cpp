@@ -100,7 +100,7 @@ TEST(StressTest, MultiProducerRuntimeEventBusContention) {
 
     using StressRuntime = corium::RuntimeBuilder
         ::WithEvents<StressEventVariant>
-        ::WithCapacity<16384>
+        ::WithCapacity<4096>
         ::WithOverflowPolicy<corium::AuditOverflowPolicy>
         ::Build;
 
