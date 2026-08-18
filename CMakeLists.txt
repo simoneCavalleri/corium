@@ -74,6 +74,7 @@ if(CORIUM_BUILD_TESTS)
         tests/test_json_log_sink.cpp
         tests/test_frame_pool.cpp
         tests/test_event_filtering.cpp
+        tests/test_embedded_adapters.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

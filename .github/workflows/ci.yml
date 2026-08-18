@@ -229,12 +229,56 @@ jobs:
             tests/*.cpp samples/*/main.cpp
 
   # ---------------------------------------------------------------------------
-  # 7. Automated GitHub Release on Git Tag
+  # 7. Bare-Metal ARM Embedded QEMU Matrix (Cortex-M3 / M4 / M7)
+  # ---------------------------------------------------------------------------
+  arm-baremetal-qemu:
+    name: "Bare-Metal ARM Cortex-M QEMU Emulation (${{ matrix.cpu }})"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cpu: "cortex-m3"
+            machine: "lm3s6965evb"
+            arch_flags: "-mcpu=cortex-m3 -mthumb"
+          - cpu: "cortex-m4"
+            machine: "mps2-an385"
+            arch_flags: "-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16"
+          - cpu: "cortex-m7"
+            machine: "mps2-an500"
+            arch_flags: "-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM GCC Toolchain and QEMU
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib \
+            qemu-system-arm
+
+      - name: Compile Bare-Metal ARM Firmware for ${{ matrix.cpu }}
+        run: |
+          arm-none-eabi-g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+            ${{ matrix.arch_flags }} \
+            -fno-rtti -fno-exceptions \
+            --specs=rdimon.specs \
+            -Iinclude \
+            tests/baremetal_arm/main.cpp -o corium_arm_${{ matrix.cpu }}.elf
+
+      - name: Execute Firmware via QEMU (${{ matrix.cpu }} on ${{ matrix.machine }})
+        run: |
+          qemu-system-arm -M ${{ matrix.machine }} -cpu ${{ matrix.cpu }} \
+            -nographic -semihosting -kernel corium_arm_${{ matrix.cpu }}.elf
+
+  # ---------------------------------------------------------------------------
+  # 8. Automated GitHub Release on Git Tag
   # ---------------------------------------------------------------------------
   release:
     name: "Publish GitHub Release"
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [matrix-build, address-sanitizers, thread-sanitizer, code-coverage, single-header-verification, documentation-quality, clang-tidy]
+    needs: [matrix-build, address-sanitizers, thread-sanitizer, code-coverage, single-header-verification, documentation-quality, clang-tidy, arm-baremetal-qemu]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
