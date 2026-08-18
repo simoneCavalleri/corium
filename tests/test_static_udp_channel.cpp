@@ -68,7 +68,7 @@ TEST(StaticUdpChannelTest, OpenBindSendAndReceiveEvent) {
 
     // Get bound port
     sockaddr_in sin{};
-    test_socklen_t len = static_cast<test_socklen_t>(sizeof(sin));
+    auto len = static_cast<test_socklen_t>(sizeof(sin));
 #if defined(_WIN32) || defined(_WIN64)
     ASSERT_EQ(getsockname(static_cast<SOCKET>(serverChannel.nativeHandle()), reinterpret_cast<sockaddr*>(&sin), &len), 0);
 #else

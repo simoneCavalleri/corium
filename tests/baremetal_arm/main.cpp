@@ -120,7 +120,7 @@ extern "C" {
 
     void HardFault_Handler() {
         printf("\n[ARM FAULT] HardFault exception triggered in QEMU!\n");
-        fflush(stdout);
+        static_cast<void>(fflush(stdout));
 #if defined(__arm__) || defined(__thumb__)
         register uint32_t r0 __asm__("r0") = 0x18; // SYS_EXIT
         register uint32_t r1 __asm__("r1") = 0x20024; // ADP_Stopped_RunTimeErrorUnknown
@@ -164,7 +164,7 @@ extern "C" {
 
         // 4. Execute application entry point
         int rc = run_baremetal_test();
-        fflush(stdout);
+        static_cast<void>(fflush(stdout));
 
         // 5. Cleanly exit QEMU via ARM Semihosting SYS_EXIT call
 #if defined(__arm__) || defined(__thumb__)
