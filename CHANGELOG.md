@@ -4,6 +4,47 @@ All notable changes to **Corium** are documented in this file in accordance with
 
 ---
 
+## [1.1.0] - 2026-08-18
+
+### Added
+- **Deterministic Record & Replay**:
+  - `corium::wire::EventJournalWriter`: Circular in-memory event journal recorder with schema hash validation and per-record CRC-16 checksums.
+  - `corium::wire::EventJournalReader`: Deterministic post-mortem event journal replay directly into any `EventSink`.
+- **Hardware Bus ISR Adapters**:
+  - `corium::embedded::SpiAdapter` / `SpiFrame`: Hardware SPI frame extraction and DMA/ISR event dispatching.
+  - `corium::embedded::I2cAdapter` / `I2cTransaction`: Hardware I²C transaction frame extraction and DMA/ISR event dispatching.
+  - `corium::embedded::CanAdapter` / `CanFdAdapter`: Native CAN 2.0B / CAN-FD frame parsing.
+  - `corium::embedded::DmaUartBuffer`: Lock-free circular DMA buffer for high-throughput UART serial streams.
+- **Low-Latency Network & Telemetry**:
+  - `corium::net::StaticUdpChannel`: Zero-copy static UDP datagram channel with `WirePacket` framing, `sendEvent()`, and `receiveAndPush()`.
+  - Master network umbrella header `corium/net/net.hpp`.
+- **Advanced Coroutine Synchronization**:
+  - `corium::async::Channel<T, Capacity>`: Bounded static async channel for coroutine producer-consumer message passing with compile-time backpressure suspension.
+  - `corium::async::AsyncSemaphore`: Counting async semaphore for non-blocking coroutine concurrency throttling.
+- **Observability & Prometheus Metrics**:
+  - `corium::profiler::Counter`: Zero-heap 64-bit atomic monotonically increasing event counter.
+  - `corium::profiler::Gauge`: Zero-heap 64-bit atomic instantaneous value metric.
+  - `corium::profiler::Histogram<NumBuckets>`: Zero-heap static bucketing latency distribution tracker.
+  - `corium::profiler::formatPrometheusCounter()` / `formatPrometheusGauge()`: Standard Prometheus text exposition formatters.
+- **Static Topic-Based Event Fan-Out**:
+  - `corium::EventRouter<EventVariant, MaxSubscribers, MaxTopics>`: Multi-subscriber publish/subscribe fan-out router with typed `subscribeEvent<Event>()` and `publishEvent()`.
+- **FSM Guard Conditions**:
+  - `corium::fsm::Transition<Source, Event, Target, Guard, Action>`: Compile-time predicate evaluation to conditionally allow or block state transitions.
+- **Documentation & Recipes**:
+  - Expanded `docs/COOKBOOK.md` to 16 comprehensive real-time recipes.
+  - Updated `docs/ARCHITECTURE.md` with new layered Mermaid diagrams and bare-metal memory footprint model.
+  - Updated Doxygen taxonomy `docs/groups.dox` with `@defgroup net`.
+
+### Fixed
+- **Bare-Metal ARM Cortex-M Startup**:
+  - Added `PROVIDE ( __end__ = . );` symbol in `linker.ld` for Newlib semihosting heap/stack initializers (`librdimon.a`).
+  - Added Cortex-M vector table `g_pfnVectors` and `Reset_Handler` startup routine.
+  - Refactored `main()` to avoid taking function pointer address under ISO C++ `-Wpedantic`.
+- **C++20 Coroutine Channel Awaiters**:
+  - Corrected `PushAwaiter` and `PopAwaiter` execution logic to perform non-suspending push/pop inside `await_ready()`.
+
+---
+
 ## [1.0.0] - 2026-08-18
 
 ### Added

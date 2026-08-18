@@ -15,6 +15,7 @@
  * - corium::BasicRuntime: Deterministic lifecycle and event pump coordinator.
  * - corium::BasicEventBus: Multi-producer single-consumer lock-free event bus.
  * - corium::BasicEventSink / corium::EventSinkT: Non-allocating type-erased fat pointer for thread-safe posting.
+ * - corium::EventRouter: Zero-heap static topic-based multi-subscriber publish/subscribe fan-out router.
  * - corium::BasicServiceRegistry: Fixed-capacity background service container.
  * - corium::Service / corium::BackgroundService: Managed worker threads using std::jthread.
  * - corium::ServiceContext: Thread-safe runtime injection context for services.
@@ -23,7 +24,7 @@
 
 /**
  * @defgroup embedded Embedded & Hardware ISR
- * @brief Bare-metal interrupt handlers, FreeRTOS integration, and hardware critical sections.
+ * @brief Bare-metal interrupt handlers, FreeRTOS integration, hardware bus adapters, and critical sections.
  * @details
  * Designed specifically for microcontrollers (ARM Cortex-M, ESP32, STM32, RP2040)
  * and real-time operating systems.
@@ -32,6 +33,10 @@
  * - corium::embedded::IsrEventSink: Safe non-blocking event posting from hardware ISRs.
  * - corium::embedded::FreeRtosIsrSink: FreeRTOS ISR sink managing task unblocking and context switching.
  * - corium::embedded::InterruptLock: Zero-overhead RAII critical section masking across ARM, ESP32, and host.
+ * - corium::embedded::SpiAdapter: Hardware SPI frame abstraction and DMA/ISR event adapter.
+ * - corium::embedded::I2cAdapter: Hardware I2C transaction frame abstraction and DMA/ISR event adapter.
+ * - corium::embedded::CanAdapter / corium::embedded::CanFdAdapter: CAN 2.0B / CAN-FD frame parsing and ISR posting.
+ * - corium::embedded::DmaUartBuffer: Lock-free circular DMA buffer for high-throughput UART event streams.
  */
 
 /**
@@ -54,7 +59,7 @@
  * Key components:
  * - corium::BoundedMpscQueuePolicy: Dmitry Vyukov's lock-free MPSC ring buffer algorithm.
  * - corium::PriorityMpscQueuePolicy: Multi-tier priority queueing (High, Normal, Low).
- * - corium::FixedStoragePolicy: FastDelegate SBO inline size and handler capacity.
+ * - corium::FixedStoragePolicy / corium::CompactStoragePolicy: FastDelegate SBO inline size and handler capacity.
  * - corium::DropNewestOverflowPolicy / corium::DropOldestOverflowPolicy / corium::AuditOverflowPolicy / corium::PanicOverflowPolicy: Queue saturation policies.
  * - corium::NoSignalPolicy / corium::ConditionVariableSignalPolicy: Thread wake-up strategies.
  */
@@ -73,12 +78,16 @@
 
 /**
  * @defgroup profiler Telemetry & Profiler
- * @brief Real-time latency tracking and circular in-memory flight recording.
+ * @brief Real-time latency tracking, atomic metrics, and circular in-memory flight recording.
  * @details
  * Key components:
  * - corium::profiler::FlightRecorder: Circular telemetry buffer capturing timestamps with zero heap allocation.
  * - corium::profiler::LatencyTracker: Real-time per-event latency statistics (min, max, average) with runtime enable/disable.
  * - corium::profiler::FlightRecorderProfiler: Combined flight recorder and latency tracking policy.
+ * - corium::profiler::Counter: Zero-heap 64-bit atomic monotonically increasing event counter.
+ * - corium::profiler::Gauge: Zero-heap 64-bit atomic instantaneous value metric.
+ * - corium::profiler::Histogram: Zero-heap static bucketing latency distribution tracker.
+ * - corium::profiler::formatPrometheusCounter / corium::profiler::formatPrometheusGauge: Prometheus exposition text exporter.
  * - corium::profiler::exportChromeTracingJson(): Google Chrome Tracing and Perfetto JSON visualizer exporter.
  */
 
@@ -95,13 +104,25 @@
  */
 
 /**
- * @defgroup wire Binary Wire Protocol
- * @brief CRC-16 validated binary packet framing and serialization over UART/CAN/TCP.
+ * @defgroup net Network & UDP Channels
+ * @brief Low-latency zero-copy UDP datagram sockets for distributed IoT and telemetry nodes.
+ * @details
+ * Key components:
+ * - corium::net::StaticUdpChannel: Bounded zero-heap UDP socket channel with WirePacket framing.
+ * - corium::net::StaticUdpChannel::sendEvent: Direct event serialization and transmission.
+ * - corium::net::StaticUdpChannel::receiveAndPush: Zero-copy reception and direct dispatching into an EventSink.
+ */
+
+/**
+ * @defgroup wire Binary Wire Protocol & Journal
+ * @brief CRC-16 validated binary packet framing, serialization, and deterministic event journaling.
  * @details
  * Key components:
  * - corium::wire::WireHeader: Packed protocol header with magic, schema version, type index, flags, and CRC.
  * - corium::wire::WirePacket: Fixed-size binary frame with header, payload, and CRC-16 checksum.
  * - corium::wire::WireSerializer: Type-safe serialization and direct event sink deserialization with version validation.
+ * - corium::wire::EventJournalWriter: Zero-heap circular event journal recorder with schema hash and CRC-16 per record.
+ * - corium::wire::EventJournalReader: Deterministic post-mortem event journal replay directly into EventSink.
  */
 
 /**
@@ -110,7 +131,7 @@
  * @details
  * Key components:
  * - corium::fsm::StateMachine: Zero-heap variant-based active state machine.
- * - corium::fsm::Transition: Declarative state transition rule with guards and actions.
+ * - corium::fsm::Transition: Declarative state transition rule with guard predicates and actions.
  * - corium::fsm::InternalTransition: In-place internal transition without onExit/onEnter overhead.
  * - corium::fsm::ActionList: Sequential composite action runner.
  * - corium::fsm::ShallowHistory: Pseudostate remembering previous state in composite groups.
@@ -118,11 +139,13 @@
  */
 
 /**
- * @defgroup async C++20 Coroutines
- * @brief Lightweight non-blocking async tasks with zero-heap resumption chaining.
+ * @defgroup async C++20 Coroutines & Channels
+ * @brief Lightweight non-blocking async tasks, channels, and synchronization primitives with zero-heap resumption chaining.
  * @details
  * Key components:
  * - corium::async::Task: C++20 lazy awaitable coroutine task.
+ * - corium::async::Channel: Bounded static async channel for coroutine producer-consumer message passing with backpressure.
+ * - corium::async::AsyncSemaphore: Counting async semaphore for concurrency throttling.
  * - corium::async::CancellationToken: Lock-free atomic cancellation token with whenCancelled() awaiter.
  * - corium::async::whenAll(): Non-blocking parallel task combinator (value & void).
  * - corium::async::whenAny(): Fastest-wins non-blocking task combinator.

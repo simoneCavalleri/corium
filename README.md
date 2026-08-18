@@ -74,9 +74,12 @@ flowchart TD
 ### Timers, Services & Safety
 - **Zero-Heap Timer Scheduler**: Schedule single-shot delayed events (`postDelayed()`) or recurring periodic events (`postPeriodic()`) with cancellation handles (`cancelTimer()`) using static fixed-capacity storage.
 - **Multi-Threaded Background Services**: Managed worker loops using C++20 `std::jthread` and `std::stop_token`, posting events concurrently with zero heap allocation.
-- **C++20 Coroutine Combinators**: Zero-heap asynchronous `Task<T>`, `whenAll()` parallel awaiter, `whenAny()` fastest-wins awaiter, atomic `CancellationToken`, and pull-based `Generator<T>` lazy sequences.
-- **Active FSM Engine**: Variant-based compile-time `StateMachine`, `InternalTransition` (in-place actions without state exit/entry overhead), composite `ActionList`, and `ShallowHistory`.
-- **Safety, Watchdogs & Profiling**: Hardware Watchdog supervision (`WatchdogSupervisor`), lock-free circuit breaker (`CircuitBreaker`), and circular in-memory flight recorder (`FlightRecorderProfiler`) with runtime `enable()`/`disable()` toggle exporting to Perfetto / Chrome Tracing.
+- **C++20 Coroutine Combinators & Channels**: Zero-heap asynchronous `Task<T>`, bounded async `Channel<T, Capacity>` with backpressure, counting `AsyncSemaphore`, parallel `whenAll()`, fastest-wins `whenAny()`, atomic `CancellationToken`, and pull-based `Generator<T>` lazy sequences.
+- **Active FSM Engine with Guard Conditions**: Variant-based compile-time `StateMachine`, predicate `Guard` conditions, `InternalTransition` (in-place actions without state exit/entry overhead), composite `ActionList`, and `ShallowHistory`.
+- **Safety, Watchdogs & Observability**: Hardware Watchdog supervision (`WatchdogSupervisor`), lock-free circuit breaker (`CircuitBreaker`), circular in-memory flight recorder (`FlightRecorderProfiler`) exporting to Chrome Tracing / Perfetto, and zero-heap atomic `Metrics` (`Counter`, `Gauge`, `Histogram`) with Prometheus text export.
+- **Deterministic Record & Replay**: Binary event journal (`EventJournalWriter` / `EventJournalReader`) with CRC-16 checksums and schema validation for black-box telemetry recording.
+- **Embedded Bus & Network Adapters**: Hardware ISR adapters for SPI (`SpiAdapter`), I²C (`I2cAdapter`), CAN/CAN-FD (`CanAdapter`), DMA UART (`DmaUartBuffer`), and zero-copy UDP datagrams (`StaticUdpChannel`).
+- **Static Topic-Based Event Router**: Multi-subscriber publish/subscribe fan-out dispatcher (`EventRouter`) with zero heap allocation.
 - **Zero-Heap Structured Logging**: Fast structured zero-heap logging sinks including ANSI console, file, and structured JSON Lines (`JsonLogSink`).
 
 ---
@@ -85,8 +88,8 @@ flowchart TD
 
 | Guide | Description |
 | :--- | :--- |
-| 🏗️ [**Architecture Guide**](docs/ARCHITECTURE.md) | In-depth design philosophy, layer breakdown, lock-free queue mechanics, and module topology. |
-| 🍳 [**Cookbook & Patterns**](docs/COOKBOOK.md) | 8 battle-tested design patterns (Request-Response, Parallel Coroutines, FSM, JSON Logging, Zero-Copy IPC, Periodic Sampling, Circuit Breakers, Flight Recorder). |
+| 🏗️ [**Architecture Guide**](docs/ARCHITECTURE.md) | In-depth design philosophy, layer breakdown, lock-free queue mechanics, embedded footprint model, and module topology. |
+| 🍳 [**Cookbook & Patterns**](docs/COOKBOOK.md) | 16 battle-tested design patterns (Request-Response, Parallel Coroutines, FSM Guards, JSON Logging, Zero-Copy IPC, Periodic Sampling, Circuit Breakers, Flight Recorder, Event Journal, SPI/I2C ISR, UDP Telemetry, Async Channels, Async Semaphore, Prometheus Metrics, EventRouter). |
 | 🔄 [**Migration Guide**](docs/MIGRATION.md) | Transitioning from `std::function`, thread pools, `boost::asio`, or `boost::sml` to Corium. |
 | ❓ [**Frequently Asked Questions (FAQ)**](docs/FAQ.md) | Answers to common architecture, capacity sizing, and bare-metal embedded questions. |
 | 🛠️ [**Contributing Guidelines**](CONTRIBUTING.md) | Code standards, zero-heap verification, testing workflows, and commit conventions. |
@@ -102,13 +105,18 @@ flowchart TD
 | **Dispatch Mechanism** | **CRTP Static Polymorphism & FastDelegate** | Virtual Tables (`override`) & RTTI |
 | **Thread Safety** | **Lock-Free MPSC** (Signal & ISR Safe) | Mutex Locks & Condition Variables |
 | **Interrupt Safety (ISR)** | **100% Safe** (Lock-Free `IsrEventSink` / `FreeRtosIsrSink`) | Unsafe (Locks can deadlock ISR) |
+| **Hardware Bus Adapters** | **Native SPI, I2C, CAN-FD, DMA UART Adapters** | Custom wrapper code with dynamic buffers |
+| **Network & Telemetry** | **Zero-Copy UDP Datagrams (`StaticUdpChannel`)** | Socket libraries requiring dynamic buffers |
 | **Hardware Clock Policies** | **Customizable Clock Sources** (Microsecond, Millisecond, ESP32, FreeRTOS, Manual) | Hardcoded `std::chrono::steady_clock` |
 | **Priority Channels** | **Strict Multi-RingBuffer Priority Draining** | Dynamic Sorting / Heap Priority Queues |
 | **Timer Scheduling** | **Zero-Heap Static Scheduler** | Dynamic Heap Timer Wheels / Heap Min-Heaps |
-| **Async Coroutines** | **Zero-Heap Tasks, WhenAll, WhenAny, CancellationToken, Generator** | Dynamic Coroutine Frame Allocations / Heap Callbacks |
-| **Finite State Machine** | **Compile-Time Table, Internal Transitions, ActionList, History** | Dynamic Virtual State Objects / Heap Transitions |
+| **Async Coroutines** | **Zero-Heap Tasks, Channels, Semaphore, WhenAll, WhenAny, Generator** | Dynamic Coroutine Frame Allocations / Heap Callbacks |
+| **Finite State Machine** | **Compile-Time Table, Guards, Internal Transitions, ActionList, History** | Dynamic Virtual State Objects / Heap Transitions |
+| **Observability & Metrics** | **Prometheus Counters/Gauges/Histograms & Chrome Tracing JSON** | External dynamic metric libraries |
+| **Record & Replay** | **Deterministic CRC-16 Event Journal (`EventJournalWriter/Reader`)** | Ad-hoc text logging without byte integrity |
+| **Publish/Subscribe Routing**| **Topic-Based Static Fan-Out (`EventRouter`)** | Dynamic subscriber lists with `std::vector` |
 | **Structured Logging** | **Zero-Heap ANSI, File, and JSON Lines (NDJSON)** | Heap-allocated string streams / formatting buffers |
-| **Bare-Metal Support** | **Full Support** (`-fno-rtti -fno-exceptions`) | Poor / Requires Heap & RTTI |
+| **Bare-Metal Support** | **Full Support** (`-fno-rtti -fno-exceptions`, <1KB RAM, ~4-8KB Flash) | Poor / Requires Heap & RTTI |
 
 ---
 

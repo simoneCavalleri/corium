@@ -244,3 +244,249 @@ ProfiledRuntime runtime;
 std::ofstream traceFile("benchmark_trace.json");
 runtime.profiler().exportChromeTracingJson(traceFile);
 ```
+
+---
+
+## 9. Deterministic Event Journaling & Post-Mortem Replay
+
+Record binary event streams with CRC-16 validation and schema hashing for deterministic black-box post-mortem replay.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/wire/EventJournal.hpp>
+#include <array>
+
+struct SensorSample { uint32_t sensorId; float value; };
+using FlightEvents = std::variant<corium::QuitEvent, SensorSample>;
+
+// 1. Record events into static memory buffer (e.g. battery-backed SRAM / Flash)
+std::array<std::byte, 4096> journalStorage{};
+corium::wire::EventJournalWriter<FlightEvents> writer(journalStorage);
+
+writer.record(SensorSample{.sensorId = 1, .value = 101.3f});
+writer.record(SensorSample{.sensorId = 2, .value = 24.5f});
+
+// 2. Replay recorded journal deterministically into a live runtime EventSink
+corium::BasicRuntime<FlightEvents> runtime;
+corium::wire::EventJournalReader<FlightEvents> reader(journalStorage);
+
+size_t replayed = reader.replayInto(runtime.eventSink());
+runtime.pump(); // Dispatches all 2 recorded events with exact payload integrity!
+```
+
+---
+
+## 10. Hardware SPI & I2C Sensor Ingestion from ISRs
+
+Ingest high-rate sensor transactions from hardware DMA interrupts into Corium's event bus with zero heap allocations.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/embedded/SpiAdapter.hpp>
+#include <corium/embedded/I2cAdapter.hpp>
+
+struct ImuSampleEvent { int16_t accelX, accelY, accelZ; };
+using EcuEvents = std::variant<corium::QuitEvent, ImuSampleEvent>;
+
+corium::BasicRuntime<EcuEvents> runtime;
+
+// Ingest from SPI DMA completion ISR:
+void SPI1_DMA_IRQHandler() {
+    corium::embedded::SpiFrame<6> rawFrame{};
+    // Read 6 bytes of accelerometer registers from SPI Rx DMA buffer...
+    rawFrame.data = {0x01, 0x00, 0x02, 0x00, 0x03, 0x00};
+
+    auto imuEvent = ImuSampleEvent{
+        .accelX = static_cast<int16_t>(rawFrame.data[0] | (rawFrame.data[1] << 8)),
+        .accelY = static_cast<int16_t>(rawFrame.data[2] | (rawFrame.data[3] << 8)),
+        .accelZ = static_cast<int16_t>(rawFrame.data[4] | (rawFrame.data[5] << 8))
+    };
+
+    runtime.isrSink().postFromIsr(imuEvent, corium::EventPriority::High);
+}
+```
+
+---
+
+## 11. Low-Latency Zero-Copy UDP Telemetry Streaming
+
+Send and receive framed event datagrams over Ethernet/Wi-Fi without dynamic memory allocations.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/net/StaticUdpChannel.hpp>
+
+struct DroneTelemetry { float altitude; float batteryVoltage; };
+using DroneEvents = std::variant<corium::QuitEvent, DroneTelemetry>;
+
+// Sender node (e.g. Ground Control Station):
+corium::net::StaticUdpChannel<DroneEvents> udpSender;
+udpSender.open();
+udpSender.sendEvent("192.168.1.50", 9000, DroneTelemetry{.altitude = 120.5f, .batteryVoltage = 15.8f});
+
+// Receiver node (e.g. On-Board Companion Computer):
+corium::BasicRuntime<DroneEvents> runtime;
+corium::net::StaticUdpChannel<DroneEvents> udpReceiver;
+udpReceiver.bind(9000);
+
+// In main event loop: receive and push directly into runtime sink
+udpReceiver.receiveAndPush(runtime.eventSink());
+runtime.pump();
+```
+
+---
+
+## 12. Bounded Producer-Consumer Pipeline with Async Channel & Backpressure
+
+Pass typed messages between asynchronous C++20 coroutines with compile-time backpressure.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/async/Channel.hpp>
+
+// Create a static bounded channel with capacity of 8 items
+corium::async::Channel<int, 8> dataChannel;
+
+corium::async::Task<void> producer() {
+    for (int i = 1; i <= 10; ++i) {
+        // Suspends automatically if channel is full (backpressure)
+        co_await dataChannel.push(i * 100);
+    }
+    dataChannel.close();
+}
+
+corium::async::Task<void> consumer() {
+    while (true) {
+        // Suspends automatically if channel is empty
+        auto val = co_await dataChannel.pop();
+        if (!val.has_value()) {
+            break; // Channel closed and drained
+        }
+        std::cout << "Received: " << *val << "\n";
+    }
+}
+```
+
+---
+
+## 13. Concurrency Throttling with Async Counting Semaphore
+
+Limit the number of concurrent asynchronous operations without thread blocking.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/async/Semaphore.hpp>
+
+// Allow maximum 2 concurrent flash write operations
+corium::async::AsyncSemaphore flashWriteSemaphore(2);
+
+corium::async::Task<void> flashWriter(int workerId) {
+    co_await flashWriteSemaphore.acquire(); // Suspend until permit available
+
+    std::cout << "Worker " << workerId << " writing to Flash...\n";
+    co_await corium::async::yield();
+
+    flashWriteSemaphore.release(); // Return permit to other waiting coroutines
+}
+```
+
+---
+
+## 14. Zero-Heap Prometheus Metrics Exporter
+
+Instrument real-time embedded applications with atomic counters, gauges, and histograms, exporting directly to Prometheus format.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/profiler/Metrics.hpp>
+#include <array>
+#include <iostream>
+
+// Define static zero-heap metrics
+corium::profiler::Counter rxPackets("rx_packets_total", "Total network packets received");
+corium::profiler::Gauge activeSessions("active_sessions", "Active client connections");
+
+void onPacketReceived() {
+    rxPackets.increment();
+    activeSessions.set(5);
+}
+
+void handleMetricsHttpEndpoint() {
+    std::array<char, 512> buffer{};
+    size_t len = corium::profiler::formatPrometheusCounter(rxPackets, buffer);
+    std::cout.write(buffer.data(), len);
+    // Output:
+    // # HELP rx_packets_total Total network packets received
+    // # TYPE rx_packets_total counter
+    // rx_packets_total 1
+}
+```
+
+---
+
+## 15. Static Topic-Based Multi-Subscriber Event Fan-Out
+
+Distribute events across multiple decoupled subscribers partitioned by Topic ID without dynamic memory allocation.
+
+```cpp
+#include <corium/corium.hpp>
+#include <corium/EventRouter.hpp>
+
+struct RadarTrack { uint32_t targetId; float rangeMeters; };
+using SystemEvents = std::variant<corium::QuitEvent, RadarTrack>;
+
+corium::EventRouter<SystemEvents, /* MaxSubscribersPerTopic = */ 4, /* MaxTopics = */ 8> router;
+
+// Subscribe Collision Avoidance module to Topic 101 (Radar Stream)
+router.subscribeEvent<RadarTrack>(101, [](const RadarTrack& track) {
+    if (track.rangeMeters < 50.0f) {
+        std::cout << "Collision Warning for Target " << track.targetId << "!\n";
+    }
+});
+
+// Subscribe Mission Logger to Topic 101
+router.subscribeEvent<RadarTrack>(101, [](const RadarTrack& track) {
+    std::cout << "Logging Target " << track.targetId << "\n";
+});
+
+// Publish track event to Topic 101 (fans out to all 2 subscribers)
+router.publishEvent(101, RadarTrack{.targetId = 42, .rangeMeters = 35.0f});
+```
+
+---
+
+## 16. Guarded FSM State Transitions with Safety Predicates
+
+Conditionally permit or reject state transitions using compile-time guard predicates.
+
+```cpp
+#include <corium/fsm/fsm.hpp>
+
+struct IdleState {};
+struct ArmedState {};
+
+struct ArmCommand { bool keyInserted; int batteryPct; };
+
+// Guard predicate evaluated before transition
+struct PreFlightSafetyGuard {
+    bool operator()(const IdleState&, const ArmCommand& cmd) const noexcept {
+        return cmd.keyInserted && cmd.batteryPct > 20;
+    }
+};
+
+using SecureDroneTable = corium::fsm::TransitionTable<
+    corium::fsm::Transition<IdleState, ArmCommand, ArmedState, PreFlightSafetyGuard>
+>;
+
+corium::fsm::StateMachine<SecureDroneTable, IdleState, ArmedState> fsm;
+
+void tryArm() {
+    // Rejected by guard (battery too low) -> Remains in IdleState
+    fsm.process_event(ArmCommand{.keyInserted = true, .batteryPct = 10});
+    assert(fsm.is<IdleState>());
+
+    // Accepted by guard -> Transitions to ArmedState
+    fsm.process_event(ArmCommand{.keyInserted = true, .batteryPct = 95});
+    assert(fsm.is<ArmedState>());
+}
+```
