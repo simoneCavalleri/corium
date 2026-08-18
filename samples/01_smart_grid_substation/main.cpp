@@ -14,11 +14,7 @@
 #include <thread>
 #include <variant>
 
-#include "corium/Application.hpp"
-#include "corium/BackgroundService.hpp"
-#include "corium/Runtime.hpp"
-#include "corium/async/Task.hpp"
-#include "corium/async/Delay.hpp"
+#include "corium/corium.hpp"
 
 // -----------------------------------------------------------------------------
 // 1. Strongly-Typed Telemetry & Domain Events

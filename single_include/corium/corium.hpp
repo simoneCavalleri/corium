@@ -5356,11 +5356,466 @@ private:
  */
 
 
-#include "corium/embedded/InterruptLock.hpp" // IWYU pragma: export
-#include "corium/embedded/IsrSink.hpp"       // IWYU pragma: export
-#include "corium/embedded/FreeRtos.hpp"      // IWYU pragma: export
-#include "corium/embedded/CanAdapter.hpp"    // IWYU pragma: export
-#include "corium/embedded/DmaUartAdapter.hpp" // IWYU pragma: export
+
+// >>> Begin: corium/embedded/InterruptLock.hpp
+/**
+ * @file InterruptLock.hpp
+ * @ingroup embedded
+ * @brief Zero-overhead RAII critical section masking across ARM, ESP32, and host.
+ */
+
+
+#include <cstdint>
+
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+#define CORIUM_HAS_ESP32_CRITICAL 1
+#elif defined(__arm__) || defined(__thumb__)
+#if __has_include(<cmsis_compiler.h>)
+#include <cmsis_compiler.h>
+#define CORIUM_HAS_ARM_CMSIS 1
+#endif
+#endif
+
+namespace corium::embedded {
+
+/// @ingroup embedded
+/// @brief RAII interrupt locking helper disabling interrupts upon construction and restoring them upon destruction.
+class InterruptLock {
+public:
+    InterruptLock() noexcept
+    {
+        lock();
+    }
+
+    ~InterruptLock() noexcept
+    {
+        unlock();
+    }
+
+    InterruptLock(const InterruptLock&) = delete;
+    InterruptLock& operator=(const InterruptLock&) = delete;
+
+    InterruptLock(InterruptLock&&) = delete;
+    InterruptLock& operator=(InterruptLock&&) = delete;
+
+    void lock() noexcept
+    {
+        if (!_locked) {
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+            portENTER_CRITICAL(&_mux);
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+            _primask = __get_PRIMASK();
+            __disable_irq();
+#endif
+            _locked = true;
+        }
+    }
+
+    void unlock() noexcept
+    {
+        if (_locked) {
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+            portEXIT_CRITICAL(&_mux);
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+            __set_PRIMASK(_primask);
+#endif
+            _locked = false;
+        }
+    }
+
+    [[nodiscard]] bool isLocked() const noexcept
+    {
+        return _locked;
+    }
+
+private:
+    bool _locked = false;
+#if defined(CORIUM_HAS_ESP32_CRITICAL)
+    static inline portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
+#elif defined(CORIUM_HAS_ARM_CMSIS)
+    uint32_t _primask = 0;
+#endif
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/InterruptLock.hpp
+
+// >>> Begin: corium/embedded/IsrSink.hpp
+/**
+ * @file IsrSink.hpp
+ * @ingroup embedded
+ * @brief Safe non-blocking event posting handle for hardware interrupt service routines.
+ */
+
+
+#include <utility>
+
+namespace corium::embedded {
+
+/// @ingroup embedded
+/// @brief Lightweight, zero-overhead wrapper around EventSink explicitly tailored for Hardware ISR handlers.
+/// Guarantees zero heap allocation, lock-free execution, and noexcept exception safety.
+/// @tparam EventSinkType Target underlying event sink type.
+template <typename EventSinkType>
+class IsrEventSink {
+public:
+    constexpr IsrEventSink() noexcept = default;
+
+    constexpr explicit IsrEventSink(EventSinkType sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Post an event safely from hardware ISR context.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance to post.
+    /// @param priority Priority level (High, Normal, Low).
+    template <typename Event>
+    void postFromIsr(Event&& event, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+    }
+
+    /// @brief Post a high-priority emergency or hardware interrupt event from ISR context.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance to post.
+    template <typename Event>
+    void postHighPriorityFromIsr(Event&& event) noexcept
+    {
+        _sink.postHighPriority(std::forward<Event>(event));
+    }
+
+    /// @brief Post an event from ISR context.
+    template <typename Event>
+    void tryPostFromIsr(Event&& event, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+    }
+
+    /// @brief Access underlying EventSink handle.
+    [[nodiscard]] constexpr EventSinkType& sink() noexcept
+    {
+        return _sink;
+    }
+
+    [[nodiscard]] constexpr const EventSinkType& sink() const noexcept
+    {
+        return _sink;
+    }
+
+private:
+    EventSinkType _sink{};
+};
+
+/// @brief Helper function to construct an IsrEventSink from an EventSink handle.
+template <typename EventSinkType>
+[[nodiscard]] constexpr auto makeIsrSink(EventSinkType sink) noexcept
+{
+    return IsrEventSink<EventSinkType>(sink);
+}
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/IsrSink.hpp
+
+// >>> Begin: corium/embedded/FreeRtos.hpp
+/**
+ * @file FreeRtos.hpp
+ * @ingroup embedded
+ * @brief FreeRTOS ISR event sink and hardware context-switching helpers.
+ */
+
+
+#include <utility>
+
+#if defined(FREERTOS) || defined(INC_FREERTOS_H) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#define CORIUM_HAS_FREERTOS_INCLUDES 1
+#else
+// Mock definitions for host build and desktop testing
+using BaseType_t = long;
+#define pdTRUE 1
+#define pdFALSE 0
+#define portYIELD_FROM_ISR(x) ((void)(x))
+#endif
+
+namespace corium::embedded {
+
+/// @ingroup embedded
+/// @brief FreeRTOS-specialized ISR sink managing RTOS task context switches.
+/// @tparam EventSinkType Target underlying event sink.
+template <typename EventSinkType>
+class FreeRtosIsrSink {
+public:
+    constexpr FreeRtosIsrSink() noexcept = default;
+
+    constexpr explicit FreeRtosIsrSink(EventSinkType sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Post event from FreeRTOS ISR and track if context switch is needed.
+    /// @tparam Event Concrete event type.
+    /// @param event Event instance.
+    /// @param pxHigherPriorityTaskWoken Pointer to FreeRTOS task unblocking flag.
+    /// @param priority Event priority level.
+    template <typename Event>
+    void postFromIsr(Event&& event, BaseType_t* pxHigherPriorityTaskWoken = nullptr, EventPriority priority = EventPriority::Normal) noexcept
+    {
+        _sink.post(std::forward<Event>(event), priority);
+        if (pxHigherPriorityTaskWoken) {
+            *pxHigherPriorityTaskWoken = pdTRUE;
+        }
+    }
+
+    /// @brief Post high priority event from FreeRTOS ISR and track context switch.
+    template <typename Event>
+    void postHighPriorityFromIsr(Event&& event, BaseType_t* pxHigherPriorityTaskWoken = nullptr) noexcept
+    {
+        _sink.postHighPriority(std::forward<Event>(event));
+        if (pxHigherPriorityTaskWoken) {
+            *pxHigherPriorityTaskWoken = pdTRUE;
+        }
+    }
+
+    /// @brief Yield to higher priority unblocked task if flag was set.
+    static void yieldFromIsr(BaseType_t xHigherPriorityTaskWoken) noexcept
+    {
+        if (xHigherPriorityTaskWoken == pdTRUE) {
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
+    }
+
+    /// @brief Access underlying sink handle.
+    [[nodiscard]] constexpr EventSinkType& sink() noexcept { return _sink; }
+    [[nodiscard]] constexpr const EventSinkType& sink() const noexcept { return _sink; }
+
+private:
+    EventSinkType _sink{};
+};
+
+/// @brief Helper function to construct FreeRtosIsrSink from an event sink handle.
+template <typename EventSinkType>
+[[nodiscard]] constexpr auto makeFreeRtosIsrSink(EventSinkType sink) noexcept
+{
+    return FreeRtosIsrSink<EventSinkType>(sink);
+}
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/FreeRtos.hpp
+
+// >>> Begin: corium/embedded/CanAdapter.hpp
+/**
+ * @file CanAdapter.hpp
+ * @ingroup embedded
+ * @brief Zero-heap CAN 2.0B and CAN-FD hardware ISR adapter for STM32 FDCAN, ESP32 TWAI, and CMSIS.
+ */
+
+
+#include <array>
+#include <cstdint>
+#include <span>
+
+
+namespace corium::embedded {
+
+/// @brief Standard CAN 2.0B classic frame structure (up to 8 bytes payload).
+struct CanFrame {
+    uint32_t id{0};               ///< 11-bit standard or 29-bit extended identifier
+    uint8_t dlc{0};               ///< Data Length Code (0..8)
+    bool isExtended{false};       ///< True if 29-bit extended ID
+    bool isRtr{false};            ///< Remote Transmission Request flag
+    std::array<uint8_t, 8> data{}; ///< Payload bytes
+
+    [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
+        return {data.data(), static_cast<std::size_t>(dlc > 8 ? 8 : dlc)};
+    }
+};
+
+/// @brief ISO 11898-1:2015 CAN-FD flexible data-rate frame structure (up to 64 bytes payload).
+struct CanFdFrame {
+    uint32_t id{0};                ///< 11-bit standard or 29-bit extended identifier
+    uint8_t len{0};                ///< Data length in bytes (0..64)
+    bool isExtended{false};        ///< True if 29-bit extended ID
+    bool bitRateSwitch{false};     ///< BRS: Bit Rate Switch flag
+    bool errorStateIndicator{false}; ///< ESI: Error State Indicator flag
+    std::array<uint8_t, 64> data{}; ///< Payload bytes (up to 64B)
+
+    [[nodiscard]] std::span<const uint8_t> payload() const noexcept {
+        return {data.data(), static_cast<std::size_t>(len > 64 ? 64 : len)};
+    }
+};
+
+/// @ingroup embedded
+/// @brief Non-blocking hardware ISR adapter for CAN/CAN-FD controller interrupts.
+/// Ingests hardware mailbox/FIFO frames inside ISR and posts into Corium lock-free ring buffer.
+template <typename EventVariant>
+class CanIsrAdapter {
+public:
+    explicit CanIsrAdapter(EventSinkT<EventVariant> sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Ingest standard CAN frame from hardware interrupt (e.g. STM32 CAN_RX_IRQHandler).
+    /// @tparam TargetEvent User-defined event type constructible from CanFrame.
+    /// @param frame Raw hardware CAN frame.
+    /// @param priority Priority to assign (default Normal, High for emergency/E-Stop).
+    template <typename TargetEvent = CanFrame>
+    void postFromIsr(const CanFrame& frame, EventPriority priority = EventPriority::Normal) noexcept {
+        if constexpr (std::is_same_v<TargetEvent, CanFrame>) {
+            _sink.post(EventVariant{frame}, priority);
+        } else {
+            _sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+    /// @brief Ingest high-speed CAN-FD frame from hardware interrupt (e.g. STM32 FDCAN1_IT0_IRQHandler).
+    /// @tparam TargetEvent User-defined event type constructible from CanFdFrame.
+    /// @param frame Raw hardware CAN-FD frame.
+    /// @param priority Priority to assign.
+    template <typename TargetEvent = CanFdFrame>
+    void postFromIsr(const CanFdFrame& frame, EventPriority priority = EventPriority::Normal) noexcept {
+        if constexpr (std::is_same_v<TargetEvent, CanFdFrame>) {
+            _sink.post(EventVariant{frame}, priority);
+        } else {
+            _sink.post(EventVariant{TargetEvent{frame}}, priority);
+        }
+    }
+
+private:
+    EventSinkT<EventVariant> _sink;
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/CanAdapter.hpp
+
+// >>> Begin: corium/embedded/DmaUartAdapter.hpp
+/**
+ * @file DmaUartAdapter.hpp
+ * @ingroup embedded
+ * @brief Zero-copy circular DMA UART receiver adapter for STM32, ESP32, and bare-metal UART ISRs.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+
+namespace corium::embedded {
+
+/// @brief Statically-allocated circular DMA UART RX buffer.
+/// @tparam BufferSize Circular buffer capacity in bytes (must be power of two).
+template <std::size_t BufferSize = 512>
+class DmaUartRxBuffer {
+    static_assert((BufferSize & (BufferSize - 1)) == 0, "BufferSize must be a power of two.");
+
+public:
+    constexpr DmaUartRxBuffer() = default;
+
+    /// @brief Direct pointer to raw memory buffer for DMA peripheral configuration (e.g. HAL_UART_Receive_DMA).
+    [[nodiscard]] uint8_t* dmaBuffer() noexcept {
+        return _buffer.data();
+    }
+
+    /// @brief Const pointer to raw memory buffer.
+    [[nodiscard]] const uint8_t* dmaBuffer() const noexcept {
+        return _buffer.data();
+    }
+
+    /// @brief Capacity of circular DMA buffer in bytes.
+    [[nodiscard]] static constexpr std::size_t capacity() noexcept {
+        return BufferSize;
+    }
+
+    /// @brief Update tail position based on hardware DMA counter and extract available bytes.
+    /// Typically invoked from UART Idle Line ISR or DMA Half/Full Transfer ISR.
+    /// @param currentDmaWriteIndex Current hardware DMA write index (e.g. BufferSize - __HAL_DMA_GET_COUNTER(hdma)).
+    /// @param onPacket Extracted byte span callback: void(std::span<const uint8_t> data).
+    template <typename Callback>
+    void processAvailableBytes(std::size_t currentDmaWriteIndex, Callback&& onPacket) {
+        currentDmaWriteIndex = currentDmaWriteIndex & (BufferSize - 1);
+
+        if (currentDmaWriteIndex == _tail) {
+            return; // No new bytes received
+        }
+
+        if (currentDmaWriteIndex > _tail) {
+            // Contiguous slice
+            std::size_t len = currentDmaWriteIndex - _tail;
+            onPacket(std::span<const uint8_t>(_buffer.data() + _tail, len));
+            _tail = currentDmaWriteIndex;
+        } else {
+            // Wrapped around circular buffer
+            std::size_t firstPart = BufferSize - _tail;
+            if (firstPart > 0) {
+                onPacket(std::span<const uint8_t>(_buffer.data() + _tail, firstPart));
+            }
+            if (currentDmaWriteIndex > 0) {
+                onPacket(std::span<const uint8_t>(_buffer.data(), currentDmaWriteIndex));
+            }
+            _tail = currentDmaWriteIndex;
+        }
+    }
+
+    /// @brief Reset circular tail index.
+    void reset() noexcept {
+        _tail = 0;
+    }
+
+    /// @brief Current tail index in the circular buffer.
+    [[nodiscard]] std::size_t tail() const noexcept {
+        return _tail;
+    }
+
+private:
+    alignas(4) std::array<uint8_t, BufferSize> _buffer{};
+    std::size_t _tail{0};
+};
+
+/// @ingroup embedded
+/// @brief Non-blocking hardware ISR adapter for DMA UART controllers.
+template <typename EventVariant, std::size_t BufferSize = 512>
+class DmaUartAdapter {
+public:
+    explicit DmaUartAdapter(EventSinkT<EventVariant> sink) noexcept
+        : _sink(sink)
+    {}
+
+    /// @brief Access underlying circular DMA RX buffer.
+    [[nodiscard]] DmaUartRxBuffer<BufferSize>& rxBuffer() noexcept {
+        return _rxBuffer;
+    }
+
+    /// @brief Access const circular DMA RX buffer.
+    [[nodiscard]] const DmaUartRxBuffer<BufferSize>& rxBuffer() const noexcept {
+        return _rxBuffer;
+    }
+
+    /// @brief Process newly received DMA bytes and post constructed event into sink.
+    /// @tparam TargetEvent User event constructible from std::span<const uint8_t>.
+    /// @param currentDmaWriteIndex Hardware DMA write pointer position.
+    /// @param priority Priority to assign to generated events.
+    template <typename TargetEvent>
+    void processFromIsr(std::size_t currentDmaWriteIndex, EventPriority priority = EventPriority::Normal) {
+        _rxBuffer.processAvailableBytes(currentDmaWriteIndex, [this, priority](std::span<const uint8_t> data) {
+            _sink.post(EventVariant{TargetEvent{data}}, priority);
+        });
+    }
+
+private:
+    EventSinkT<EventVariant> _sink;
+    DmaUartRxBuffer<BufferSize> _rxBuffer{};
+};
+
+} // namespace corium::embedded
+
+// <<< End: corium/embedded/DmaUartAdapter.hpp
 
 // <<< End: corium/embedded/embedded.hpp
 
@@ -5698,14 +6153,1019 @@ private:
  */
 
 
-#include "corium/async/FramePool.hpp"        // IWYU pragma: export
-#include "corium/async/Task.hpp"             // IWYU pragma: export
-#include "corium/async/Delay.hpp"            // IWYU pragma: export
-#include "corium/async/CancellationToken.hpp" // IWYU pragma: export
-#include "corium/async/WhenAll.hpp"          // IWYU pragma: export
-#include "corium/async/WhenAny.hpp"          // IWYU pragma: export
-#include "corium/async/Generator.hpp"        // IWYU pragma: export
-#include "corium/async/AsyncEvent.hpp"       // IWYU pragma: export
+
+// >>> Begin: corium/async/FramePool.hpp
+/**
+ * @file FramePool.hpp
+ * @ingroup async
+ * @brief Zero-heap static coroutine frame pool and frame allocator policies.
+ */
+
+
+#include <array>
+#include <cstddef>
+#include <new>
+
+namespace corium::async {
+
+/// @brief Default heap allocator policy for C++20 coroutine frames (HALO-eligible).
+struct HeapFrameAllocator {
+    [[nodiscard]] static void* allocate(std::size_t size) {
+        return ::operator new(size);
+    }
+
+    static void deallocate(void* ptr, [[maybe_unused]] std::size_t size) noexcept {
+        ::operator delete(ptr);
+    }
+};
+
+/// @ingroup async
+/// @brief Statically-allocated fixed-capacity memory pool for coroutine state frames.
+/// Eliminates heap allocations and guarantees deterministic O(1) coroutine frame allocation.
+/// @tparam MaxFrames Maximum number of concurrent active coroutine frames.
+/// @tparam FrameSize Maximum size in bytes reserved for each coroutine frame.
+template <std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+class StaticFramePool {
+public:
+    static constexpr std::size_t max_frames = MaxFrames;
+    static constexpr std::size_t frame_size = FrameSize;
+
+    struct alignas(std::max_align_t) Slot {
+        std::byte storage[FrameSize];
+        bool inUse{false};
+    };
+
+    [[nodiscard]] static void* allocate(std::size_t size) noexcept {
+        if (size > FrameSize) {
+            return nullptr;
+        }
+
+        for (auto& slot : _slots) {
+            if (!slot.inUse) {
+                slot.inUse = true;
+                return static_cast<void*>(slot.storage);
+            }
+        }
+        return nullptr; // Pool exhausted
+    }
+
+    static void deallocate(void* ptr, std::size_t /*size*/) noexcept {
+        if (!ptr) {
+            return;
+        }
+
+        for (auto& slot : _slots) {
+            if (static_cast<void*>(slot.storage) == ptr) {
+                slot.inUse = false;
+                return;
+            }
+        }
+    }
+
+    /// @brief Number of active frames currently allocated from the pool.
+    [[nodiscard]] static std::size_t activeCount() noexcept {
+        std::size_t count = 0;
+        for (const auto& slot : _slots) {
+            if (slot.inUse) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /// @brief Reset all pool slots to available state.
+    static void reset() noexcept {
+        for (auto& slot : _slots) {
+            slot.inUse = false;
+        }
+    }
+
+private:
+    static inline std::array<Slot, MaxFrames> _slots{};
+};
+
+/// @brief Allocator policy adapter wrapping a StaticFramePool.
+template <std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+struct StaticFrameAllocator {
+    using Pool = StaticFramePool<MaxFrames, FrameSize>;
+
+    [[nodiscard]] static void* allocate(std::size_t size) {
+        void* ptr = Pool::allocate(size);
+        if (!ptr) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            throw std::bad_alloc();
+#else
+            return nullptr;
+#endif
+        }
+        return ptr;
+    }
+
+    static void deallocate(void* ptr, std::size_t size) noexcept {
+        Pool::deallocate(ptr, size);
+    }
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/FramePool.hpp
+
+// >>> Begin: corium/async/Task.hpp
+/**
+ * @file Task.hpp
+ * @ingroup async
+ * @brief Lazy awaitable C++20 coroutine task with zero dynamic heap allocation.
+ */
+
+
+#include <coroutine>
+#include <exception>
+#include <utility>
+
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining and configurable frame allocator.
+/// @tparam T Result type returned by the coroutine (defaults to void).
+/// @tparam Allocator Frame allocation policy (HeapFrameAllocator default or StaticFrameAllocator).
+template <typename T = void, typename Allocator = HeapFrameAllocator>
+class Task {
+public:
+    using ValueType = T;
+    using AllocatorType = Allocator;
+
+    struct promise_type {
+        std::coroutine_handle<> continuation{nullptr};
+        T value{};
+        std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
+
+        Task get_return_object() noexcept {
+            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+
+        auto final_suspend() noexcept {
+            struct FinalAwaiter {
+                bool await_ready() noexcept { return false; }
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                    if (h.promise().continuation) {
+                        return h.promise().continuation;
+                    }
+                    return std::noop_coroutine();
+                }
+                void await_resume() noexcept {}
+            };
+            return FinalAwaiter{};
+        }
+
+        template <typename Val>
+            requires (std::is_convertible_v<Val, T>)
+        void return_value(Val&& val) noexcept(std::is_nothrow_constructible_v<T, Val>) {
+            value = std::forward<Val>(val);
+        }
+
+        void unhandled_exception() noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    constexpr Task() noexcept = default;
+
+    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Task() {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    Task(Task&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Task& operator=(Task&& other) noexcept {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    /// @brief Check if coroutine has completed execution.
+    [[nodiscard]] bool done() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    /// @brief Resume the coroutine explicitly.
+    void resume() {
+        if (_handle && !_handle.done()) {
+            _handle.resume();
+        }
+    }
+
+    /// @brief Awaiter interface for co_await chaining.
+    [[nodiscard]] bool await_ready() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
+        _handle.promise().continuation = awaiting;
+        return _handle;
+    }
+
+    T await_resume() {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+        if (_handle.promise().exception) {
+            std::rethrow_exception(_handle.promise().exception);
+        }
+#endif
+        return std::move(_handle.promise().value);
+    }
+
+    /// @brief Access raw coroutine handle.
+    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
+        return _handle;
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+/// @brief Specialization of Task for void return type with configurable frame allocator.
+template <typename Allocator>
+class Task<void, Allocator> {
+public:
+    using ValueType = void;
+    using AllocatorType = Allocator;
+
+    struct promise_type {
+        std::coroutine_handle<> continuation{nullptr};
+        std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
+
+        Task get_return_object() noexcept {
+            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+
+        auto final_suspend() noexcept {
+            struct FinalAwaiter {
+                bool await_ready() noexcept { return false; }
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                    if (h.promise().continuation) {
+                        return h.promise().continuation;
+                    }
+                    return std::noop_coroutine();
+                }
+                void await_resume() noexcept {}
+            };
+            return FinalAwaiter{};
+        }
+
+        void return_void() noexcept {}
+
+        void unhandled_exception() noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    constexpr Task() noexcept = default;
+
+    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Task() {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    Task(Task&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Task& operator=(Task&& other) noexcept {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] bool done() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    void resume() {
+        if (_handle && !_handle.done()) {
+            _handle.resume();
+        }
+    }
+
+    [[nodiscard]] bool await_ready() const noexcept {
+        return !_handle || _handle.done();
+    }
+
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
+        _handle.promise().continuation = awaiting;
+        return _handle;
+    }
+
+    void await_resume() {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+        if (_handle.promise().exception) {
+            std::rethrow_exception(_handle.promise().exception);
+        }
+#endif
+    }
+
+    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
+        return _handle;
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+/// @brief Pre-configured zero-heap statically-pooled coroutine task.
+template <typename T = void, std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+using PooledTask = Task<T, StaticFrameAllocator<MaxFrames, FrameSize>>;
+
+} // namespace corium::async
+
+// <<< End: corium/async/Task.hpp
+
+// >>> Begin: corium/async/Delay.hpp
+/**
+ * @file Delay.hpp
+ * @ingroup async
+ * @brief Non-blocking timer delay and yield awaitables for C++20 coroutines.
+ */
+
+
+#include <chrono>
+#include <coroutine>
+#include <thread>
+
+namespace corium::async {
+
+/// @brief Awaitable that yields control back to the caller/event loop once.
+struct YieldAwaiter {
+    [[nodiscard]] constexpr bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) const noexcept {
+        handle.resume();
+    }
+    constexpr void await_resume() const noexcept {}
+};
+
+/// @brief Helper to yield execution in a coroutine.
+[[nodiscard]] inline constexpr YieldAwaiter yield() noexcept {
+    return YieldAwaiter{};
+}
+
+/// @brief Awaitable that pauses the coroutine thread for the specified duration.
+template <typename Rep, typename Period>
+struct DelayAwaiter {
+    std::chrono::duration<Rep, Period> duration;
+
+    [[nodiscard]] constexpr bool await_ready() const noexcept {
+        return duration.count() <= 0;
+    }
+
+    void await_suspend(std::coroutine_handle<> handle) const {
+        std::this_thread::sleep_for(duration);
+        handle.resume();
+    }
+
+    constexpr void await_resume() const noexcept {}
+};
+
+/// @brief Helper to suspend coroutine for a given std::chrono duration.
+template <typename Rep, typename Period>
+[[nodiscard]] inline auto delay(const std::chrono::duration<Rep, Period>& d) noexcept {
+    return DelayAwaiter<Rep, Period>{d};
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/Delay.hpp
+
+// >>> Begin: corium/async/CancellationToken.hpp
+/**
+ * @file CancellationToken.hpp
+ * @ingroup async
+ * @brief Lock-free atomic cooperative cancellation token with coroutine awaiter.
+ */
+
+
+#include <atomic>
+#include <coroutine>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Lightweight, zero-heap cooperative cancellation token for C++20 coroutines and services.
+class CancellationToken {
+public:
+    constexpr CancellationToken() noexcept = default;
+
+    /// @brief Signal cancellation to all observing tasks.
+    /// @note Wakes any suspended coroutine awaiting `whenCancelled()` immediately.
+    void cancel() noexcept
+    {
+        _cancelled.store(true, std::memory_order_release);
+        auto handle = _waiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (handle && !handle.done()) {
+            handle.resume();
+        }
+    }
+
+    /// @brief Check if cancellation has been requested.
+    /// @return True if cancel() has been invoked, false otherwise.
+    [[nodiscard]] bool isCancelled() const noexcept
+    {
+        return _cancelled.load(std::memory_order_acquire);
+    }
+
+    /// @brief Reset token state to uncancelled.
+    /// @note Allows reusing the token for subsequent asynchronous task executions.
+    void reset() noexcept
+    {
+        _cancelled.store(false, std::memory_order_release);
+        _waiter.store(nullptr, std::memory_order_release);
+    }
+
+    /// @brief Awaitable that suspends until this token is cancelled.
+    struct WhenCancelledAwaiter {
+        CancellationToken& token;
+
+        [[nodiscard]] bool await_ready() const noexcept
+        {
+            return token.isCancelled();
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept
+        {
+            if (token.isCancelled()) {
+                return false; // do not suspend
+            }
+            token._waiter.store(h, std::memory_order_release);
+            return !token.isCancelled();
+        }
+
+        constexpr void await_resume() const noexcept {}
+    };
+
+    /// @brief Helper to suspend the current coroutine until cancel() is called.
+    /// @return WhenCancelledAwaiter that suspends until token cancellation.
+    /// @example
+    /// Task<void> worker(CancellationToken token) {
+    ///     co_await token.whenCancelled();
+    ///     // Clean up resources on shutdown signal
+    /// }
+    [[nodiscard]] WhenCancelledAwaiter whenCancelled() noexcept
+    {
+        return WhenCancelledAwaiter{*this};
+    }
+
+private:
+    std::atomic<bool> _cancelled{false};
+    std::atomic<std::coroutine_handle<>> _waiter{nullptr};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/CancellationToken.hpp
+
+// >>> Begin: corium/async/WhenAll.hpp
+/**
+ * @file WhenAll.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator awaiting completion of multiple parallel tasks.
+ */
+
+
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+
+namespace corium::async {
+
+namespace detail {
+
+template <typename... Tasks>
+inline constexpr bool all_void_tasks_v = (std::is_void_v<typename std::decay_t<Tasks>::ValueType> && ...);
+
+template <typename... Tasks>
+Task<std::tuple<typename std::decay_t<Tasks>::ValueType...>> whenAllValueImpl(Tasks... tasks)
+{
+    co_return std::tuple<typename std::decay_t<Tasks>::ValueType...>{(co_await tasks)...};
+}
+
+template <typename... Tasks>
+Task<void> whenAllVoidImpl(Tasks... tasks)
+{
+    ((void)(co_await tasks), ...);
+    co_return;
+}
+
+} // namespace detail
+
+/// @ingroup async
+/// @brief Awaits concurrent or sequential completion of multiple Task coroutines.
+/// @return Task containing std::tuple of results, or Task<void> if all input tasks are void.
+template <typename... Tasks>
+auto whenAll(Tasks&&... tasks)
+{
+    if constexpr (detail::all_void_tasks_v<Tasks...>) {
+        return detail::whenAllVoidImpl(std::forward<Tasks>(tasks)...);
+    } else {
+        return detail::whenAllValueImpl(std::forward<Tasks>(tasks)...);
+    }
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/WhenAll.hpp
+
+// >>> Begin: corium/async/WhenAny.hpp
+/**
+ * @file WhenAny.hpp
+ * @ingroup async
+ * @brief Non-blocking combinator resolving on the first completed task.
+ */
+
+
+#include <cstddef>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+namespace corium::async {
+
+namespace detail {
+
+template <typename T>
+struct WrapVoid {
+    using type = T;
+};
+
+template <>
+struct WrapVoid<void> {
+    using type = std::monostate;
+};
+
+template <typename T>
+using wrap_void_t = typename WrapVoid<T>::type;
+
+} // namespace detail
+
+/// @brief Result container for whenAny combinator.
+template <typename... ResultTypes>
+struct WhenAnyResult {
+    std::size_t index{0};
+    std::variant<detail::wrap_void_t<ResultTypes>...> result{};
+};
+
+namespace detail {
+
+template <size_t Index, typename TaskType, typename ResultVariant>
+bool checkTaskDone(TaskType& task, size_t& winnerIndex, ResultVariant& resultVariant)
+{
+    if (task.done()) {
+        winnerIndex = Index;
+        if constexpr (!std::is_void_v<typename TaskType::ValueType>) {
+            resultVariant.template emplace<Index>(task.await_resume());
+        } else {
+            task.await_resume();
+            resultVariant.template emplace<Index>(std::monostate{});
+        }
+        return true;
+    }
+    return false;
+}
+
+template <size_t Index, typename TaskType>
+void resumeTask(TaskType& task)
+{
+    if (!task.done()) {
+        task.resume();
+    }
+}
+
+template <typename... Tasks, size_t... Is>
+Task<WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>> whenAnyImpl(std::index_sequence<Is...>, Tasks... tasks)
+{
+    using ResultType = WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>;
+    ResultType res{};
+
+    // Initial resume pass
+    (resumeTask<Is>(tasks), ...);
+
+    while (true) {
+        bool winnerFound = (checkTaskDone<Is>(tasks, res.index, res.result) || ...);
+        if (winnerFound) {
+            break;
+        }
+        (resumeTask<Is>(tasks), ...);
+    }
+
+    co_return res;
+}
+
+} // namespace detail
+
+/// @ingroup async
+/// @brief Awaits the first task among multiple tasks to complete.
+/// @return Task containing WhenAnyResult with index and variant result.
+template <typename... Tasks>
+auto whenAny(Tasks&&... tasks)
+{
+    return detail::whenAnyImpl(
+        std::index_sequence_for<Tasks...>{},
+        std::forward<Tasks>(tasks)...
+    );
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/WhenAny.hpp
+
+// >>> Begin: corium/async/Generator.hpp
+/**
+ * @file Generator.hpp
+ * @ingroup async
+ * @brief Pull-based zero-heap lazy sequence generator compatible with C++20 ranges.
+ */
+
+
+#include <coroutine>
+#include <exception>
+#include <iterator>
+#include <utility>
+
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Zero-heap C++20 pull-based lazy generator sequence with configurable frame allocator.
+/// Compatible with range-based for loops and standard C++20 ranges.
+/// @tparam T Value type yielded by the generator.
+/// @tparam Allocator Frame allocation policy (HeapFrameAllocator default or StaticFrameAllocator).
+template <typename T, typename Allocator = HeapFrameAllocator>
+class Generator {
+public:
+    using ValueType = T;
+    using AllocatorType = Allocator;
+
+    struct promise_type {
+        const T* currentValue{nullptr};
+        std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
+
+        Generator get_return_object() noexcept
+        {
+            return Generator(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_always final_suspend() noexcept { return {}; }
+
+        std::suspend_always yield_value(const T& val) noexcept
+        {
+            currentValue = std::addressof(val);
+            return {};
+        }
+
+        std::suspend_always yield_value(T&& val) noexcept
+        {
+            currentValue = std::addressof(val);
+            return {};
+        }
+
+        void return_void() noexcept {}
+
+        void unhandled_exception() noexcept
+        {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    class Sentinel {};
+
+    class Iterator {
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = T;
+        using reference = const T&;
+        using pointer = const T*;
+
+        constexpr Iterator() noexcept = default;
+
+        explicit Iterator(std::coroutine_handle<promise_type> handle) noexcept
+            : _handle(handle)
+        {}
+
+        Iterator& operator++()
+        {
+            _handle.resume();
+            if (_handle.done()) {
+                if (_handle.promise().exception) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+                    std::rethrow_exception(_handle.promise().exception);
+#endif
+                }
+            }
+            return *this;
+        }
+
+        void operator++(int)
+        {
+            (void)operator++();
+        }
+
+        [[nodiscard]] reference operator*() const noexcept
+        {
+            return *_handle.promise().currentValue;
+        }
+
+        [[nodiscard]] pointer operator->() const noexcept
+        {
+            return _handle.promise().currentValue;
+        }
+
+        [[nodiscard]] bool operator==(Sentinel) const noexcept
+        {
+            return !_handle || _handle.done();
+        }
+
+        [[nodiscard]] bool operator!=(Sentinel s) const noexcept
+        {
+            return !(*this == s);
+        }
+
+    private:
+        std::coroutine_handle<promise_type> _handle{nullptr};
+    };
+
+    constexpr Generator() noexcept = default;
+
+    explicit Generator(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Generator()
+    {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Generator(const Generator&) = delete;
+    Generator& operator=(const Generator&) = delete;
+
+    Generator(Generator&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Generator& operator=(Generator&& other) noexcept
+    {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] Iterator begin()
+    {
+        if (_handle) {
+            _handle.resume();
+            if (_handle.promise().exception) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+                std::rethrow_exception(_handle.promise().exception);
+#endif
+            }
+        }
+        return Iterator{_handle};
+    }
+
+    [[nodiscard]] constexpr Sentinel end() noexcept
+    {
+        return Sentinel{};
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+/// @brief Pre-configured zero-heap statically-pooled lazy generator sequence.
+template <typename T, std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+using PooledGenerator = Generator<T, StaticFrameAllocator<MaxFrames, FrameSize>>;
+
+} // namespace corium::async
+
+// <<< End: corium/async/Generator.hpp
+
+// >>> Begin: corium/async/AsyncEvent.hpp
+/**
+ * @file AsyncEvent.hpp
+ * @ingroup async
+ * @brief Lock-free asynchronous event synchronization primitive for C++20 coroutines.
+ */
+
+
+#include <atomic>
+#include <coroutine>
+#include <type_traits>
+#include <utility>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Lock-free single-waiter asynchronous event channel for C++20 coroutines.
+/// Enables event-driven coroutine resumption without blocking threads or allocating dynamic memory.
+/// @tparam T Payload type transferred when event is signaled (defaults to void).
+template <typename T = void>
+class AsyncEvent {
+public:
+    using ValueType = T;
+
+    constexpr AsyncEvent() = default;
+
+    /// @brief Emit event value and resume waiting coroutine.
+    template <typename U>
+        requires (std::is_convertible_v<U, T>)
+    void emit(U&& value) {
+        _value = std::forward<U>(value);
+        _ready.store(true, std::memory_order_release);
+        auto h = _waiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (h && !h.done()) {
+            h.resume();
+        }
+    }
+
+    /// @brief Reset event to unsignaled state.
+    void reset() noexcept {
+        _ready.store(false, std::memory_order_release);
+        _waiter.store(nullptr, std::memory_order_release);
+    }
+
+    /// @brief Check if event has been signaled.
+    [[nodiscard]] bool isReady() const noexcept {
+        return _ready.load(std::memory_order_acquire);
+    }
+
+    struct Awaiter {
+        AsyncEvent& event;
+
+        [[nodiscard]] bool await_ready() const noexcept {
+            return event.isReady();
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept {
+            if (event.isReady()) {
+                return false;
+            }
+            event._waiter.store(h, std::memory_order_release);
+            return !event.isReady();
+        }
+
+        T await_resume() {
+            event._ready.store(false, std::memory_order_release);
+            return std::move(event._value);
+        }
+    };
+
+    /// @brief Awaiter factory for co_await syntax.
+    [[nodiscard]] Awaiter wait() noexcept {
+        return Awaiter{*this};
+    }
+
+    /// @brief Direct co_await support on AsyncEvent instance.
+    [[nodiscard]] Awaiter operator co_await() noexcept {
+        return Awaiter{*this};
+    }
+
+private:
+    std::atomic<std::coroutine_handle<>> _waiter{nullptr};
+    T _value{};
+    std::atomic<bool> _ready{false};
+};
+
+/// @brief Specialization of AsyncEvent for void signaling.
+template <>
+class AsyncEvent<void> {
+public:
+    using ValueType = void;
+
+    constexpr AsyncEvent() = default;
+
+    /// @brief Signal the event and resume waiting coroutine.
+    void emit() noexcept {
+        _ready.store(true, std::memory_order_release);
+        auto h = _waiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (h && !h.done()) {
+            h.resume();
+        }
+    }
+
+    /// @brief Reset event to unsignaled state.
+    void reset() noexcept {
+        _ready.store(false, std::memory_order_release);
+        _waiter.store(nullptr, std::memory_order_release);
+    }
+
+    /// @brief Check if event has been signaled.
+    [[nodiscard]] bool isReady() const noexcept {
+        return _ready.load(std::memory_order_acquire);
+    }
+
+    struct Awaiter {
+        AsyncEvent<void>& event;
+
+        [[nodiscard]] bool await_ready() const noexcept {
+            return event.isReady();
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept {
+            if (event.isReady()) {
+                return false;
+            }
+            event._waiter.store(h, std::memory_order_release);
+            return !event.isReady();
+        }
+
+        constexpr void await_resume() const noexcept {}
+    };
+
+    /// @brief Awaiter factory for co_await syntax.
+    [[nodiscard]] Awaiter wait() noexcept {
+        return Awaiter{*this};
+    }
+
+    /// @brief Direct co_await support on AsyncEvent instance.
+    [[nodiscard]] Awaiter operator co_await() noexcept {
+        return Awaiter{*this};
+    }
+
+private:
+    std::atomic<std::coroutine_handle<>> _waiter{nullptr};
+    std::atomic<bool> _ready{false};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/AsyncEvent.hpp
 
 // <<< End: corium/async/async.hpp
 

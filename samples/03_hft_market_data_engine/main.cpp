@@ -13,9 +13,7 @@
 #include <iostream>
 #include <variant>
 
-#include "corium/Application.hpp"
-#include "corium/Runtime.hpp"
-#include "corium/policies/OverflowPolicies.hpp"
+#include "corium/corium.hpp"
 
 // -----------------------------------------------------------------------------
 // 1. Order Book & Financial Market Event Types

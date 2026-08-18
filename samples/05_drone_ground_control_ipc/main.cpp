@@ -14,12 +14,7 @@
 #include <thread>
 #include <variant>
 
-#include "corium/Application.hpp"
-#include "corium/Runtime.hpp"
-#include "corium/ipc/IpcChannel.hpp"
-#include "corium/ipc/UdsChannel.hpp"
-#include "corium/wire/Serializer.hpp"
-#include "corium/wire/WirePacket.hpp"
+#include "corium/corium.hpp"
 
 // -----------------------------------------------------------------------------
 // 1. Avionics Telemetry & Ground Control Domain Events (Trivially Copyable)

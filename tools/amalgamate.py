@@ -21,7 +21,7 @@ OUTPUT_FILE = os.path.join(OUTPUT_DIR, "corium.hpp")
 NESTED_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "corium")
 NESTED_OUTPUT_FILE = os.path.join(NESTED_OUTPUT_DIR, "corium.hpp")
 
-INCLUDE_PATTERN = re.compile(r'^\s*#include\s+["<]corium/([^">]+)[">]\s*$')
+INCLUDE_PATTERN = re.compile(r'^\s*#include\s+["<]corium/([^">]+)[">](?:\s*//.*)?\s*$')
 
 visited_files = set()
 processed_lines = []
