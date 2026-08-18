@@ -264,6 +264,7 @@ jobs:
             ${{ matrix.arch_flags }} \
             -fno-rtti -fno-exceptions \
             --specs=rdimon.specs \
+            -T tests/baremetal_arm/linker.ld \
             -Iinclude \
             tests/baremetal_arm/main.cpp -o corium_arm_${{ matrix.cpu }}.elf
 
