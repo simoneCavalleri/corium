@@ -114,8 +114,8 @@ TEST(StressTest, MultiProducerRuntimeEventBusContention) {
         }
     };
 
-    StressRuntime runtime;
     StressApp app;
+    StressRuntime runtime;
     runtime.initialize(app);
 
     std::atomic<bool> startFlag{false};
@@ -156,6 +156,7 @@ TEST(StressTest, MultiProducerRuntimeEventBusContention) {
 
     // Drain all remaining queued events
     runtime.drain();
+    runtime.shutdown();
 
     const uint32_t processed = app.processedCount;
     const uint64_t dropped = runtime.overflowPolicy().overflowCount();

@@ -130,8 +130,8 @@ TEST(ClockPoliciesTest, RuntimeWithManualClockBuilder)
         }
     };
 
-    ManualRuntime runtime;
     App app;
+    ManualRuntime runtime;
     runtime.initialize(app);
 
     runtime.scheduleDelayed(ClockTestEvent{42}, std::chrono::microseconds(100));

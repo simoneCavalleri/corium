@@ -179,8 +179,8 @@ TEST(SafetyTest, WatchdogServiceAutonomousSupervision) {
         ::WithPriorityQueue<16, 64>
         ::Build;
 
-    SafetyRuntime runtime;
     MonitoredApp app;
+    SafetyRuntime runtime;
 
     // Register service 42 with 25ms timeout
     app.wdService.registerService(42, 25'000'000);

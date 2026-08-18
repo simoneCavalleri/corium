@@ -41,8 +41,8 @@ TEST(IsrSinkTest, IsrEventSinkNormalAndHighPriority)
         }
     };
 
-    IsrRuntime runtime;
     App app;
+    IsrRuntime runtime;
     runtime.initialize(app);
 
     auto isrSink = makeIsrSink(runtime.eventSink());

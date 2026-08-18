@@ -57,8 +57,8 @@ TEST(BatchPumpTest, RuntimePumpBatchAndDrain)
         }
     };
 
-    BatchRuntime runtime;
     App app;
+    BatchRuntime runtime;
     runtime.initialize(app);
 
     for (int i = 0; i < 35; ++i) {

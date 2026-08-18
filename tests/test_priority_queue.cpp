@@ -73,8 +73,8 @@ TEST(PriorityQueueTest, EventBusPriorityDispatch)
         }
     };
 
-    PriorityRuntime runtime;
     PriorityTestApp app;
+    PriorityRuntime runtime;
     runtime.initialize(app);
 
     auto sink = runtime.eventSink();
