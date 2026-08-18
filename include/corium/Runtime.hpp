@@ -6,15 +6,20 @@
 #include <limits>
 #include <utility>
 
-#include "corium/Application.hpp"
 #include "corium/ApplicationContext.hpp"
 #include "corium/EventBus.hpp"
-#include "corium/ServiceContext.hpp"
-#include "corium/ServiceRegistry.hpp"
 #include "corium/internal/VariantIndex.hpp"
-#include "corium/policies/Policies.hpp"
+#include "corium/policies/OverflowPolicies.hpp"
+#include "corium/policies/QueuePolicies.hpp"
+#include "corium/policies/SignalPolicies.hpp"
+#include "corium/policies/StoragePolicies.hpp"
+#include "corium/policies/TimerPolicies.hpp"
+#include "corium/timers/TimerScheduler.hpp"
 
 namespace corium {
+
+template <typename Derived, typename EventVariant, std::size_t MaxServices>
+class Application;
 
 /// @ingroup core
 /// @brief Corium Application Runtime managing MPSC event loops and static policy execution.

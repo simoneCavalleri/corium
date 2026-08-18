@@ -4,7 +4,6 @@
 #include "corium/internal/CallableTraits.hpp"
 #include "corium/internal/EventQueue.hpp"
 #include "corium/internal/Reactor.hpp"
-#include "corium/policies/Policies.hpp"
 #include "corium/profiler/ProfilerPolicies.hpp"
 
 #include <utility>

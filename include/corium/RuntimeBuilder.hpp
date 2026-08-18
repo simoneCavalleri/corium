@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstddef>
-#include "corium/Events.hpp"
-#include "corium/policies/Policies.hpp"
+#include "corium/Runtime.hpp"
+#include "corium/policies/OverflowPolicies.hpp"
+#include "corium/policies/QueuePolicies.hpp"
+#include "corium/policies/SignalPolicies.hpp"
+#include "corium/policies/StoragePolicies.hpp"
+#include "corium/policies/TimerPolicies.hpp"
 #include "corium/profiler/ProfilerPolicies.hpp"
 
 namespace corium {

@@ -77,12 +77,12 @@ public:
             const float freq = 50.00f + (sampleIndex % 2 == 0 ? 0.02f : -0.01f);
 
             // Post real-time continuous line telemetry
-            post(GridTelemetryEvent{101, voltage, current, freq});
+            post(GridTelemetryEvent{.substationId = 101, .voltageRms = voltage, .currentRms = current, .gridFrequencyHz = freq});
 
             // Anomaly injection: Sample #3 simulates sudden grid surge
             if (voltage > 250.0f) {
                 // Post high-priority emergency event bypassing normal queue
-                postHighPriority(GridAnomalyFaultEvent{501, "SURGE_VOLTAGE_LIMIT_EXCEEDED", voltage});
+                postHighPriority(GridAnomalyFaultEvent{.errorCode = 501, .faultReason = "SURGE_VOLTAGE_LIMIT_EXCEEDED", .anomalousValue = voltage});
             }
 
             sampleIndex++;
@@ -178,7 +178,7 @@ private:
         const float thd = 1.25f + std::fmod(voltage, 2.0f);
 
         // Inject computed analytics back into the event loop via eventSink()
-        eventSink().post(PowerAnalysisReportEvent{p, q, thd});
+        eventSink().post(PowerAnalysisReportEvent{.activePowerKw = p, .reactivePowerKvar = q, .totalHarmonicDistortion = thd});
         co_return;
     }
 };

@@ -7,7 +7,6 @@
 #include "corium/policies/SignalPolicies.hpp"
 #include "corium/policies/StoragePolicies.hpp"
 
-#include <chrono>
 #include <cstddef>
 #include <utility>
 

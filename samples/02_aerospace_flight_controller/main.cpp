@@ -8,7 +8,6 @@
 // =============================================================================
 
 #include <cstdint>
-#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <variant>
@@ -92,19 +91,19 @@ using FlightTransitionTable = corium::fsm::TransitionTable<
 static void SIMULATED_SPI_IMU_IRQHandler(FlightIsrSink& isrSink)
 {
     // Fast interrupt handler pushing 6-DoF sensor readings
-    isrSink.postFromIsr(ImuTelemetryEvent{12, -4, 981});
+    isrSink.postFromIsr(ImuTelemetryEvent{.gyroPitch = 12, .gyroRoll = -4, .accelZ = 981});
 }
 
 static void SIMULATED_UART_SBUS_IRQHandler(FlightIsrSink& isrSink, uint16_t throttle, uint16_t arm)
 {
     // RC Receiver DMA completed: dispatch RC command
-    isrSink.postFromIsr(RcCommandEvent{throttle, arm});
+    isrSink.postFromIsr(RcCommandEvent{.throttlePwm = throttle, .armSwitch = arm});
 }
 
 static void SIMULATED_CRITICAL_FAULT_IRQHandler(FlightIsrSink& isrSink, uint8_t fault)
 {
     // Hardware E-Stop / Geofence breach: push into high-priority ring buffer
-    isrSink.postHighPriorityFromIsr(MotorEmergencyCutoffEvent{fault});
+    isrSink.postHighPriorityFromIsr(MotorEmergencyCutoffEvent{.faultSource = fault});
 }
 
 // -----------------------------------------------------------------------------

@@ -9,7 +9,6 @@
 
 #include <chrono>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <thread>
 #include <variant>
@@ -76,7 +75,7 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(55)); // Deadline violation!
             }
 
-            post(InverterTorqueCommandEvent{150.0f - cycle * 10.0f, 2400.0f});
+            post(InverterTorqueCommandEvent{.targetTorqueNm = 150.0f - cycle * 10.0f, .currentRpm = 2400.0f});
             cycle++;
         }
     }

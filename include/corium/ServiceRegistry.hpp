@@ -3,10 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <stop_token>
-#include <type_traits>
-#include <utility>
 
-#include "corium/BackgroundService.hpp"
 #include "corium/ServiceContext.hpp"
 
 namespace corium {

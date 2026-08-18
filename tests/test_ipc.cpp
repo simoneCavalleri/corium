@@ -1,16 +1,15 @@
 #include <gtest/gtest.h>
+#include <string>
+#include <thread>
 #include <variant>
+#include <vector>
+
 #include "corium/Application.hpp"
 #include "corium/Runtime.hpp"
 #include "corium/ipc/IpcChannel.hpp"
 #include "corium/ipc/SharedMemory.hpp"
 #include "corium/ipc/ShmMpscQueue.hpp"
 #include "corium/ipc/UdsChannel.hpp"
-
-#include <atomic>
-#include <string>
-#include <thread>
-#include <vector>
 
 using namespace corium;
 using namespace corium::ipc;
@@ -181,7 +180,7 @@ TEST(IpcTest, ConcurrentMultiProducerPush)
             ASSERT_TRUE(clientChannel.attach(channelName));
 
             for (int i = 0; i < itemsPerThread; ++i) {
-                while (!clientChannel.post(IpcTelemetryEvent{static_cast<uint32_t>(t), static_cast<float>(i)})) {
+                while (!clientChannel.post(IpcTelemetryEvent{.sensorId = static_cast<uint32_t>(t), .value = static_cast<float>(i)})) {
                     std::this_thread::yield();
                 }
             }

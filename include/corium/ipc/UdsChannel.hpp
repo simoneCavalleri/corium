@@ -4,10 +4,8 @@
 #include <cstring>
 #include <string>
 #include <utility>
-#include <variant>
 
 #include "corium/Events.hpp"
-#include "corium/EventSink.hpp"
 #include "corium/ipc/DomainSocket.hpp"
 
 namespace corium::ipc {

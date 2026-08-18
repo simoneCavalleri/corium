@@ -25,15 +25,11 @@
 #include <utility>
 
 
-// >>> Begin: corium/Application.hpp
-
-
 // >>> Begin: corium/ApplicationContext.hpp
 
 #include <array>
 #include <chrono>
 #include <cstddef>
-#include <new>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -909,7 +905,6 @@ using extract_event_variant_t = typename extract_event_variant<T>::type;
 #include <cstdint>
 #include <mutex>
 #include <thread>
-#include <utility>
 
 #ifdef __linux__
 #include <poll.h>
@@ -1735,21 +1730,6 @@ private:
 
 // <<< End: corium/ApplicationContext.hpp
 
-// >>> Begin: corium/ServiceRegistry.hpp
-
-#include <array>
-#include <cstddef>
-#include <stop_token>
-#include <type_traits>
-#include <utility>
-
-
-// >>> Begin: corium/BackgroundService.hpp
-
-
-// >>> Begin: corium/Service.hpp
-
-
 // >>> Begin: corium/EventBus.hpp
 
 
@@ -1758,44 +1738,6 @@ private:
 #include <optional>
 #include <utility>
 
-
-// >>> Begin: corium/policies/Policies.hpp
-
-/// @file Policies.hpp
-/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
-
-
-// >>> Begin: corium/policies/StoragePolicies.hpp
-
-#include <cstddef>
-
-namespace corium {
-
-/// @ingroup policies
-/// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
-/// @tparam MaxHandlers Maximum handlers per event type stored statically.
-/// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).
-template <std::size_t MaxHandlers = 8, std::size_t InlineSize = 32>
-struct FixedStoragePolicy {
-    static constexpr std::size_t max_handlers_per_event = MaxHandlers;
-    static constexpr std::size_t inline_storage_size = InlineSize;
-};
-
-/// @brief Default storage policy (8 handlers per event type, 32 bytes inline delegate storage).
-using DefaultStoragePolicy = FixedStoragePolicy<8, 32>;
-
-/// @brief Footprint-optimized storage policy (4 handlers per event type, 16 bytes inline storage).
-using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
-
-/// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
-using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
-
-/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
-using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
-
-} // namespace corium
-
-// <<< End: corium/policies/StoragePolicies.hpp
 
 // >>> Begin: corium/policies/OverflowPolicies.hpp
 
@@ -1883,31 +1825,6 @@ private:
 } // namespace corium
 
 // <<< End: corium/policies/OverflowPolicies.hpp
-
-// >>> Begin: corium/policies/TimerPolicies.hpp
-
-#include <cstddef>
-
-namespace corium {
-
-/// @brief Compile-time policy configuring TimerScheduler capacity and clock source.
-/// @tparam MaxTimers Maximum number of concurrent timers allowed (default: 64).
-/// @tparam ClockPolicy Time source and arithmetic policy (default: ChronoClockPolicy).
-template <size_t MaxTimers = 64, typename ClockPolicy = ChronoClockPolicy>
-struct FixedTimerStoragePolicy {
-    static constexpr size_t max_timers = MaxTimers;
-    using clock_policy = ClockPolicy;
-};
-
-using DefaultTimerStoragePolicy = FixedTimerStoragePolicy<64, ChronoClockPolicy>;
-using CompactTimerStoragePolicy = FixedTimerStoragePolicy<16, ChronoClockPolicy>;
-using LargeTimerStoragePolicy = FixedTimerStoragePolicy<256, ChronoClockPolicy>;
-
-} // namespace corium
-
-// <<< End: corium/policies/TimerPolicies.hpp
-
-// <<< End: corium/policies/Policies.hpp
 
 namespace corium {
 
@@ -2026,7 +1943,6 @@ private:
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
 
 namespace corium {
 
@@ -2081,6 +1997,38 @@ inline void setPanicHandler(PanicHandlerFn fn) noexcept {
 #define CORIUM_PANIC(msg) ::corium::internal::panic(__FILE__, __LINE__, msg)
 
 // <<< End: corium/internal/Panic.hpp
+
+// >>> Begin: corium/policies/StoragePolicies.hpp
+
+#include <cstddef>
+
+namespace corium {
+
+/// @ingroup policies
+/// @brief Policy configuring compile-time handler capacity and delegate inline storage size.
+/// @tparam MaxHandlers Maximum handlers per event type stored statically.
+/// @tparam InlineSize Maximum bytes for FastDelegate inline storage (zero heap allocation).
+template <std::size_t MaxHandlers = 8, std::size_t InlineSize = 32>
+struct FixedStoragePolicy {
+    static constexpr std::size_t max_handlers_per_event = MaxHandlers;
+    static constexpr std::size_t inline_storage_size = InlineSize;
+};
+
+/// @brief Default storage policy (8 handlers per event type, 32 bytes inline delegate storage).
+using DefaultStoragePolicy = FixedStoragePolicy<8, 32>;
+
+/// @brief Footprint-optimized storage policy (4 handlers per event type, 16 bytes inline storage).
+using CompactStoragePolicy = FixedStoragePolicy<4, 16>;
+
+/// @brief High-capacity storage policy (16 handlers per event type, 64 bytes inline storage).
+using LargeStoragePolicy = FixedStoragePolicy<16, 64>;
+
+/// @brief Zero-overhead storage policy for producer services or buses with zero event handlers.
+using ZeroStoragePolicy = FixedStoragePolicy<0, 0>;
+
+} // namespace corium
+
+// <<< End: corium/policies/StoragePolicies.hpp
 
 namespace corium {
 namespace internal {
@@ -2823,765 +2771,33 @@ using EventBusT = BasicEventBus<EventVariantType, QueuePolicy, SignalPolicy, Sto
 
 // <<< End: corium/EventBus.hpp
 
-// >>> Begin: corium/ServiceContext.hpp
+// >>> Begin: corium/policies/TimerPolicies.hpp
 
-
-namespace corium {
-
-/// @brief Execution context provided to background services.
-/// Allows services to post events back to the main event queue thread-safely
-/// and communicate with other registered background services.
-/// @tparam EventVariant The variant type list of supported events.
-template <typename EventVariant = DefaultEvents>
-class BasicServiceContext {
-public:
-    using GetServiceFn = void* (*)(void* registryPtr, internal::TypeIdPtr typeId);
-
-    BasicServiceContext() = default;
-
-    explicit BasicServiceContext(
-        EventSinkT<EventVariant> sink,
-        void* regPtr = nullptr,
-        GetServiceFn fn = nullptr
-    ) noexcept
-        : _eventSink(sink), _registryPtr(regPtr), _getServiceFn(fn)
-    {}
-
-    /// @brief Access main application EventSink handle.
-    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept
-    {
-        return _eventSink;
-    }
-
-    /// @brief Access main application EventSink handle.
-    [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
-    {
-        return _eventSink;
-    }
-
-    /// @brief Configure registry resolution bridge (internal framework usage).
-    void setRegistry(void* registryPtr, GetServiceFn fn) noexcept
-    {
-        _registryPtr = registryPtr;
-        _getServiceFn = fn;
-    }
-
-    /// @brief Retrieve another registered service instance by type.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return Pointer to ServiceType instance or nullptr if not registered.
-    template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() const noexcept
-    {
-        if (_registryPtr && _getServiceFn) {
-            return static_cast<ServiceType*>(_getServiceFn(_registryPtr, internal::getTypeId<ServiceType>()));
-        }
-        return nullptr;
-    }
-
-    /// @brief Retrieve event sink handle of a target registered service if available.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
-    template <typename ServiceType>
-    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
-    {
-        auto* service = getService<ServiceType>();
-        if (service) {
-            if constexpr (requires { service->sink(); }) {
-                return service->sink();
-            }
-        }
-        return EventSinkT<EventVariant>{};
-    }
-
-    /// @brief Post an event directly to a target service.
-    /// @tparam TargetService Target service type to send the event to.
-    /// @tparam EventType Event type to send.
-    /// @param event Event instance to post.
-    /// @param priority Priority level.
-    /// @return true if event was posted to the target service; false if target service was not found or has no sink.
-    template <typename TargetService, typename EventType>
-    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
-    {
-        auto sinkHandle = getServiceSink<TargetService>();
-        if (sinkHandle) {
-            sinkHandle.post(std::forward<EventType>(event), priority);
-            return true;
-        }
-        return false;
-    }
-
-private:
-    EventSinkT<EventVariant> _eventSink;
-    void* _registryPtr = nullptr;
-    GetServiceFn _getServiceFn = nullptr;
-};
-
-/// @brief Default ServiceContext alias using DefaultEvents.
-using ServiceContext = BasicServiceContext<DefaultEvents>;
-
-/// @brief Templated ServiceContext alias for custom event variant.
-template <typename EventVariant = DefaultEvents>
-using ServiceContextT = BasicServiceContext<EventVariant>;
-
-} // namespace corium
-
-// <<< End: corium/ServiceContext.hpp
-
-#include <chrono>
 #include <cstddef>
-#include <utility>
 
 namespace corium {
 
-/// @ingroup core
-/// @brief Non-allocating base class for synchronous or thread-agnostic services.
-/// Provides event producing (posting to main EventBus) and event consuming (receiving events into dedicated incoming bus).
-/// Does NOT own a thread. Zero heap allocations, zero vtables/RTTI.
-/// @tparam EventVariantType Supported event variant type list.
-/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
-/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
-/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
-/// @tparam OverflowPolicy Strategy for queue overflow handling.
-template <
-    typename EventVariantType = DefaultEvents,
-    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy,
-    typename OverflowPolicy = DropNewestOverflowPolicy
->
-class Service {
-public:
-    using EventVariant = EventVariantType;
-    using IncomingBus = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
-
-    Service() = default;
-
-    explicit Service(ServiceContextT<EventVariant> context)
-        : _context(context)
-    {}
-
-    ~Service() = default;
-
-    Service(const Service&) = delete;
-    Service& operator=(const Service&) = delete;
-
-    Service(Service&&) noexcept = default;
-    Service& operator=(Service&&) noexcept = default;
-
-    void setContext(ServiceContextT<EventVariant> context) noexcept
-    {
-        _context = context;
-    }
-
-    /// @brief Get an EventSink handle targeting this service's incoming event queue.
-    [[nodiscard]] EventSinkT<EventVariant> sink() noexcept
-    {
-        return _incomingBus.sink();
-    }
-
-    /// @brief Register an event handler for incoming events with explicit event type parameter.
-    template <typename EventType, typename Handler>
-    bool registerHandler(Handler&& handler)
-    {
-        return _incomingBus.template registerHandler<EventType>(std::forward<Handler>(handler));
-    }
-
-    /// @brief Register an event handler for incoming events with automatic event type deduction.
-    template <typename Handler>
-    bool on(Handler&& handler)
-    {
-        return _incomingBus.registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Process a single incoming event from the service queue.
-    /// @return true if an event was popped and dispatched; false if queue was empty.
-    bool processOne()
-    {
-        return _incomingBus.processOne();
-    }
-
-    /// @brief Pump all pending incoming events from the queue until empty.
-    /// @return Number of events processed.
-    std::size_t pump()
-    {
-        std::size_t processed = 0;
-        while (_incomingBus.processOne()) {
-            processed++;
-        }
-        return processed;
-    }
-
-    /// @brief Pump up to maxEvents pending incoming events from the queue.
-    /// @param maxEvents Maximum number of events to process.
-    /// @return Number of events processed.
-    std::size_t pump(std::size_t maxEvents)
-    {
-        std::size_t processed = 0;
-        while (processed < maxEvents && _incomingBus.processOne()) {
-            processed++;
-        }
-        return processed;
-    }
-
-protected:
-    [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
-    [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
-
-    /// @brief Access main application EventSink handle.
-    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept { return _context.mainSink(); }
-
-    /// @brief Post an event into the main application event queue.
-    template <typename EventType>
-    void post(EventType&& event, EventPriority priority = EventPriority::Normal) const
-    {
-        _context.mainSink().post(std::forward<EventType>(event), priority);
-    }
-
-    /// @brief Post a high-priority event into the main application event queue.
-    template <typename EventType>
-    void postHighPriority(EventType&& event) const
-    {
-        _context.mainSink().postHighPriority(std::forward<EventType>(event));
-    }
-
-    /// @brief Post an event directly to another registered service.
-    template <typename TargetService, typename EventType>
-    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
-    {
-        return _context.template sendToService<TargetService>(std::forward<EventType>(event), priority);
-    }
-
-    [[nodiscard]] IncomingBus& incomingBus() noexcept { return _incomingBus; }
-    [[nodiscard]] const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
-
-private:
-    ServiceContextT<EventVariant> _context;
-    [[no_unique_address]] IncomingBus _incomingBus;
+/// @brief Compile-time policy configuring TimerScheduler capacity and clock source.
+/// @tparam MaxTimers Maximum number of concurrent timers allowed (default: 64).
+/// @tparam ClockPolicy Time source and arithmetic policy (default: ChronoClockPolicy).
+template <size_t MaxTimers = 64, typename ClockPolicy = ChronoClockPolicy>
+struct FixedTimerStoragePolicy {
+    static constexpr size_t max_timers = MaxTimers;
+    using clock_policy = ClockPolicy;
 };
 
-/// @brief Zero-overhead Service alias for pure producer services (no incoming event queue/reactor allocations).
-/// @tparam EventVariant Supported event variant type list.
-template <typename EventVariant = DefaultEvents>
-using ProducerService = Service<
-    EventVariant,
-    NoQueuePolicy<EventVariant>,
-    NoSignalPolicy,
-    ZeroStoragePolicy
->;
-
-/// @brief Explicit Service alias for consumer services with configurable incoming event queue capacity.
-/// @tparam EventVariant Supported event variant type list.
-/// @tparam Capacity Incoming ring buffer event capacity.
-template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
-using ConsumerService = Service<
-    EventVariant,
-    BoundedMpscQueuePolicy<EventVariant, Capacity>,
-    CallbackSignalPolicy,
-    DefaultStoragePolicy
->;
+using DefaultTimerStoragePolicy = FixedTimerStoragePolicy<64, ChronoClockPolicy>;
+using CompactTimerStoragePolicy = FixedTimerStoragePolicy<16, ChronoClockPolicy>;
+using LargeTimerStoragePolicy = FixedTimerStoragePolicy<256, ChronoClockPolicy>;
 
 } // namespace corium
 
-// <<< End: corium/Service.hpp
-
-#include <chrono>
-#include <exception>
-#include <stop_token>
-#include <thread>
+// <<< End: corium/policies/TimerPolicies.hpp
 
 namespace corium {
 
-/// @ingroup core
-/// @brief Multi-threaded background worker service owning a dedicated std::jthread.
-/// Integrates incoming event queue with background worker execution and cooperative shutdown via std::stop_token.
-/// Zero heap allocations, zero vtables/RTTI.
-/// @tparam EventVariantType Supported event variant type list.
-/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
-/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
-/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
-/// @tparam OverflowPolicy Strategy for queue overflow handling.
-template <
-    typename EventVariantType = DefaultEvents,
-    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
-    typename SignalPolicy = CallbackSignalPolicy,
-    typename StoragePolicy = DefaultStoragePolicy,
-    typename OverflowPolicy = DropNewestOverflowPolicy
->
-class BackgroundService : public Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy> {
-public:
-    using Base = Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
-    using EventVariant = typename Base::EventVariant;
-
-    BackgroundService() = default;
-
-    explicit BackgroundService(ServiceContextT<EventVariant> context)
-        : Base(context)
-    {}
-
-    ~BackgroundService()
-    {
-        stop();
-        join();
-    }
-
-    BackgroundService(const BackgroundService&) = delete;
-    BackgroundService& operator=(const BackgroundService&) = delete;
-
-    BackgroundService(BackgroundService&&) noexcept = default;
-    BackgroundService& operator=(BackgroundService&&) noexcept = default;
-
-    /// @brief Wait for incoming events or timeout, then pump all available incoming events.
-    /// Safe for use inside worker thread run(std::stop_token).
-    /// @tparam Rep Duration representation type.
-    /// @tparam Period Duration period type.
-    /// @param stopToken std::stop_token from run(stopToken).
-    /// @param timeout Maximum duration to wait if queue is empty.
-    /// @return Number of events processed.
-    template <typename Rep, typename Period>
-    std::size_t waitAndPump(const std::stop_token& stopToken, const std::chrono::duration<Rep, Period>& timeout)
-    {
-        if (this->incomingBus().empty() && !stopToken.stop_requested()) {
-            this->incomingBus().signalPolicy().wait_for(timeout);
-        }
-
-        std::size_t processed = 0;
-        while (!stopToken.stop_requested()) {
-            if (!this->incomingBus().processOne()) {
-                break;
-            }
-            processed++;
-        }
-        return processed;
-    }
-
-    /// @brief Start execution loop on dedicated std::jthread.
-    template <typename Derived>
-    void startThread(Derived* derived)
-    {
-        _thread = std::jthread([this, derived](std::stop_token stopToken) {
-#if __cpp_exceptions
-            using EvVariant = EventVariantType;
-            try {
-                derived->run(stopToken);
-            } catch (const std::exception& e) {
-                if constexpr (requires { derived->onError(std::current_exception()); }) {
-                    derived->onError(std::current_exception());
-                } else if constexpr (requires { derived->onError(e.what()); }) {
-                    derived->onError(e.what());
-                }
-                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
-                    this->postHighPriority(ErrorEvent{1, reinterpret_cast<uintptr_t>(e.what())});
-                }
-            } catch (...) {
-                if constexpr (requires { derived->onError(std::current_exception()); }) {
-                    derived->onError(std::current_exception());
-                }
-                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
-                    this->postHighPriority(ErrorEvent{1, 0});
-                }
-            }
-#else
-            derived->run(stopToken);
-#endif
-        });
-    }
-
-    /// @brief Request graceful stop of the background thread via std::stop_token.
-    void stop() noexcept
-    {
-        _thread.request_stop();
-    }
-
-    /// @brief Join background std::jthread cleanly.
-    void join() noexcept
-    {
-        if (_thread.joinable()) {
-            _thread.join();
-        }
-    }
-
-private:
-    std::jthread _thread;
-};
-
-/// @brief Zero-overhead BackgroundService alias for producer worker threads (zero incoming queue/reactor footprint).
-/// @tparam EventVariant Supported event variant type list.
-template <typename EventVariant = DefaultEvents>
-using ProducerBackgroundService = BackgroundService<
-    EventVariant,
-    NoQueuePolicy<EventVariant>,
-    NoSignalPolicy,
-    ZeroStoragePolicy
->;
-
-/// @brief BackgroundService alias for consumer worker threads with configurable queue capacity.
-/// @tparam EventVariant Supported event variant type list.
-/// @tparam Capacity Incoming ring buffer event capacity.
-template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
-using ConsumerBackgroundService = BackgroundService<
-    EventVariant,
-    BoundedMpscQueuePolicy<EventVariant, Capacity>,
-    CallbackSignalPolicy,
-    DefaultStoragePolicy
->;
-
-} // namespace corium
-
-// <<< End: corium/BackgroundService.hpp
-
-namespace corium {
-
-namespace internal {
-
-template <typename T, typename Context>
-concept HasSetContext = requires(T& t, Context ctx) {
-    t.setContext(ctx);
-};
-
-template <typename T>
-concept HasInitialize = requires(T& t) {
-    t.initialize();
-};
-
-template <typename T>
-concept HasRunToken = requires(T& t, std::stop_token st) {
-    t.run(st);
-};
-
-template <typename T>
-concept HasStart = requires(T& t) {
-    t.start();
-};
-
-template <typename T>
-concept HasStop = requires(T& t) {
-    t.stop();
-};
-
-template <typename T>
-concept HasJoin = requires(T& t) {
-    t.join();
-};
-
-} // namespace internal
-
-/// @ingroup core
-/// @brief Non-allocating ServiceRegistry storing service handles in a fixed stack/static array.
-/// Zero heap allocations, zero vtables/RTTI.
-/// @tparam MaxServices Maximum number of background services allowed per registry (default 8).
-/// @tparam EventVariant Supported event variant type list.
-template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
-class BasicServiceRegistry {
-public:
-    using ServiceContextType = ServiceContextT<EventVariant>;
-
-    /// @brief Non-allocating type-erased handle for static background services.
-    struct ServiceHandle {
-        void* instance = nullptr;
-        internal::TypeIdPtr typeId = nullptr;
-        void (*initFn)(void* inst, ServiceContextType ctx) = nullptr;
-        void (*startFn)(void* inst) = nullptr;
-        void (*stopFn)(void* inst) noexcept = nullptr;
-        void (*joinFn)(void* inst) noexcept = nullptr;
-    };
-
-    BasicServiceRegistry() = default;
-
-    /// @brief Register a background service instance by reference.
-    /// @tparam ServiceType Type of the background service.
-    /// @param serviceInstance Reference to service instance.
-    /// @return true if service was registered successfully; false if registry is full.
-    template <typename ServiceType>
-    bool registerService(ServiceType& serviceInstance)
-    {
-        if (_count >= MaxServices) {
-            return false;
-        }
-        _services[_count] = ServiceHandle{
-            &serviceInstance,
-            internal::getTypeId<ServiceType>(),
-            [](void* ptr, ServiceContextType ctx) {
-                auto* s = static_cast<ServiceType*>(ptr);
-                if constexpr (internal::HasSetContext<ServiceType, ServiceContextType>) { s->setContext(ctx); }
-                if constexpr (internal::HasInitialize<ServiceType>) { s->initialize(); }
-            },
-            [](void* ptr) {
-                auto* s = static_cast<ServiceType*>(ptr);
-                if constexpr (internal::HasRunToken<ServiceType>) {
-                    s->startThread(s);
-                } else if constexpr (internal::HasStart<ServiceType>) {
-                    s->start();
-                }
-            },
-            [](void* ptr) noexcept {
-                auto* s = static_cast<ServiceType*>(ptr);
-                if constexpr (internal::HasStop<ServiceType>) { s->stop(); }
-            },
-            [](void* ptr) noexcept {
-                auto* s = static_cast<ServiceType*>(ptr);
-                if constexpr (internal::HasJoin<ServiceType>) { s->join(); }
-            }
-        };
-        _count++;
-        return true;
-    }
-
-    /// @brief Retrieve a registered service instance by static type ID.
-    [[nodiscard]] void* getServiceById(internal::TypeIdPtr typeId) const noexcept
-    {
-        for (size_t i = 0; i < _count; ++i) {
-            if (_services[i].typeId == typeId) {
-                return _services[i].instance;
-            }
-        }
-        return nullptr;
-    }
-
-    /// @brief Retrieve a registered service instance by concrete type.
-    /// @tparam ServiceType Type of the background service.
-    /// @return Pointer to registered ServiceType instance, or nullptr if not found.
-    template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() const noexcept
-    {
-        return static_cast<ServiceType*>(getServiceById(internal::getTypeId<ServiceType>()));
-    }
-
-    /// @brief Retrieve event sink handle of a target registered service if available.
-    /// @tparam ServiceType Type of the target background service.
-    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
-    template <typename ServiceType>
-    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
-    {
-        auto* service = getService<ServiceType>();
-        if (service) {
-            if constexpr (requires { service->sink(); }) {
-                return service->sink();
-            }
-        }
-        return EventSinkT<EventVariant>{};
-    }
-
-    /// @brief Initialize and launch all registered background service jthreads.
-    void initialize(ServiceContextType ctx)
-    {
-        ctx.setRegistry(const_cast<BasicServiceRegistry*>(this), [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
-            return static_cast<BasicServiceRegistry*>(regPtr)->getServiceById(typeId);
-        });
-
-        for (size_t i = 0; i < _count; ++i) {
-            if (_services[i].initFn) {
-                _services[i].initFn(_services[i].instance, ctx);
-            }
-            if (_services[i].startFn) {
-                _services[i].startFn(_services[i].instance);
-            }
-        }
-    }
-
-    /// @brief Stop and join all registered background service threads.
-    void shutdown() noexcept
-    {
-        for (size_t i = 0; i < _count; ++i) {
-            if (_services[i].stopFn) {
-                _services[i].stopFn(_services[i].instance);
-            }
-        }
-        for (size_t i = 0; i < _count; ++i) {
-            if (_services[i].joinFn) {
-                _services[i].joinFn(_services[i].instance);
-            }
-        }
-    }
-
-    /// @brief Access number of registered services.
-    [[nodiscard]] size_t size() const noexcept
-    {
-        return _count;
-    }
-
-private:
-    std::array<ServiceHandle, MaxServices> _services{};
-    size_t _count = 0;
-};
-
-/// @brief Default ServiceRegistry alias using MaxServices=8 and DefaultEvents.
-using ServiceRegistry = BasicServiceRegistry<8, DefaultEvents>;
-
-/// @brief Templated ServiceRegistry alias for custom capacity and event variant.
-template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
-using ServiceRegistryT = BasicServiceRegistry<MaxServices, EventVariant>;
-
-} // namespace corium
-
-// <<< End: corium/ServiceRegistry.hpp
-
-#include <utility>
-
-namespace corium {
-
-// Forward declaration of BasicRuntime for friendship
-template <
-    typename EventVariant,
-    typename QueuePolicy,
-    typename SignalPolicy,
-    typename StoragePolicy,
-    typename OverflowPolicy,
-    typename TimerStoragePolicy,
-    typename ProfilerPolicy
->
-class BasicRuntime;
-
-/// @ingroup core
-/// @brief Static CRTP base class for applications managed by Corium Runtime.
-/// Subclass Application<Derived> or Application<Derived, EventVariant, MaxServices> for zero-vtable compile-time static dispatch.
-/// All framework operations and handlers are protected for clean encapsulation within the derived application.
-/// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
-/// @tparam EventVariantOrBus Event variant type list or EventBus type (defaults to DefaultEvents).
-/// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
-template <typename Derived, typename EventVariantOrBus = DefaultEvents, std::size_t MaxServices = 8>
-class Application {
-public:
-    using EventVariant = internal::extract_event_variant_t<EventVariantOrBus>;
-    using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
-    using ContextType = ApplicationContext<EventVariant>;
-
-    Application() = default;
-    ~Application() = default;
-
-    Application(const Application&) = delete;
-    Application& operator=(const Application&) = delete;
-
-    Application(Application&&) = delete;
-    Application& operator=(Application&&) = delete;
-
-protected:
-    /// @brief Register event handler with automatic event type deduction from callable signature.
-    template <typename Handler>
-    bool on(Handler&& handler)
-    {
-        return _context.registerHandler(std::forward<Handler>(handler));
-    }
-
-    /// @brief Access event sink handle.
-    [[nodiscard]] EventSinkT<EventVariant> eventSink()
-    {
-        return _context.eventSink();
-    }
-
-    /// @brief Schedule a single-shot delayed event.
-    template <typename Rep, typename Period>
-    TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
-    {
-        return _context.scheduleDelayed(std::move(event), delay, priority);
-    }
-
-    /// @brief Schedule a recurring periodic event.
-    template <typename Rep, typename Period>
-    TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
-    {
-        return _context.schedulePeriodic(std::move(event), interval, priority);
-    }
-
-    /// @brief Cancel an active timer.
-    bool cancelTimer(TimerId id) noexcept
-    {
-        return _context.cancelTimer(id);
-    }
-
-    /// @brief Request graceful runtime shutdown.
-    void requestQuit()
-    {
-        _context.requestQuit();
-    }
-
-    /// @brief Access background service registry.
-    [[nodiscard]] ServiceRegistryType& services() noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Access const background service registry.
-    [[nodiscard]] const ServiceRegistryType& services() const noexcept
-    {
-        return _serviceRegistry;
-    }
-
-    /// @brief Retrieve registered background service by concrete type.
-    template <typename ServiceType>
-    [[nodiscard]] ServiceType* getService() const noexcept
-    {
-        return _serviceRegistry.template getService<ServiceType>();
-    }
-
-private:
-    template <
-        typename EV,
-        typename QP,
-        typename SP,
-        typename STP,
-        typename OP,
-        typename TP,
-        typename PP
-    >
-    friend class BasicRuntime;
-
-    template <typename Registry>
-    void configureServices(Registry& registry)
-    {
-        if constexpr (requires(Derived& d, Registry& r) { d.onConfigureServices(r); }) {
-            static_cast<Derived*>(this)->onConfigureServices(registry);
-        }
-    }
-
-    void initializeServices(EventSinkT<EventVariant> sink)
-    {
-        configureServices(_serviceRegistry);
-        _serviceRegistry.initialize(BasicServiceContext<EventVariant>{sink});
-    }
-
-    void shutdownServices() noexcept
-    {
-        _serviceRegistry.shutdown();
-    }
-
-    void registerHandlers()
-    {
-        if constexpr (requires(Derived& d) { d.onRegisterHandlers(); }) {
-            static_cast<Derived*>(this)->onRegisterHandlers();
-        }
-    }
-
-    void initialize()
-    {
-        if constexpr (requires(Derived& d) { d.onInitialize(); }) {
-            static_cast<Derived*>(this)->onInitialize();
-        }
-    }
-
-    void shutdown()
-    {
-        if constexpr (requires(Derived& d) { d.onShutdown(); }) {
-            static_cast<Derived*>(this)->onShutdown();
-        }
-    }
-
-    void setContext(ApplicationContext<EventVariant> context)
-    {
-        _context = context;
-        if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
-            static_cast<Derived*>(this)->onSetContext(context);
-        }
-    }
-
-    ApplicationContext<EventVariant> _context;
-    ServiceRegistryType _serviceRegistry;
-};
-
-} // namespace corium
-
-// <<< End: corium/Application.hpp
-
-namespace corium {
+template <typename Derived, typename EventVariant, std::size_t MaxServices>
+class Application;
 
 /// @ingroup core
 /// @brief Corium Application Runtime managing MPSC event loops and static policy execution.
@@ -4217,6 +3433,787 @@ struct RuntimeBuilder : BasicRuntimeBuilder<> {};
 // <<< End: corium/RuntimeBuilder.hpp
 
 // <<< End: corium/Runtime.hpp
+
+// >>> Begin: corium/Application.hpp
+
+
+// >>> Begin: corium/ServiceRegistry.hpp
+
+#include <array>
+#include <cstddef>
+#include <stop_token>
+
+
+// >>> Begin: corium/ServiceContext.hpp
+
+
+namespace corium {
+
+/// @brief Execution context provided to background services.
+/// Allows services to post events back to the main event queue thread-safely
+/// and communicate with other registered background services.
+/// @tparam EventVariant The variant type list of supported events.
+template <typename EventVariant = DefaultEvents>
+class BasicServiceContext {
+public:
+    using GetServiceFn = void* (*)(void* registryPtr, internal::TypeIdPtr typeId);
+
+    BasicServiceContext() = default;
+
+    explicit BasicServiceContext(
+        EventSinkT<EventVariant> sink,
+        void* regPtr = nullptr,
+        GetServiceFn fn = nullptr
+    ) noexcept
+        : _eventSink(sink), _registryPtr(regPtr), _getServiceFn(fn)
+    {}
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
+    {
+        return _eventSink;
+    }
+
+    /// @brief Configure registry resolution bridge (internal framework usage).
+    void setRegistry(void* registryPtr, GetServiceFn fn) noexcept
+    {
+        _registryPtr = registryPtr;
+        _getServiceFn = fn;
+    }
+
+    /// @brief Retrieve another registered service instance by type.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return Pointer to ServiceType instance or nullptr if not registered.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        if (_registryPtr && _getServiceFn) {
+            return static_cast<ServiceType*>(_getServiceFn(_registryPtr, internal::getTypeId<ServiceType>()));
+        }
+        return nullptr;
+    }
+
+    /// @brief Retrieve event sink handle of a target registered service if available.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
+    template <typename ServiceType>
+    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
+    {
+        auto* service = getService<ServiceType>();
+        if (service) {
+            if constexpr (requires { service->sink(); }) {
+                return service->sink();
+            }
+        }
+        return EventSinkT<EventVariant>{};
+    }
+
+    /// @brief Post an event directly to a target service.
+    /// @tparam TargetService Target service type to send the event to.
+    /// @tparam EventType Event type to send.
+    /// @param event Event instance to post.
+    /// @param priority Priority level.
+    /// @return true if event was posted to the target service; false if target service was not found or has no sink.
+    template <typename TargetService, typename EventType>
+    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        auto sinkHandle = getServiceSink<TargetService>();
+        if (sinkHandle) {
+            sinkHandle.post(std::forward<EventType>(event), priority);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    EventSinkT<EventVariant> _eventSink;
+    void* _registryPtr = nullptr;
+    GetServiceFn _getServiceFn = nullptr;
+};
+
+/// @brief Default ServiceContext alias using DefaultEvents.
+using ServiceContext = BasicServiceContext<DefaultEvents>;
+
+/// @brief Templated ServiceContext alias for custom event variant.
+template <typename EventVariant = DefaultEvents>
+using ServiceContextT = BasicServiceContext<EventVariant>;
+
+} // namespace corium
+
+// <<< End: corium/ServiceContext.hpp
+
+namespace corium {
+
+namespace internal {
+
+template <typename T, typename Context>
+concept HasSetContext = requires(T& t, Context ctx) {
+    t.setContext(ctx);
+};
+
+template <typename T>
+concept HasInitialize = requires(T& t) {
+    t.initialize();
+};
+
+template <typename T>
+concept HasRunToken = requires(T& t, std::stop_token st) {
+    t.run(st);
+};
+
+template <typename T>
+concept HasStart = requires(T& t) {
+    t.start();
+};
+
+template <typename T>
+concept HasStop = requires(T& t) {
+    t.stop();
+};
+
+template <typename T>
+concept HasJoin = requires(T& t) {
+    t.join();
+};
+
+} // namespace internal
+
+/// @ingroup core
+/// @brief Non-allocating ServiceRegistry storing service handles in a fixed stack/static array.
+/// Zero heap allocations, zero vtables/RTTI.
+/// @tparam MaxServices Maximum number of background services allowed per registry (default 8).
+/// @tparam EventVariant Supported event variant type list.
+template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
+class BasicServiceRegistry {
+public:
+    using ServiceContextType = ServiceContextT<EventVariant>;
+
+    /// @brief Non-allocating type-erased handle for static background services.
+    struct ServiceHandle {
+        void* instance = nullptr;
+        internal::TypeIdPtr typeId = nullptr;
+        void (*initFn)(void* inst, ServiceContextType ctx) = nullptr;
+        void (*startFn)(void* inst) = nullptr;
+        void (*stopFn)(void* inst) noexcept = nullptr;
+        void (*joinFn)(void* inst) noexcept = nullptr;
+    };
+
+    BasicServiceRegistry() = default;
+
+    /// @brief Register a background service instance by reference.
+    /// @tparam ServiceType Type of the background service.
+    /// @param serviceInstance Reference to service instance.
+    /// @return true if service was registered successfully; false if registry is full.
+    template <typename ServiceType>
+    bool registerService(ServiceType& serviceInstance)
+    {
+        if (_count >= MaxServices) {
+            return false;
+        }
+        _services[_count] = ServiceHandle{
+            &serviceInstance,
+            internal::getTypeId<ServiceType>(),
+            [](void* ptr, ServiceContextType ctx) {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasSetContext<ServiceType, ServiceContextType>) { s->setContext(ctx); }
+                if constexpr (internal::HasInitialize<ServiceType>) { s->initialize(); }
+            },
+            [](void* ptr) {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasRunToken<ServiceType>) {
+                    s->startThread(s);
+                } else if constexpr (internal::HasStart<ServiceType>) {
+                    s->start();
+                }
+            },
+            [](void* ptr) noexcept {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasStop<ServiceType>) { s->stop(); }
+            },
+            [](void* ptr) noexcept {
+                auto* s = static_cast<ServiceType*>(ptr);
+                if constexpr (internal::HasJoin<ServiceType>) { s->join(); }
+            }
+        };
+        _count++;
+        return true;
+    }
+
+    /// @brief Retrieve a registered service instance by static type ID.
+    [[nodiscard]] void* getServiceById(internal::TypeIdPtr typeId) const noexcept
+    {
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].typeId == typeId) {
+                return _services[i].instance;
+            }
+        }
+        return nullptr;
+    }
+
+    /// @brief Retrieve a registered service instance by concrete type.
+    /// @tparam ServiceType Type of the background service.
+    /// @return Pointer to registered ServiceType instance, or nullptr if not found.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        return static_cast<ServiceType*>(getServiceById(internal::getTypeId<ServiceType>()));
+    }
+
+    /// @brief Retrieve event sink handle of a target registered service if available.
+    /// @tparam ServiceType Type of the target background service.
+    /// @return EventSinkT handle targeting the service's incoming queue, or empty handle if unavailable.
+    template <typename ServiceType>
+    [[nodiscard]] EventSinkT<EventVariant> getServiceSink() const noexcept
+    {
+        auto* service = getService<ServiceType>();
+        if (service) {
+            if constexpr (requires { service->sink(); }) {
+                return service->sink();
+            }
+        }
+        return EventSinkT<EventVariant>{};
+    }
+
+    /// @brief Initialize and launch all registered background service jthreads.
+    void initialize(ServiceContextType ctx)
+    {
+        ctx.setRegistry(const_cast<BasicServiceRegistry*>(this), [](void* regPtr, internal::TypeIdPtr typeId) -> void* {
+            return static_cast<BasicServiceRegistry*>(regPtr)->getServiceById(typeId);
+        });
+
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].initFn) {
+                _services[i].initFn(_services[i].instance, ctx);
+            }
+            if (_services[i].startFn) {
+                _services[i].startFn(_services[i].instance);
+            }
+        }
+    }
+
+    /// @brief Stop and join all registered background service threads.
+    void shutdown() noexcept
+    {
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].stopFn) {
+                _services[i].stopFn(_services[i].instance);
+            }
+        }
+        for (size_t i = 0; i < _count; ++i) {
+            if (_services[i].joinFn) {
+                _services[i].joinFn(_services[i].instance);
+            }
+        }
+    }
+
+    /// @brief Access number of registered services.
+    [[nodiscard]] size_t size() const noexcept
+    {
+        return _count;
+    }
+
+private:
+    std::array<ServiceHandle, MaxServices> _services{};
+    size_t _count = 0;
+};
+
+/// @brief Default ServiceRegistry alias using MaxServices=8 and DefaultEvents.
+using ServiceRegistry = BasicServiceRegistry<8, DefaultEvents>;
+
+/// @brief Templated ServiceRegistry alias for custom capacity and event variant.
+template <size_t MaxServices = 8, typename EventVariant = DefaultEvents>
+using ServiceRegistryT = BasicServiceRegistry<MaxServices, EventVariant>;
+
+} // namespace corium
+
+// <<< End: corium/ServiceRegistry.hpp
+
+#include <utility>
+
+namespace corium {
+
+// Forward declaration of BasicRuntime for friendship
+template <
+    typename EventVariant,
+    typename QueuePolicy,
+    typename SignalPolicy,
+    typename StoragePolicy,
+    typename OverflowPolicy,
+    typename TimerStoragePolicy,
+    typename ProfilerPolicy
+>
+class BasicRuntime;
+
+/// @ingroup core
+/// @brief Static CRTP base class for applications managed by Corium Runtime.
+/// Subclass Application<Derived> or Application<Derived, EventVariant, MaxServices> for zero-vtable compile-time static dispatch.
+/// All framework operations and handlers are protected for clean encapsulation within the derived application.
+/// @tparam Derived Subclass type implementing lifecycle hooks (onRegisterHandlers, onInitialize, onShutdown, onConfigureServices).
+/// @tparam EventVariantOrBus Event variant type list or EventBus type (defaults to DefaultEvents).
+/// @tparam MaxServices Maximum number of background services that can be registered (defaults to 8).
+template <typename Derived, typename EventVariantOrBus = DefaultEvents, std::size_t MaxServices = 8>
+class Application {
+public:
+    using EventVariant = internal::extract_event_variant_t<EventVariantOrBus>;
+    using ServiceRegistryType = BasicServiceRegistry<MaxServices, EventVariant>;
+    using ContextType = ApplicationContext<EventVariant>;
+
+    Application() = default;
+    ~Application() = default;
+
+    Application(const Application&) = delete;
+    Application& operator=(const Application&) = delete;
+
+    Application(Application&&) = delete;
+    Application& operator=(Application&&) = delete;
+
+protected:
+    /// @brief Register event handler with automatic event type deduction from callable signature.
+    template <typename Handler>
+    bool on(Handler&& handler)
+    {
+        return _context.registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Access event sink handle.
+    [[nodiscard]] EventSinkT<EventVariant> eventSink()
+    {
+        return _context.eventSink();
+    }
+
+    /// @brief Schedule a single-shot delayed event.
+    template <typename Rep, typename Period>
+    TimerId postDelayed(EventVariant event, const std::chrono::duration<Rep, Period>& delay, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.scheduleDelayed(std::move(event), delay, priority);
+    }
+
+    /// @brief Schedule a recurring periodic event.
+    template <typename Rep, typename Period>
+    TimerId postPeriodic(EventVariant event, const std::chrono::duration<Rep, Period>& interval, EventPriority priority = EventPriority::Normal)
+    {
+        return _context.schedulePeriodic(std::move(event), interval, priority);
+    }
+
+    /// @brief Cancel an active timer.
+    bool cancelTimer(TimerId id) noexcept
+    {
+        return _context.cancelTimer(id);
+    }
+
+    /// @brief Request graceful runtime shutdown.
+    void requestQuit()
+    {
+        _context.requestQuit();
+    }
+
+    /// @brief Access background service registry.
+    [[nodiscard]] ServiceRegistryType& services() noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Access const background service registry.
+    [[nodiscard]] const ServiceRegistryType& services() const noexcept
+    {
+        return _serviceRegistry;
+    }
+
+    /// @brief Retrieve registered background service by concrete type.
+    template <typename ServiceType>
+    [[nodiscard]] ServiceType* getService() const noexcept
+    {
+        return _serviceRegistry.template getService<ServiceType>();
+    }
+
+private:
+    template <
+        typename EV,
+        typename QP,
+        typename SP,
+        typename STP,
+        typename OP,
+        typename TP,
+        typename PP
+    >
+    friend class BasicRuntime;
+
+    template <typename Registry>
+    void configureServices(Registry& registry)
+    {
+        if constexpr (requires(Derived& d, Registry& r) { d.onConfigureServices(r); }) {
+            static_cast<Derived*>(this)->onConfigureServices(registry);
+        }
+    }
+
+    void initializeServices(EventSinkT<EventVariant> sink)
+    {
+        configureServices(_serviceRegistry);
+        _serviceRegistry.initialize(BasicServiceContext<EventVariant>{sink});
+    }
+
+    void shutdownServices() noexcept
+    {
+        _serviceRegistry.shutdown();
+    }
+
+    void registerHandlers()
+    {
+        if constexpr (requires(Derived& d) { d.onRegisterHandlers(); }) {
+            static_cast<Derived*>(this)->onRegisterHandlers();
+        }
+    }
+
+    void initialize()
+    {
+        if constexpr (requires(Derived& d) { d.onInitialize(); }) {
+            static_cast<Derived*>(this)->onInitialize();
+        }
+    }
+
+    void shutdown()
+    {
+        if constexpr (requires(Derived& d) { d.onShutdown(); }) {
+            static_cast<Derived*>(this)->onShutdown();
+        }
+    }
+
+    void setContext(ApplicationContext<EventVariant> context)
+    {
+        _context = context;
+        if constexpr (requires(Derived& d, ApplicationContext<EventVariant> c) { d.onSetContext(c); }) {
+            static_cast<Derived*>(this)->onSetContext(context);
+        }
+    }
+
+    ApplicationContext<EventVariant> _context;
+    ServiceRegistryType _serviceRegistry;
+};
+
+} // namespace corium
+
+// <<< End: corium/Application.hpp
+
+// >>> Begin: corium/Service.hpp
+
+
+#include <cstddef>
+#include <utility>
+
+namespace corium {
+
+/// @ingroup core
+/// @brief Non-allocating base class for synchronous or thread-agnostic services.
+/// Provides event producing (posting to main EventBus) and event consuming (receiving events into dedicated incoming bus).
+/// Does NOT own a thread. Zero heap allocations, zero vtables/RTTI.
+/// @tparam EventVariantType Supported event variant type list.
+/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
+>
+class Service {
+public:
+    using EventVariant = EventVariantType;
+    using IncomingBus = BasicEventBus<EventVariant, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
+
+    Service() = default;
+
+    explicit Service(ServiceContextT<EventVariant> context)
+        : _context(context)
+    {}
+
+    ~Service() = default;
+
+    Service(const Service&) = delete;
+    Service& operator=(const Service&) = delete;
+
+    Service(Service&&) noexcept = default;
+    Service& operator=(Service&&) noexcept = default;
+
+    void setContext(ServiceContextT<EventVariant> context) noexcept
+    {
+        _context = context;
+    }
+
+    /// @brief Get an EventSink handle targeting this service's incoming event queue.
+    [[nodiscard]] EventSinkT<EventVariant> sink() noexcept
+    {
+        return _incomingBus.sink();
+    }
+
+    /// @brief Register an event handler for incoming events with explicit event type parameter.
+    template <typename EventType, typename Handler>
+    bool registerHandler(Handler&& handler)
+    {
+        return _incomingBus.template registerHandler<EventType>(std::forward<Handler>(handler));
+    }
+
+    /// @brief Register an event handler for incoming events with automatic event type deduction.
+    template <typename Handler>
+    bool on(Handler&& handler)
+    {
+        return _incomingBus.registerHandler(std::forward<Handler>(handler));
+    }
+
+    /// @brief Process a single incoming event from the service queue.
+    /// @return true if an event was popped and dispatched; false if queue was empty.
+    bool processOne()
+    {
+        return _incomingBus.processOne();
+    }
+
+    /// @brief Pump all pending incoming events from the queue until empty.
+    /// @return Number of events processed.
+    std::size_t pump()
+    {
+        std::size_t processed = 0;
+        while (_incomingBus.processOne()) {
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Pump up to maxEvents pending incoming events from the queue.
+    /// @param maxEvents Maximum number of events to process.
+    /// @return Number of events processed.
+    std::size_t pump(std::size_t maxEvents)
+    {
+        std::size_t processed = 0;
+        while (processed < maxEvents && _incomingBus.processOne()) {
+            processed++;
+        }
+        return processed;
+    }
+
+protected:
+    [[nodiscard]] ServiceContextT<EventVariant>& context() noexcept { return _context; }
+    [[nodiscard]] const ServiceContextT<EventVariant>& context() const noexcept { return _context; }
+
+    /// @brief Access main application EventSink handle.
+    [[nodiscard]] EventSinkT<EventVariant> mainSink() const noexcept { return _context.mainSink(); }
+
+    /// @brief Post an event into the main application event queue.
+    template <typename EventType>
+    void post(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        _context.mainSink().post(std::forward<EventType>(event), priority);
+    }
+
+    /// @brief Post a high-priority event into the main application event queue.
+    template <typename EventType>
+    void postHighPriority(EventType&& event) const
+    {
+        _context.mainSink().postHighPriority(std::forward<EventType>(event));
+    }
+
+    /// @brief Post an event directly to another registered service.
+    template <typename TargetService, typename EventType>
+    bool sendToService(EventType&& event, EventPriority priority = EventPriority::Normal) const
+    {
+        return _context.template sendToService<TargetService>(std::forward<EventType>(event), priority);
+    }
+
+    [[nodiscard]] IncomingBus& incomingBus() noexcept { return _incomingBus; }
+    [[nodiscard]] const IncomingBus& incomingBus() const noexcept { return _incomingBus; }
+
+private:
+    ServiceContextT<EventVariant> _context;
+    [[no_unique_address]] IncomingBus _incomingBus;
+};
+
+/// @brief Zero-overhead Service alias for pure producer services (no incoming event queue/reactor allocations).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerService = Service<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief Explicit Service alias for consumer services with configurable incoming event queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerService = Service<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
+
+} // namespace corium
+
+// <<< End: corium/Service.hpp
+
+// >>> Begin: corium/BackgroundService.hpp
+
+
+#include <chrono>
+#include <exception>
+#include <stop_token>
+#include <thread>
+
+namespace corium {
+
+/// @ingroup core
+/// @brief Multi-threaded background worker service owning a dedicated std::jthread.
+/// Integrates incoming event queue with background worker execution and cooperative shutdown via std::stop_token.
+/// Zero heap allocations, zero vtables/RTTI.
+/// @tparam EventVariantType Supported event variant type list.
+/// @tparam QueuePolicy Strategy for queueing incoming events (bounded lock-free MPSC).
+/// @tparam SignalPolicy Strategy for signaling (CallbackSignalPolicy default).
+/// @tparam StoragePolicy Strategy for compile-time handler capacity and delegate storage.
+/// @tparam OverflowPolicy Strategy for queue overflow handling.
+template <
+    typename EventVariantType = DefaultEvents,
+    typename QueuePolicy = BoundedMpscQueuePolicy<EventVariantType, 1024>,
+    typename SignalPolicy = CallbackSignalPolicy,
+    typename StoragePolicy = DefaultStoragePolicy,
+    typename OverflowPolicy = DropNewestOverflowPolicy
+>
+class BackgroundService : public Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy> {
+public:
+    using Base = Service<EventVariantType, QueuePolicy, SignalPolicy, StoragePolicy, OverflowPolicy>;
+    using EventVariant = typename Base::EventVariant;
+
+    BackgroundService() = default;
+
+    explicit BackgroundService(ServiceContextT<EventVariant> context)
+        : Base(context)
+    {}
+
+    ~BackgroundService()
+    {
+        stop();
+        join();
+    }
+
+    BackgroundService(const BackgroundService&) = delete;
+    BackgroundService& operator=(const BackgroundService&) = delete;
+
+    BackgroundService(BackgroundService&&) noexcept = default;
+    BackgroundService& operator=(BackgroundService&&) noexcept = default;
+
+    /// @brief Wait for incoming events or timeout, then pump all available incoming events.
+    /// Safe for use inside worker thread run(std::stop_token).
+    /// @tparam Rep Duration representation type.
+    /// @tparam Period Duration period type.
+    /// @param stopToken std::stop_token from run(stopToken).
+    /// @param timeout Maximum duration to wait if queue is empty.
+    /// @return Number of events processed.
+    template <typename Rep, typename Period>
+    std::size_t waitAndPump(const std::stop_token& stopToken, const std::chrono::duration<Rep, Period>& timeout)
+    {
+        if (this->incomingBus().empty() && !stopToken.stop_requested()) {
+            this->incomingBus().signalPolicy().wait_for(timeout);
+        }
+
+        std::size_t processed = 0;
+        while (!stopToken.stop_requested()) {
+            if (!this->incomingBus().processOne()) {
+                break;
+            }
+            processed++;
+        }
+        return processed;
+    }
+
+    /// @brief Start execution loop on dedicated std::jthread.
+    template <typename Derived>
+    void startThread(Derived* derived)
+    {
+        _thread = std::jthread([this, derived](std::stop_token stopToken) {
+#if __cpp_exceptions
+            using EvVariant = EventVariantType;
+            try {
+                derived->run(stopToken);
+            } catch (const std::exception& e) {
+                if constexpr (requires { derived->onError(std::current_exception()); }) {
+                    derived->onError(std::current_exception());
+                } else if constexpr (requires { derived->onError(e.what()); }) {
+                    derived->onError(e.what());
+                }
+                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
+                    this->postHighPriority(ErrorEvent{1, reinterpret_cast<uintptr_t>(e.what())});
+                }
+            } catch (...) {
+                if constexpr (requires { derived->onError(std::current_exception()); }) {
+                    derived->onError(std::current_exception());
+                }
+                if constexpr (has_variant_type_v<ErrorEvent, EvVariant>) {
+                    this->postHighPriority(ErrorEvent{1, 0});
+                }
+            }
+#else
+            derived->run(stopToken);
+#endif
+        });
+    }
+
+    /// @brief Request graceful stop of the background thread via std::stop_token.
+    void stop() noexcept
+    {
+        _thread.request_stop();
+    }
+
+    /// @brief Join background std::jthread cleanly.
+    void join() noexcept
+    {
+        if (_thread.joinable()) {
+            _thread.join();
+        }
+    }
+
+private:
+    std::jthread _thread;
+};
+
+/// @brief Zero-overhead BackgroundService alias for producer worker threads (zero incoming queue/reactor footprint).
+/// @tparam EventVariant Supported event variant type list.
+template <typename EventVariant = DefaultEvents>
+using ProducerBackgroundService = BackgroundService<
+    EventVariant,
+    NoQueuePolicy<EventVariant>,
+    NoSignalPolicy,
+    ZeroStoragePolicy
+>;
+
+/// @brief BackgroundService alias for consumer worker threads with configurable queue capacity.
+/// @tparam EventVariant Supported event variant type list.
+/// @tparam Capacity Incoming ring buffer event capacity.
+template <typename EventVariant = DefaultEvents, std::size_t Capacity = 64>
+using ConsumerBackgroundService = BackgroundService<
+    EventVariant,
+    BoundedMpscQueuePolicy<EventVariant, Capacity>,
+    CallbackSignalPolicy,
+    DefaultStoragePolicy
+>;
+
+} // namespace corium
+
+// <<< End: corium/BackgroundService.hpp
+
+// >>> Begin: corium/policies/Policies.hpp
+
+/// @file Policies.hpp
+/// @brief Umbrella header providing QueuePolicies, SignalPolicies, and StoragePolicies.
+
+
+// <<< End: corium/policies/Policies.hpp
 
 // >>> Begin: corium/logging/logging.hpp
 
@@ -4990,8 +4987,6 @@ struct TransitionTable {
 
 // >>> Begin: corium/fsm/StateMachine.hpp
 
-#include <concepts>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -6031,7 +6026,7 @@ public:
 
         // Failure detected: suppress watchdog kick and post emergency event
         _suppressionsCount.fetch_add(1, std::memory_order_relaxed);
-        sink.postHighPriority(WatchdogTimeoutEvent{timedOutId, lastBeat, budget});
+        sink.postHighPriority(WatchdogTimeoutEvent{.serviceId = timedOutId, .lastHeartbeatNs = lastBeat, .timeoutBudgetNs = budget});
         return false;
     }
 
@@ -6990,7 +6985,6 @@ private:
 #include <cstring>
 #include <string>
 #include <utility>
-#include <variant>
 
 
 namespace corium::ipc {

@@ -12,7 +12,6 @@
 #include <iomanip>
 #include <iostream>
 #include <variant>
-#include <vector>
 
 #include "corium/Application.hpp"
 #include "corium/Runtime.hpp"
@@ -122,14 +121,14 @@ int main()
     auto sink = runtime.eventSink();
 
     // 1. Normal priority quotes
-    sink.post(MarketQuoteEvent{1, 95420.50, 95421.00, 1.25});
-    sink.post(MarketQuoteEvent{1, 95421.00, 95421.50, 2.40});
+    sink.post(MarketQuoteEvent{.symbolId = 1, .bidPrice = 95420.50, .askPrice = 95421.00, .volume = 1.25});
+    sink.post(MarketQuoteEvent{.symbolId = 1, .bidPrice = 95421.00, .askPrice = 95421.50, .volume = 2.40});
 
     // 2. High-priority risk cancellation (should be dispatched BEFORE normal quotes)
-    sink.postHighPriority(EmergencyRiskCancelEvent{9901, 1, "MAX_DRAWDOWN_LIMIT_TRIGGERED"});
+    sink.postHighPriority(EmergencyRiskCancelEvent{.accountId = 9901, .symbolId = 1, .cancelReason = "MAX_DRAWDOWN_LIMIT_TRIGGERED"});
 
     // 3. Trade execution
-    sink.post(TradeExecutionEvent{88231, 1, 95421.00, 0.50, true});
+    sink.post(TradeExecutionEvent{.tradeId = 88231, .symbolId = 1, .executionPrice = 95421.00, .quantity = 0.50, .isBuy = true});
 
     // Process all events
     runtime.pump();
@@ -141,7 +140,7 @@ int main()
 
     const auto burstStart = std::chrono::steady_clock::now();
     for (uint32_t i = 1; i <= 150; ++i) {
-        sink.post(MarketQuoteEvent{2, 3450.00 + i * 0.1, 3450.50 + i * 0.1, 5.0});
+        sink.post(MarketQuoteEvent{.symbolId = 2, .bidPrice = 3450.00 + i * 0.1, .askPrice = 3450.50 + i * 0.1, .volume = 5.0});
     }
     const auto burstEnd = std::chrono::steady_clock::now();
     const auto pushDurationNs = std::chrono::duration_cast<std::chrono::nanoseconds>(burstEnd - burstStart).count();

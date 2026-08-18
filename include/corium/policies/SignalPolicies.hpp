@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <mutex>
 #include <thread>
-#include <utility>
 
 #ifdef __linux__
 #include <poll.h>

@@ -14,6 +14,7 @@ Checks: >
   -modernize-raw-string-literal,
   -modernize-macro-to-enum,
   -modernize-use-constraints,
+  -modernize-use-designated-initializers,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
   -bugprone-exception-escape,

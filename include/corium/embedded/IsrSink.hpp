@@ -1,7 +1,6 @@
 #pragma once
 
 #include <utility>
-#include "corium/EventSink.hpp"
 #include "corium/policies/QueuePolicies.hpp"
 
 namespace corium::embedded {

@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "corium/EventSink.hpp"
 #include "corium/safety/HeartbeatMonitor.hpp"
 #include "corium/safety/SafetyEvents.hpp"
 #include "corium/timers/ClockPolicies.hpp"
@@ -88,7 +87,7 @@ public:
 
         // Failure detected: suppress watchdog kick and post emergency event
         _suppressionsCount.fetch_add(1, std::memory_order_relaxed);
-        sink.postHighPriority(WatchdogTimeoutEvent{timedOutId, lastBeat, budget});
+        sink.postHighPriority(WatchdogTimeoutEvent{.serviceId = timedOutId, .lastHeartbeatNs = lastBeat, .timeoutBudgetNs = budget});
         return false;
     }
 

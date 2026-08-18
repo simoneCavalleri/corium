@@ -4,7 +4,9 @@
 #include <utility>
 
 #include "corium/Events.hpp"
-#include "corium/policies/Policies.hpp"
+#include "corium/policies/OverflowPolicies.hpp"
+#include "corium/policies/QueuePolicies.hpp"
+#include "corium/policies/SignalPolicies.hpp"
 
 namespace corium {
 

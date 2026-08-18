@@ -95,7 +95,7 @@ int main()
     // -------------------------------------------------------------------------
     std::cout << "--- Part 1: Zero-Copy Binary Wire Framing (CRC-16) ---\n";
 
-    DroneNavTelemetryEvent sourceTelem{104, 45.4642f, 9.1900f, 120.5f, 94.0f};
+    DroneNavTelemetryEvent sourceTelem{.uavId = 104, .latitude = 45.4642f, .longitude = 9.1900f, .altitudeMsl = 120.5f, .batteryPct = 94.0f};
 
     // Serialize directly into a framed WirePacket with CRC-16 checksum
     auto packet = corium::wire::WireSerializer::serialize<DroneNavTelemetryEvent, AvionicsEvents>(sourceTelem);
@@ -128,13 +128,13 @@ int main()
     runtime.initialize(app);
 
     // 1. Simulate external sensor daemon writing telemetry into Shared Memory (zero-copy)
-    shmChannel.post(DroneNavTelemetryEvent{104, 45.4642f, 9.1900f, 120.5f, 94.0f});
-    shmChannel.post(DroneNavTelemetryEvent{104, 45.4645f, 9.1905f, 125.0f, 93.5f});
+    shmChannel.post(DroneNavTelemetryEvent{.uavId = 104, .latitude = 45.4642f, .longitude = 9.1900f, .altitudeMsl = 120.5f, .batteryPct = 94.0f});
+    shmChannel.post(DroneNavTelemetryEvent{.uavId = 104, .latitude = 45.4645f, .longitude = 9.1905f, .altitudeMsl = 125.0f, .batteryPct = 93.5f});
 
     // 2. Simulate Ground Station sending flight commands over UNIX Domain Socket
     corium::ipc::UdsChannel<AvionicsEvents> clientSocket;
     clientSocket.connect(socketPath);
-    clientSocket.post(GroundFlightCommandEvent{2, 150.0f, 18.5f}); // Set Waypoint
+    clientSocket.post(GroundFlightCommandEvent{.commandId = 2, .targetAltitude = 150.0f, .targetSpeed = 18.5f}); // Set Waypoint
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 

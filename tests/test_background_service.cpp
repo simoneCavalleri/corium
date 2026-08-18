@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
-#include <corium/corium.hpp>
 #include <chrono>
-#include <iostream>
 #include <thread>
+#include <corium/corium.hpp>
 
 using namespace corium;
 
