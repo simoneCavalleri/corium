@@ -34,16 +34,14 @@ namespace internal {
 template <std::size_t N>
 constexpr std::size_t next_power_of_two() {
     if (N <= 1) return 1;
-    std::size_t val = N - 1;
+    uint64_t val = N - 1;
     val |= val >> 1;
     val |= val >> 2;
     val |= val >> 4;
     val |= val >> 8;
     val |= val >> 16;
-    if constexpr (sizeof(std::size_t) > 4) {
-        val |= val >> 32;
-    }
-    return val + 1;
+    val |= val >> 32;
+    return static_cast<std::size_t>(val + 1);
 }
 
 /// @brief Extract queue capacity from a QueuePolicy if it exposes a static ::capacity member,
