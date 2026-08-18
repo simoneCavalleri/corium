@@ -18,8 +18,8 @@ struct HeapFrameAllocator {
         return ::operator new(size);
     }
 
-    static void deallocate(void* ptr, std::size_t size) noexcept {
-        ::operator delete(ptr, size);
+    static void deallocate(void* ptr, [[maybe_unused]] std::size_t size) noexcept {
+        ::operator delete(ptr);
     }
 };
 
