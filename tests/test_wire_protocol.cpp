@@ -100,3 +100,26 @@ TEST(WireProtocolTest, SchemaVersionValidation)
     } sink;
     EXPECT_FALSE((WireSerializer::deserializeAndPush<WireTestEvents>(packet, sink)));
 }
+
+TEST(WireProtocolTest, SchemaSignatureMismatch)
+{
+    WireSensorData data{300, 21.0f, 45.0f};
+    auto packet = WireSerializer::serialize<WireSensorData, WireTestEvents>(data);
+    EXPECT_TRUE(packet.isValid());
+
+    struct MockWireSink {
+        int count = 0;
+        void post(const WireTestEvents&, corium::EventPriority = corium::EventPriority::Normal) noexcept {
+            count++;
+        }
+    } sink;
+
+    // Tamper signature byte with recalculating checksum
+    packet.header.reserved = 0xEE;
+    packet.header.checksum = calculateCrc16(std::span<const uint8_t>(packet.payload.data(), packet.header.payloadLength));
+    EXPECT_TRUE(packet.isValid()); // Valid CRC, but signature mismatched
+
+    EXPECT_FALSE((WireSerializer::deserializeAndPush<WireTestEvents>(packet, sink)));
+    EXPECT_EQ(sink.count, 0);
+}
+

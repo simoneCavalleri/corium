@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -14,6 +13,7 @@
 #include <utility>
 
 #include "corium/Events.hpp"
+#include "corium/internal/StaticMinHeap.hpp"
 #include "corium/policies/QueuePolicies.hpp"
 #include "corium/timers/ClockPolicies.hpp"
 
@@ -23,10 +23,11 @@ using TimerId = uint32_t;
 constexpr TimerId INVALID_TIMER_ID = 0;
 
 /// @ingroup timers
-/// @brief Zero-heap Timer Scheduler storing timers in a fixed-capacity static array.
+/// @brief Zero-heap Min-Heap Timer Scheduler for delayed and periodic events.
+/// Provides O(1) earliest-due timer checks and O(log N) insertion and rescheduling.
 /// Supports single-shot delayed events and recurring periodic events with compile-time clock policy.
 /// @tparam EventVariant Supported event variant list type.
-/// @tparam MaxTimers Maximum number of concurrent active timers (static array capacity).
+/// @tparam MaxTimers Maximum number of concurrent active timers (static min-heap capacity).
 /// @tparam ClockPolicy Policy governing time acquisition and arithmetic (ChronoClockPolicy default).
 template <
     typename EventVariant = DefaultEvents,
@@ -38,6 +39,22 @@ public:
     using Clock = ClockPolicy;
     using time_point = typename ClockPolicy::time_point;
     using duration = typename ClockPolicy::duration;
+
+    struct TimerEntry {
+        TimerId id = INVALID_TIMER_ID;
+        EventVariant event{};
+        time_point expiryTime{};
+        duration interval{};
+        EventPriority priority = EventPriority::Normal;
+        bool isPeriodic = false;
+        bool active = false;
+    };
+
+    struct TimerComparator {
+        bool operator()(const TimerEntry& a, const TimerEntry& b) const noexcept {
+            return a.expiryTime > b.expiryTime; // Min-heap: earliest expiry at top
+        }
+    };
 
     TimerScheduler() = default;
 
@@ -91,14 +108,16 @@ public:
     /// @return true if timer was found and cancelled; false if handle was invalid/inactive.
     bool cancelTimer(TimerId id) noexcept
     {
-        if (id == INVALID_TIMER_ID) {
+        if (id == INVALID_TIMER_ID || _activeCount == 0) {
             return false;
         }
 
-        for (auto& entry : _timers) {
-            if (entry.active && entry.id == id) {
-                entry.active = false;
-                entry.id = INVALID_TIMER_ID;
+        auto* data = _heap.data();
+        const std::size_t n = _heap.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            if (data[i].active && data[i].id == id) {
+                data[i].active = false;
+                data[i].id = INVALID_TIMER_ID;
                 if (_activeCount > 0) {
                     _activeCount--;
                 }
@@ -109,6 +128,7 @@ public:
     }
 
     /// @brief Process all due timers and post their events into target event bus or sink.
+    /// Uses O(1) early exit when the earliest timer is not yet due.
     /// @tparam TargetEventSink Target event sink type (e.g. BasicEventBus or EventSink).
     /// @param sink Target sink receiving due timer events.
     /// @param now Current time point (defaults to ClockPolicy::now()).
@@ -116,34 +136,45 @@ public:
     template <typename EventSink>
     std::size_t processDueTimers(EventSink& sink, time_point now = ClockPolicy::now())
     {
-        if (_activeCount == 0) {
+        if (_activeCount == 0 || _heap.empty()) {
             return 0;
         }
 
         std::size_t posted = 0;
-        for (auto& entry : _timers) {
-            if (!entry.active) {
+
+        while (!_heap.empty()) {
+            auto& top = _heap.top();
+
+            // Discard cancelled timers at top of heap
+            if (!top.active) {
+                _heap.pop();
                 continue;
             }
 
-            if (ClockPolicy::isDue(now, entry.expiryTime)) {
-                sink.post(entry.event, entry.priority);
-                posted++;
+            // O(1) early exit: if earliest scheduled timer is not due, nothing else is due
+            if (!ClockPolicy::isDue(now, top.expiryTime)) {
+                break;
+            }
 
-                if (entry.isPeriodic) {
+            TimerEntry entry = std::move(_heap.top());
+            _heap.pop();
+
+            sink.post(entry.event, entry.priority);
+            posted++;
+
+            if (entry.isPeriodic) {
+                entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
+                while (ClockPolicy::isDue(now, entry.expiryTime)) {
                     entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
-                    while (ClockPolicy::isDue(now, entry.expiryTime)) {
-                        entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
-                    }
-                } else {
-                    entry.active = false;
-                    entry.id = INVALID_TIMER_ID;
-                    if (_activeCount > 0) {
-                        _activeCount--;
-                    }
+                }
+                _heap.push(std::move(entry));
+            } else {
+                if (_activeCount > 0) {
+                    _activeCount--;
                 }
             }
         }
+
         return posted;
     }
 
@@ -162,37 +193,34 @@ public:
 private:
     TimerId allocateTimer(EventVariant event, time_point expiryTime, duration interval, EventPriority priority, bool isPeriodic)
     {
-        for (auto& entry : _timers) {
-            if (!entry.active) {
-                entry.id = _nextId++;
-                if (_nextId == INVALID_TIMER_ID) {
-                    _nextId = 1;
-                }
-                entry.event = std::move(event);
-                entry.expiryTime = expiryTime;
-                entry.interval = interval;
-                entry.priority = priority;
-                entry.isPeriodic = isPeriodic;
-                entry.active = true;
-                _activeCount++;
-                return entry.id;
-            }
+        if (_activeCount >= MaxTimers || _heap.full()) {
+            return INVALID_TIMER_ID;
         }
 
-        return INVALID_TIMER_ID; // Capacity exceeded
+        TimerId id = _nextId++;
+        if (_nextId == INVALID_TIMER_ID) {
+            _nextId = 1;
+        }
+
+        TimerEntry entry{
+            .id = id,
+            .event = std::move(event),
+            .expiryTime = expiryTime,
+            .interval = interval,
+            .priority = priority,
+            .isPeriodic = isPeriodic,
+            .active = true
+        };
+
+        if (_heap.push(std::move(entry))) {
+            _activeCount++;
+            return id;
+        }
+
+        return INVALID_TIMER_ID;
     }
 
-    struct TimerEntry {
-        TimerId id = INVALID_TIMER_ID;
-        EventVariant event{};
-        time_point expiryTime{};
-        duration interval{};
-        EventPriority priority = EventPriority::Normal;
-        bool isPeriodic = false;
-        bool active = false;
-    };
-
-    std::array<TimerEntry, MaxTimers> _timers{};
+    internal::StaticMinHeap<TimerEntry, MaxTimers, TimerComparator> _heap{};
     size_t _activeCount = 0;
     TimerId _nextId = 1;
 };

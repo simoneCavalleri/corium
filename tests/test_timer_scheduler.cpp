@@ -189,3 +189,50 @@ TEST(TimerSchedulerTest, PeriodicTimerNoCumulativeDrift)
     scheduler.cancelTimer(id);
 }
 
+TEST(StaticMinHeapTest, PushPopOrdering)
+{
+    corium::internal::StaticMinHeap<int, 8, std::greater<>> minHeap;
+    EXPECT_TRUE(minHeap.empty());
+    EXPECT_EQ(minHeap.size(), 0u);
+
+    EXPECT_TRUE(minHeap.push(50));
+    EXPECT_TRUE(minHeap.push(10));
+    EXPECT_TRUE(minHeap.push(30));
+    EXPECT_TRUE(minHeap.push(5));
+    EXPECT_TRUE(minHeap.push(20));
+
+    EXPECT_EQ(minHeap.size(), 5u);
+    EXPECT_EQ(minHeap.top(), 5);
+
+    EXPECT_TRUE(minHeap.pop());
+    EXPECT_EQ(minHeap.top(), 10);
+
+    EXPECT_TRUE(minHeap.pop());
+    EXPECT_EQ(minHeap.top(), 20);
+
+    EXPECT_TRUE(minHeap.pop());
+    EXPECT_EQ(minHeap.top(), 30);
+
+    EXPECT_TRUE(minHeap.pop());
+    EXPECT_EQ(minHeap.top(), 50);
+
+    EXPECT_TRUE(minHeap.pop());
+    EXPECT_TRUE(minHeap.empty());
+    EXPECT_FALSE(minHeap.pop());
+}
+
+TEST(StaticMinHeapTest, CapacityLimit)
+{
+    corium::internal::StaticMinHeap<int, 3, std::greater<>> heap;
+    EXPECT_TRUE(heap.push(1));
+    EXPECT_TRUE(heap.push(2));
+    EXPECT_TRUE(heap.push(3));
+    EXPECT_TRUE(heap.full());
+    EXPECT_FALSE(heap.push(4)); // Overflow rejected
+
+    heap.clear();
+    EXPECT_TRUE(heap.empty());
+    EXPECT_EQ(heap.size(), 0u);
+}
+
+

@@ -11,18 +11,32 @@
 #include <iterator>
 #include <utility>
 
+#include "corium/async/FramePool.hpp"
+
 namespace corium::async {
 
 /// @ingroup async
-/// @brief Zero-heap C++20 pull-based lazy generator sequence.
+/// @brief Zero-heap C++20 pull-based lazy generator sequence with configurable frame allocator.
 /// Compatible with range-based for loops and standard C++20 ranges.
 /// @tparam T Value type yielded by the generator.
-template <typename T>
+/// @tparam Allocator Frame allocation policy (HeapFrameAllocator default or StaticFrameAllocator).
+template <typename T, typename Allocator = HeapFrameAllocator>
 class Generator {
 public:
+    using ValueType = T;
+    using AllocatorType = Allocator;
+
     struct promise_type {
         const T* currentValue{nullptr};
         std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
 
         Generator get_return_object() noexcept
         {
@@ -164,5 +178,9 @@ public:
 private:
     std::coroutine_handle<promise_type> _handle{nullptr};
 };
+
+/// @brief Pre-configured zero-heap statically-pooled lazy generator sequence.
+template <typename T, std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+using PooledGenerator = Generator<T, StaticFrameAllocator<MaxFrames, FrameSize>>;
 
 } // namespace corium::async

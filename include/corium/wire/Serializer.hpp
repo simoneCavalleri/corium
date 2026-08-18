@@ -42,6 +42,7 @@ public:
         WirePacket<MaxPayload> packet;
         std::memcpy(packet.payload.data(), &event, sizeof(Event));
         packet.finalize(static_cast<uint8_t>(typeIdx), static_cast<uint16_t>(sizeof(Event)));
+        packet.header.reserved = computeTypeSignature<Event>();
         return packet;
     }
 
@@ -102,6 +103,10 @@ private:
         using TargetEvent = std::variant_alternative_t<Index, EventVariant>;
         if (packet.header.payloadLength != sizeof(TargetEvent)) {
             return false;
+        }
+
+        if (packet.header.reserved != 0 && packet.header.reserved != computeTypeSignature<TargetEvent>()) {
+            return false; // ABI size/alignment signature mismatch
         }
 
         TargetEvent evt{};

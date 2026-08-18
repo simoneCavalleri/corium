@@ -100,15 +100,24 @@ int main() {
     bool deserialized = WireSerializer::deserializeAndPush<ZeroHeapEvents>(packet, sink);
     runtime.drain();
 
+    // 6. Execute statically-pooled C++20 coroutine task
+    auto asyncWorker = [](EventSinkT<ZeroHeapEvents>& s) -> async::PooledTask<void, 4, 512> {
+        s.post(ZeroHeapDataEvent{888, 5.0f});
+        co_return;
+    };
+    auto task = asyncWorker(sink);
+    task.resume();
+    runtime.drain();
+
     g_trackAllocations = false;
     // --- END ZERO-HEAP CRITICAL TEST SECTION ---
 
     std::cout << "[Test Results]\n";
-    std::cout << " Total events processed  : " << app.processedCount << " / 501\n";
+    std::cout << " Total events processed  : " << app.processedCount << " / 502\n";
     std::cout << " Dynamic heap allocations: " << g_allocationCount << " (Expected: 0)\n";
     std::cout << " Wire deserialization ok : " << std::boolalpha << deserialized << "\n\n";
 
-    if (g_allocationCount != 0 || app.processedCount != 501 || !deserialized) {
+    if (g_allocationCount != 0 || app.processedCount != 502 || !deserialized) {
         std::cerr << "FAILED: Dynamic memory allocations occurred on the hot-path!\n";
         return 1;
     }

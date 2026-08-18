@@ -1222,13 +1222,171 @@ private:
  */
 
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
 
+
+// >>> Begin: corium/internal/StaticMinHeap.hpp
+/**
+ * @file StaticMinHeap.hpp
+ * @ingroup internal
+ * @brief Fixed-capacity zero-heap binary min-heap for deterministic priority queues and timers.
+ */
+
+
+#include <array>
+#include <cassert>
+#include <cstddef>
+#include <functional>
+#include <utility>
+
+namespace corium::internal {
+
+/// @brief Fixed-capacity statically-allocated binary min-heap.
+/// Zero dynamic heap allocations.
+/// @tparam T Element type stored in the heap.
+/// @tparam Capacity Maximum number of elements.
+/// @tparam Compare Comparator predicate (std::greater<T> for min-heap where smallest element is at top).
+template <
+    typename T,
+    std::size_t Capacity,
+    typename Compare = std::greater<T>
+>
+class StaticMinHeap {
+public:
+    constexpr StaticMinHeap() = default;
+
+    /// @brief Push an element into the heap.
+    /// @return true if pushed, false if capacity exceeded.
+    template <typename U>
+    bool push(U&& value) {
+        if (_size >= Capacity) {
+            return false;
+        }
+
+        _data[_size] = std::forward<U>(value);
+        siftUp(_size);
+        _size++;
+        return true;
+    }
+
+    /// @brief Remove the top element from the heap.
+    /// @return true if popped, false if heap was empty.
+    bool pop() noexcept {
+        if (_size == 0) {
+            return false;
+        }
+
+        _size--;
+        if (_size > 0) {
+            _data[0] = std::move(_data[_size]);
+            siftDown(0);
+        }
+        return true;
+    }
+
+    /// @brief Access top element.
+    [[nodiscard]] const T& top() const noexcept {
+        assert(_size > 0 && "Accessing top of empty StaticMinHeap");
+        return _data[0];
+    }
+
+    /// @brief Access mutable top element.
+    [[nodiscard]] T& top() noexcept {
+        assert(_size > 0 && "Accessing top of empty StaticMinHeap");
+        return _data[0];
+    }
+
+    /// @brief Current number of elements in the heap.
+    [[nodiscard]] constexpr std::size_t size() const noexcept {
+        return _size;
+    }
+
+    /// @brief Maximum capacity of the heap.
+    [[nodiscard]] static constexpr std::size_t capacity() noexcept {
+        return Capacity;
+    }
+
+    /// @brief Check if heap is empty.
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return _size == 0;
+    }
+
+    /// @brief Check if heap is full.
+    [[nodiscard]] constexpr bool full() const noexcept {
+        return _size >= Capacity;
+    }
+
+    /// @brief Clear all elements.
+    void clear() noexcept {
+        _size = 0;
+    }
+
+    /// @brief Direct access to underlying data array.
+    [[nodiscard]] T* data() noexcept {
+        return _data.data();
+    }
+
+    /// @brief Direct const access to underlying data array.
+    [[nodiscard]] const T* data() const noexcept {
+        return _data.data();
+    }
+
+    /// @brief Sift down an element at specified index (e.g. after in-place modification).
+    void siftDown(std::size_t index) noexcept {
+        Compare comp;
+        std::size_t current = index;
+
+        while (true) {
+            std::size_t left = 2 * current + 1;
+            std::size_t right = 2 * current + 2;
+            std::size_t smallest = current;
+
+            if (left < _size && comp(_data[smallest], _data[left])) {
+                smallest = left;
+            }
+            if (right < _size && comp(_data[smallest], _data[right])) {
+                smallest = right;
+            }
+
+            if (smallest != current) {
+                using std::swap;
+                swap(_data[current], _data[smallest]);
+                current = smallest;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// @brief Sift up an element at specified index.
+    void siftUp(std::size_t index) noexcept {
+        Compare comp;
+        std::size_t current = index;
+
+        while (current > 0) {
+            std::size_t parent = (current - 1) / 2;
+            if (comp(_data[parent], _data[current])) {
+                using std::swap;
+                swap(_data[parent], _data[current]);
+                current = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+private:
+    std::array<T, Capacity> _data{};
+    std::size_t _size{0};
+};
+
+} // namespace corium::internal
+
+// <<< End: corium/internal/StaticMinHeap.hpp
 
 // >>> Begin: corium/timers/ClockPolicies.hpp
 /**
@@ -1485,10 +1643,11 @@ using TimerId = uint32_t;
 constexpr TimerId INVALID_TIMER_ID = 0;
 
 /// @ingroup timers
-/// @brief Zero-heap Timer Scheduler storing timers in a fixed-capacity static array.
+/// @brief Zero-heap Min-Heap Timer Scheduler for delayed and periodic events.
+/// Provides O(1) earliest-due timer checks and O(log N) insertion and rescheduling.
 /// Supports single-shot delayed events and recurring periodic events with compile-time clock policy.
 /// @tparam EventVariant Supported event variant list type.
-/// @tparam MaxTimers Maximum number of concurrent active timers (static array capacity).
+/// @tparam MaxTimers Maximum number of concurrent active timers (static min-heap capacity).
 /// @tparam ClockPolicy Policy governing time acquisition and arithmetic (ChronoClockPolicy default).
 template <
     typename EventVariant = DefaultEvents,
@@ -1500,6 +1659,22 @@ public:
     using Clock = ClockPolicy;
     using time_point = typename ClockPolicy::time_point;
     using duration = typename ClockPolicy::duration;
+
+    struct TimerEntry {
+        TimerId id = INVALID_TIMER_ID;
+        EventVariant event{};
+        time_point expiryTime{};
+        duration interval{};
+        EventPriority priority = EventPriority::Normal;
+        bool isPeriodic = false;
+        bool active = false;
+    };
+
+    struct TimerComparator {
+        bool operator()(const TimerEntry& a, const TimerEntry& b) const noexcept {
+            return a.expiryTime > b.expiryTime; // Min-heap: earliest expiry at top
+        }
+    };
 
     TimerScheduler() = default;
 
@@ -1553,14 +1728,16 @@ public:
     /// @return true if timer was found and cancelled; false if handle was invalid/inactive.
     bool cancelTimer(TimerId id) noexcept
     {
-        if (id == INVALID_TIMER_ID) {
+        if (id == INVALID_TIMER_ID || _activeCount == 0) {
             return false;
         }
 
-        for (auto& entry : _timers) {
-            if (entry.active && entry.id == id) {
-                entry.active = false;
-                entry.id = INVALID_TIMER_ID;
+        auto* data = _heap.data();
+        const std::size_t n = _heap.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            if (data[i].active && data[i].id == id) {
+                data[i].active = false;
+                data[i].id = INVALID_TIMER_ID;
                 if (_activeCount > 0) {
                     _activeCount--;
                 }
@@ -1571,6 +1748,7 @@ public:
     }
 
     /// @brief Process all due timers and post their events into target event bus or sink.
+    /// Uses O(1) early exit when the earliest timer is not yet due.
     /// @tparam TargetEventSink Target event sink type (e.g. BasicEventBus or EventSink).
     /// @param sink Target sink receiving due timer events.
     /// @param now Current time point (defaults to ClockPolicy::now()).
@@ -1578,34 +1756,45 @@ public:
     template <typename EventSink>
     std::size_t processDueTimers(EventSink& sink, time_point now = ClockPolicy::now())
     {
-        if (_activeCount == 0) {
+        if (_activeCount == 0 || _heap.empty()) {
             return 0;
         }
 
         std::size_t posted = 0;
-        for (auto& entry : _timers) {
-            if (!entry.active) {
+
+        while (!_heap.empty()) {
+            auto& top = _heap.top();
+
+            // Discard cancelled timers at top of heap
+            if (!top.active) {
+                _heap.pop();
                 continue;
             }
 
-            if (ClockPolicy::isDue(now, entry.expiryTime)) {
-                sink.post(entry.event, entry.priority);
-                posted++;
+            // O(1) early exit: if earliest scheduled timer is not due, nothing else is due
+            if (!ClockPolicy::isDue(now, top.expiryTime)) {
+                break;
+            }
 
-                if (entry.isPeriodic) {
+            TimerEntry entry = std::move(_heap.top());
+            _heap.pop();
+
+            sink.post(entry.event, entry.priority);
+            posted++;
+
+            if (entry.isPeriodic) {
+                entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
+                while (ClockPolicy::isDue(now, entry.expiryTime)) {
                     entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
-                    while (ClockPolicy::isDue(now, entry.expiryTime)) {
-                        entry.expiryTime = ClockPolicy::add(entry.expiryTime, entry.interval);
-                    }
-                } else {
-                    entry.active = false;
-                    entry.id = INVALID_TIMER_ID;
-                    if (_activeCount > 0) {
-                        _activeCount--;
-                    }
+                }
+                _heap.push(std::move(entry));
+            } else {
+                if (_activeCount > 0) {
+                    _activeCount--;
                 }
             }
         }
+
         return posted;
     }
 
@@ -1624,37 +1813,34 @@ public:
 private:
     TimerId allocateTimer(EventVariant event, time_point expiryTime, duration interval, EventPriority priority, bool isPeriodic)
     {
-        for (auto& entry : _timers) {
-            if (!entry.active) {
-                entry.id = _nextId++;
-                if (_nextId == INVALID_TIMER_ID) {
-                    _nextId = 1;
-                }
-                entry.event = std::move(event);
-                entry.expiryTime = expiryTime;
-                entry.interval = interval;
-                entry.priority = priority;
-                entry.isPeriodic = isPeriodic;
-                entry.active = true;
-                _activeCount++;
-                return entry.id;
-            }
+        if (_activeCount >= MaxTimers || _heap.full()) {
+            return INVALID_TIMER_ID;
         }
 
-        return INVALID_TIMER_ID; // Capacity exceeded
+        TimerId id = _nextId++;
+        if (_nextId == INVALID_TIMER_ID) {
+            _nextId = 1;
+        }
+
+        TimerEntry entry{
+            .id = id,
+            .event = std::move(event),
+            .expiryTime = expiryTime,
+            .interval = interval,
+            .priority = priority,
+            .isPeriodic = isPeriodic,
+            .active = true
+        };
+
+        if (_heap.push(std::move(entry))) {
+            _activeCount++;
+            return id;
+        }
+
+        return INVALID_TIMER_ID;
     }
 
-    struct TimerEntry {
-        TimerId id = INVALID_TIMER_ID;
-        EventVariant event{};
-        time_point expiryTime{};
-        duration interval{};
-        EventPriority priority = EventPriority::Normal;
-        bool isPeriodic = false;
-        bool active = false;
-    };
-
-    std::array<TimerEntry, MaxTimers> _timers{};
+    internal::StaticMinHeap<TimerEntry, MaxTimers, TimerComparator> _heap{};
     size_t _activeCount = 0;
     TimerId _nextId = 1;
 };
@@ -1745,6 +1931,20 @@ public:
             return _regFns[typeIdx](_busPtr, srcPtr, reinterpret_cast<void*>(invoker), mover, destroyer, sizeof(Decayed));
         }
         return false;
+    }
+
+    /// @brief Register a filtered event handler executed only when predicate evaluates to true.
+    /// @tparam Filter Callable returning bool when passed the event.
+    /// @tparam Handler Callable accepting const EventType&.
+    template <typename Filter, typename Handler>
+    bool registerFilteredHandler(Filter&& filter, Handler&& handler)
+    {
+        using EventType = callable_event_type_t<Handler>;
+        return registerHandler([f = std::forward<Filter>(filter), h = std::forward<Handler>(handler)](const EventType& event) {
+            if (f(event)) {
+                h(event);
+            }
+        });
     }
 
     /// @brief Access event sink handle.
@@ -4057,6 +4257,16 @@ protected:
         return _context.registerHandler(std::forward<Handler>(handler));
     }
 
+    /// @brief Register a filtered event handler executed only when predicate evaluates to true.
+    /// @tparam Filter Callable returning bool when passed the event.
+    /// @tparam Handler Callable taking const EventType&.
+    template <typename Filter, typename Handler>
+        requires (std::is_invocable_r_v<bool, Filter&, const callable_event_type_t<Handler>&>)
+    bool on(Filter&& filter, Handler&& handler)
+    {
+        return _context.registerFilteredHandler(std::forward<Filter>(filter), std::forward<Handler>(handler));
+    }
+
     /// @brief Access event sink handle.
     [[nodiscard]] EventSinkT<EventVariant> eventSink()
     {
@@ -5678,711 +5888,14 @@ private:
  */
 
 
-
-// >>> Begin: corium/async/Task.hpp
-/**
- * @file Task.hpp
- * @ingroup async
- * @brief Lazy awaitable C++20 coroutine task with zero dynamic heap allocation.
- */
-
-
-#include <coroutine>
-#include <exception>
-#include <utility>
-
-namespace corium::async {
-
-/// @ingroup async
-/// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining.
-/// @tparam T Result type returned by the coroutine (defaults to void).
-template <typename T = void>
-class Task {
-public:
-    using ValueType = T;
-
-    struct promise_type {
-        std::coroutine_handle<> continuation{nullptr};
-        T value{};
-        std::exception_ptr exception{nullptr};
-
-        Task get_return_object() noexcept {
-            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
-        }
-
-        std::suspend_always initial_suspend() noexcept { return {}; }
-
-        auto final_suspend() noexcept {
-            struct FinalAwaiter {
-                bool await_ready() noexcept { return false; }
-                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
-                    if (h.promise().continuation) {
-                        return h.promise().continuation;
-                    }
-                    return std::noop_coroutine();
-                }
-                void await_resume() noexcept {}
-            };
-            return FinalAwaiter{};
-        }
-
-        template <typename ValueType>
-            requires (std::is_convertible_v<ValueType, T>)
-        void return_value(ValueType&& val) noexcept(std::is_nothrow_constructible_v<T, ValueType>) {
-            value = std::forward<ValueType>(val);
-        }
-
-        void unhandled_exception() noexcept {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-            exception = std::current_exception();
-#endif
-        }
-    };
-
-    constexpr Task() noexcept = default;
-
-    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
-        : _handle(handle)
-    {}
-
-    ~Task() {
-        if (_handle) {
-            _handle.destroy();
-        }
-    }
-
-    Task(const Task&) = delete;
-    Task& operator=(const Task&) = delete;
-
-    Task(Task&& other) noexcept
-        : _handle(std::exchange(other._handle, nullptr))
-    {}
-
-    Task& operator=(Task&& other) noexcept {
-        if (this != &other) {
-            if (_handle) {
-                _handle.destroy();
-            }
-            _handle = std::exchange(other._handle, nullptr);
-        }
-        return *this;
-    }
-
-    /// @brief Check if coroutine has completed execution.
-    [[nodiscard]] bool done() const noexcept {
-        return !_handle || _handle.done();
-    }
-
-    /// @brief Resume the coroutine explicitly.
-    void resume() {
-        if (_handle && !_handle.done()) {
-            _handle.resume();
-        }
-    }
-
-    /// @brief Awaiter interface for co_await chaining.
-    [[nodiscard]] bool await_ready() const noexcept {
-        return !_handle || _handle.done();
-    }
-
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
-        _handle.promise().continuation = awaiting;
-        return _handle;
-    }
-
-    T await_resume() {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-        if (_handle.promise().exception) {
-            std::rethrow_exception(_handle.promise().exception);
-        }
-#endif
-        return std::move(_handle.promise().value);
-    }
-
-    /// @brief Access raw coroutine handle.
-    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
-        return _handle;
-    }
-
-private:
-    std::coroutine_handle<promise_type> _handle{nullptr};
-};
-
-/// @brief Specialization of Task for void return type.
-template <>
-class Task<void> {
-public:
-    using ValueType = void;
-
-    struct promise_type {
-        std::coroutine_handle<> continuation{nullptr};
-        std::exception_ptr exception{nullptr};
-
-        Task get_return_object() noexcept {
-            return Task(std::coroutine_handle<promise_type>::from_promise(*this));
-        }
-
-        std::suspend_always initial_suspend() noexcept { return {}; }
-
-        auto final_suspend() noexcept {
-            struct FinalAwaiter {
-                bool await_ready() noexcept { return false; }
-                std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
-                    if (h.promise().continuation) {
-                        return h.promise().continuation;
-                    }
-                    return std::noop_coroutine();
-                }
-                void await_resume() noexcept {}
-            };
-            return FinalAwaiter{};
-        }
-
-        void return_void() noexcept {}
-
-        void unhandled_exception() noexcept {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-            exception = std::current_exception();
-#endif
-        }
-    };
-
-    constexpr Task() noexcept = default;
-
-    explicit Task(std::coroutine_handle<promise_type> handle) noexcept
-        : _handle(handle)
-    {}
-
-    ~Task() {
-        if (_handle) {
-            _handle.destroy();
-        }
-    }
-
-    Task(const Task&) = delete;
-    Task& operator=(const Task&) = delete;
-
-    Task(Task&& other) noexcept
-        : _handle(std::exchange(other._handle, nullptr))
-    {}
-
-    Task& operator=(Task&& other) noexcept {
-        if (this != &other) {
-            if (_handle) {
-                _handle.destroy();
-            }
-            _handle = std::exchange(other._handle, nullptr);
-        }
-        return *this;
-    }
-
-    [[nodiscard]] bool done() const noexcept {
-        return !_handle || _handle.done();
-    }
-
-    void resume() {
-        if (_handle && !_handle.done()) {
-            _handle.resume();
-        }
-    }
-
-    [[nodiscard]] bool await_ready() const noexcept {
-        return !_handle || _handle.done();
-    }
-
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
-        _handle.promise().continuation = awaiting;
-        return _handle;
-    }
-
-    void await_resume() {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-        if (_handle.promise().exception) {
-            std::rethrow_exception(_handle.promise().exception);
-        }
-#endif
-    }
-
-    [[nodiscard]] std::coroutine_handle<promise_type> handle() const noexcept {
-        return _handle;
-    }
-
-private:
-    std::coroutine_handle<promise_type> _handle{nullptr};
-};
-
-} // namespace corium::async
-
-// <<< End: corium/async/Task.hpp
-
-// >>> Begin: corium/async/Delay.hpp
-/**
- * @file Delay.hpp
- * @ingroup async
- * @brief Non-blocking timer delay and yield awaitables for C++20 coroutines.
- */
-
-
-#include <chrono>
-#include <coroutine>
-#include <thread>
-
-namespace corium::async {
-
-/// @brief Awaitable that yields control back to the caller/event loop once.
-struct YieldAwaiter {
-    [[nodiscard]] constexpr bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) const noexcept {
-        handle.resume();
-    }
-    constexpr void await_resume() const noexcept {}
-};
-
-/// @brief Helper to yield execution in a coroutine.
-[[nodiscard]] inline constexpr YieldAwaiter yield() noexcept {
-    return YieldAwaiter{};
-}
-
-/// @brief Awaitable that pauses the coroutine thread for the specified duration.
-template <typename Rep, typename Period>
-struct DelayAwaiter {
-    std::chrono::duration<Rep, Period> duration;
-
-    [[nodiscard]] constexpr bool await_ready() const noexcept {
-        return duration.count() <= 0;
-    }
-
-    void await_suspend(std::coroutine_handle<> handle) const {
-        std::this_thread::sleep_for(duration);
-        handle.resume();
-    }
-
-    constexpr void await_resume() const noexcept {}
-};
-
-/// @brief Helper to suspend coroutine for a given std::chrono duration.
-template <typename Rep, typename Period>
-[[nodiscard]] inline auto delay(const std::chrono::duration<Rep, Period>& d) noexcept {
-    return DelayAwaiter<Rep, Period>{d};
-}
-
-} // namespace corium::async
-
-// <<< End: corium/async/Delay.hpp
-
-// >>> Begin: corium/async/CancellationToken.hpp
-/**
- * @file CancellationToken.hpp
- * @ingroup async
- * @brief Lock-free atomic cooperative cancellation token with coroutine awaiter.
- */
-
-
-#include <atomic>
-#include <coroutine>
-
-namespace corium::async {
-
-/// @ingroup async
-/// @brief Lightweight, zero-heap cooperative cancellation token for C++20 coroutines and services.
-class CancellationToken {
-public:
-    constexpr CancellationToken() noexcept = default;
-
-    /// @brief Signal cancellation to all observing tasks.
-    /// @note Wakes any suspended coroutine awaiting `whenCancelled()` immediately.
-    void cancel() noexcept
-    {
-        _cancelled.store(true, std::memory_order_release);
-        auto handle = _waiter.exchange(nullptr, std::memory_order_acq_rel);
-        if (handle && !handle.done()) {
-            handle.resume();
-        }
-    }
-
-    /// @brief Check if cancellation has been requested.
-    /// @return True if cancel() has been invoked, false otherwise.
-    [[nodiscard]] bool isCancelled() const noexcept
-    {
-        return _cancelled.load(std::memory_order_acquire);
-    }
-
-    /// @brief Reset token state to uncancelled.
-    /// @note Allows reusing the token for subsequent asynchronous task executions.
-    void reset() noexcept
-    {
-        _cancelled.store(false, std::memory_order_release);
-        _waiter.store(nullptr, std::memory_order_release);
-    }
-
-    /// @brief Awaitable that suspends until this token is cancelled.
-    struct WhenCancelledAwaiter {
-        CancellationToken& token;
-
-        [[nodiscard]] bool await_ready() const noexcept
-        {
-            return token.isCancelled();
-        }
-
-        bool await_suspend(std::coroutine_handle<> h) noexcept
-        {
-            if (token.isCancelled()) {
-                return false; // do not suspend
-            }
-            token._waiter.store(h, std::memory_order_release);
-            return !token.isCancelled();
-        }
-
-        constexpr void await_resume() const noexcept {}
-    };
-
-    /// @brief Helper to suspend the current coroutine until cancel() is called.
-    /// @return WhenCancelledAwaiter that suspends until token cancellation.
-    /// @example
-    /// Task<void> worker(CancellationToken token) {
-    ///     co_await token.whenCancelled();
-    ///     // Clean up resources on shutdown signal
-    /// }
-    [[nodiscard]] WhenCancelledAwaiter whenCancelled() noexcept
-    {
-        return WhenCancelledAwaiter{*this};
-    }
-
-private:
-    std::atomic<bool> _cancelled{false};
-    std::atomic<std::coroutine_handle<>> _waiter{nullptr};
-};
-
-} // namespace corium::async
-
-// <<< End: corium/async/CancellationToken.hpp
-
-// >>> Begin: corium/async/WhenAll.hpp
-/**
- * @file WhenAll.hpp
- * @ingroup async
- * @brief Non-blocking combinator awaiting completion of multiple parallel tasks.
- */
-
-
-#include <tuple>
-#include <type_traits>
-#include <utility>
-
-
-namespace corium::async {
-
-namespace detail {
-
-template <typename... Tasks>
-inline constexpr bool all_void_tasks_v = (std::is_void_v<typename std::decay_t<Tasks>::ValueType> && ...);
-
-template <typename... Tasks>
-Task<std::tuple<typename std::decay_t<Tasks>::ValueType...>> whenAllValueImpl(Tasks... tasks)
-{
-    co_return std::tuple<typename std::decay_t<Tasks>::ValueType...>{(co_await tasks)...};
-}
-
-template <typename... Tasks>
-Task<void> whenAllVoidImpl(Tasks... tasks)
-{
-    ((void)(co_await tasks), ...);
-    co_return;
-}
-
-} // namespace detail
-
-/// @ingroup async
-/// @brief Awaits concurrent or sequential completion of multiple Task coroutines.
-/// @return Task containing std::tuple of results, or Task<void> if all input tasks are void.
-template <typename... Tasks>
-auto whenAll(Tasks&&... tasks)
-{
-    if constexpr (detail::all_void_tasks_v<Tasks...>) {
-        return detail::whenAllVoidImpl(std::forward<Tasks>(tasks)...);
-    } else {
-        return detail::whenAllValueImpl(std::forward<Tasks>(tasks)...);
-    }
-}
-
-} // namespace corium::async
-
-// <<< End: corium/async/WhenAll.hpp
-
-// >>> Begin: corium/async/WhenAny.hpp
-/**
- * @file WhenAny.hpp
- * @ingroup async
- * @brief Non-blocking combinator resolving on the first completed task.
- */
-
-
-#include <cstddef>
-#include <type_traits>
-#include <utility>
-#include <variant>
-
-
-namespace corium::async {
-
-namespace detail {
-
-template <typename T>
-struct WrapVoid {
-    using type = T;
-};
-
-template <>
-struct WrapVoid<void> {
-    using type = std::monostate;
-};
-
-template <typename T>
-using wrap_void_t = typename WrapVoid<T>::type;
-
-} // namespace detail
-
-/// @brief Result container for whenAny combinator.
-template <typename... ResultTypes>
-struct WhenAnyResult {
-    std::size_t index{0};
-    std::variant<detail::wrap_void_t<ResultTypes>...> result{};
-};
-
-namespace detail {
-
-template <size_t Index, typename TaskType, typename ResultVariant>
-bool checkTaskDone(TaskType& task, size_t& winnerIndex, ResultVariant& resultVariant)
-{
-    if (task.done()) {
-        winnerIndex = Index;
-        if constexpr (!std::is_void_v<typename TaskType::ValueType>) {
-            resultVariant.template emplace<Index>(task.await_resume());
-        } else {
-            task.await_resume();
-            resultVariant.template emplace<Index>(std::monostate{});
-        }
-        return true;
-    }
-    return false;
-}
-
-template <size_t Index, typename TaskType>
-void resumeTask(TaskType& task)
-{
-    if (!task.done()) {
-        task.resume();
-    }
-}
-
-template <typename... Tasks, size_t... Is>
-Task<WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>> whenAnyImpl(std::index_sequence<Is...>, Tasks... tasks)
-{
-    using ResultType = WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>;
-    ResultType res{};
-
-    // Initial resume pass
-    (resumeTask<Is>(tasks), ...);
-
-    while (true) {
-        bool winnerFound = (checkTaskDone<Is>(tasks, res.index, res.result) || ...);
-        if (winnerFound) {
-            break;
-        }
-        (resumeTask<Is>(tasks), ...);
-    }
-
-    co_return res;
-}
-
-} // namespace detail
-
-/// @ingroup async
-/// @brief Awaits the first task among multiple tasks to complete.
-/// @return Task containing WhenAnyResult with index and variant result.
-template <typename... Tasks>
-auto whenAny(Tasks&&... tasks)
-{
-    return detail::whenAnyImpl(
-        std::index_sequence_for<Tasks...>{},
-        std::forward<Tasks>(tasks)...
-    );
-}
-
-} // namespace corium::async
-
-// <<< End: corium/async/WhenAny.hpp
-
-// >>> Begin: corium/async/Generator.hpp
-/**
- * @file Generator.hpp
- * @ingroup async
- * @brief Pull-based zero-heap lazy sequence generator compatible with C++20 ranges.
- */
-
-
-#include <coroutine>
-#include <exception>
-#include <iterator>
-#include <utility>
-
-namespace corium::async {
-
-/// @ingroup async
-/// @brief Zero-heap C++20 pull-based lazy generator sequence.
-/// Compatible with range-based for loops and standard C++20 ranges.
-/// @tparam T Value type yielded by the generator.
-template <typename T>
-class Generator {
-public:
-    struct promise_type {
-        const T* currentValue{nullptr};
-        std::exception_ptr exception{nullptr};
-
-        Generator get_return_object() noexcept
-        {
-            return Generator(std::coroutine_handle<promise_type>::from_promise(*this));
-        }
-
-        std::suspend_always initial_suspend() noexcept { return {}; }
-        std::suspend_always final_suspend() noexcept { return {}; }
-
-        std::suspend_always yield_value(const T& val) noexcept
-        {
-            currentValue = std::addressof(val);
-            return {};
-        }
-
-        std::suspend_always yield_value(T&& val) noexcept
-        {
-            currentValue = std::addressof(val);
-            return {};
-        }
-
-        void return_void() noexcept {}
-
-        void unhandled_exception() noexcept
-        {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-            exception = std::current_exception();
-#endif
-        }
-    };
-
-    class Sentinel {};
-
-    class Iterator {
-    public:
-        using iterator_category = std::input_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = T;
-        using reference = const T&;
-        using pointer = const T*;
-
-        constexpr Iterator() noexcept = default;
-
-        explicit Iterator(std::coroutine_handle<promise_type> handle) noexcept
-            : _handle(handle)
-        {}
-
-        Iterator& operator++()
-        {
-            _handle.resume();
-            if (_handle.done()) {
-                if (_handle.promise().exception) {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-                    std::rethrow_exception(_handle.promise().exception);
-#endif
-                }
-            }
-            return *this;
-        }
-
-        void operator++(int)
-        {
-            (void)operator++();
-        }
-
-        [[nodiscard]] reference operator*() const noexcept
-        {
-            return *_handle.promise().currentValue;
-        }
-
-        [[nodiscard]] pointer operator->() const noexcept
-        {
-            return _handle.promise().currentValue;
-        }
-
-        [[nodiscard]] bool operator==(Sentinel) const noexcept
-        {
-            return !_handle || _handle.done();
-        }
-
-        [[nodiscard]] bool operator!=(Sentinel s) const noexcept
-        {
-            return !(*this == s);
-        }
-
-    private:
-        std::coroutine_handle<promise_type> _handle{nullptr};
-    };
-
-    constexpr Generator() noexcept = default;
-
-    explicit Generator(std::coroutine_handle<promise_type> handle) noexcept
-        : _handle(handle)
-    {}
-
-    ~Generator()
-    {
-        if (_handle) {
-            _handle.destroy();
-        }
-    }
-
-    Generator(const Generator&) = delete;
-    Generator& operator=(const Generator&) = delete;
-
-    Generator(Generator&& other) noexcept
-        : _handle(std::exchange(other._handle, nullptr))
-    {}
-
-    Generator& operator=(Generator&& other) noexcept
-    {
-        if (this != &other) {
-            if (_handle) {
-                _handle.destroy();
-            }
-            _handle = std::exchange(other._handle, nullptr);
-        }
-        return *this;
-    }
-
-    [[nodiscard]] Iterator begin()
-    {
-        if (_handle) {
-            _handle.resume();
-            if (_handle.promise().exception) {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-                std::rethrow_exception(_handle.promise().exception);
-#endif
-            }
-        }
-        return Iterator{_handle};
-    }
-
-    [[nodiscard]] constexpr Sentinel end() noexcept
-    {
-        return Sentinel{};
-    }
-
-private:
-    std::coroutine_handle<promise_type> _handle{nullptr};
-};
-
-} // namespace corium::async
-
-// <<< End: corium/async/Generator.hpp
+#include "corium/async/FramePool.hpp"        // IWYU pragma: export
+#include "corium/async/Task.hpp"             // IWYU pragma: export
+#include "corium/async/Delay.hpp"            // IWYU pragma: export
+#include "corium/async/CancellationToken.hpp" // IWYU pragma: export
+#include "corium/async/WhenAll.hpp"          // IWYU pragma: export
+#include "corium/async/WhenAny.hpp"          // IWYU pragma: export
+#include "corium/async/Generator.hpp"        // IWYU pragma: export
+#include "corium/async/AsyncEvent.hpp"       // IWYU pragma: export
 
 // <<< End: corium/async/async.hpp
 
@@ -6428,6 +5941,14 @@ inline constexpr uint16_t CORIUM_WIRE_MAGIC = 0xC041;
         }
     }
     return crc;
+}
+
+/// @brief Calculate an ABI type signature based on size and alignment.
+template <typename T>
+[[nodiscard]] constexpr uint8_t computeTypeSignature() noexcept {
+    auto sig = static_cast<uint8_t>(sizeof(T) & 0x0F);
+    sig |= static_cast<uint8_t>((alignof(T) & 0x0F) << 4);
+    return sig;
 }
 
 /// @brief Current schema version for Corium binary wire packets.
@@ -6533,6 +6054,7 @@ public:
         WirePacket<MaxPayload> packet;
         std::memcpy(packet.payload.data(), &event, sizeof(Event));
         packet.finalize(static_cast<uint8_t>(typeIdx), static_cast<uint16_t>(sizeof(Event)));
+        packet.header.reserved = computeTypeSignature<Event>();
         return packet;
     }
 
@@ -6593,6 +6115,10 @@ private:
         using TargetEvent = std::variant_alternative_t<Index, EventVariant>;
         if (packet.header.payloadLength != sizeof(TargetEvent)) {
             return false;
+        }
+
+        if (packet.header.reserved != 0 && packet.header.reserved != computeTypeSignature<TargetEvent>()) {
+            return false; // ABI size/alignment signature mismatch
         }
 
         TargetEvent evt{};

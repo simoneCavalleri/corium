@@ -106,6 +106,20 @@ public:
         return false;
     }
 
+    /// @brief Register a filtered event handler executed only when predicate evaluates to true.
+    /// @tparam Filter Callable returning bool when passed the event.
+    /// @tparam Handler Callable accepting const EventType&.
+    template <typename Filter, typename Handler>
+    bool registerFilteredHandler(Filter&& filter, Handler&& handler)
+    {
+        using EventType = callable_event_type_t<Handler>;
+        return registerHandler([f = std::forward<Filter>(filter), h = std::forward<Handler>(handler)](const EventType& event) {
+            if (f(event)) {
+                h(event);
+            }
+        });
+    }
+
     /// @brief Access event sink handle.
     [[nodiscard]] EventSinkT<EventVariant> eventSink() const noexcept
     {

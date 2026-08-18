@@ -72,3 +72,34 @@ TEST(FastDelegateTest, MoveSemantics) {
     d2.invoke(TickEvent{100.0});
     EXPECT_EQ(result, 100);
 }
+
+TEST(FastDelegateTest, ExactInlineSizeBoundaries) {
+    // Exact 32 bytes capture
+    struct Exactly32Bytes {
+        uint64_t a{1};
+        uint64_t b{2};
+        uint64_t c{3};
+        uint64_t d{4};
+
+        void operator()(const TickEvent&) const noexcept {}
+    };
+    static_assert(sizeof(Exactly32Bytes) == 32);
+
+    EventHandlerDelegate<TickEvent, 32> d32(Exactly32Bytes{});
+    EXPECT_TRUE(static_cast<bool>(d32));
+    d32.invoke(TickEvent{0.0});
+
+    // Exact 16 bytes capture
+    struct Exactly16Bytes {
+        uint64_t a{10};
+        uint64_t b{20};
+
+        void operator()(const TickEvent&) const noexcept {}
+    };
+    static_assert(sizeof(Exactly16Bytes) == 16);
+
+    EventHandlerDelegate<TickEvent, 16> d16(Exactly16Bytes{});
+    EXPECT_TRUE(static_cast<bool>(d16));
+    d16.invoke(TickEvent{0.0});
+}
+

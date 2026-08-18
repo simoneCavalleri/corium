@@ -8,6 +8,7 @@
 #include "corium/async/Task.hpp"
 #include "corium/async/WhenAll.hpp"
 #include "corium/async/WhenAny.hpp"
+#include "corium/async/AsyncEvent.hpp"
 
 namespace {
 
@@ -119,3 +120,73 @@ TEST(AsyncAdvancedTest, GeneratorEarlyBreak) {
     }
     EXPECT_EQ(count, 5);
 }
+
+TEST(AsyncAdvancedTest, AsyncEventValueSignaling) {
+    corium::async::AsyncEvent<int> event;
+    int receivedValue = 0;
+
+    auto consumer = [&]() -> corium::async::Task<void> {
+        receivedValue = co_await event;
+        co_return;
+    };
+
+    auto task = consumer();
+    task.resume();
+    EXPECT_FALSE(task.done());
+    EXPECT_EQ(receivedValue, 0);
+
+    // Signal event
+    event.emit(999);
+    EXPECT_TRUE(task.done());
+    EXPECT_EQ(receivedValue, 999);
+}
+
+TEST(AsyncAdvancedTest, AsyncEventVoidSignaling) {
+    corium::async::AsyncEvent<void> event;
+    bool signaled = false;
+
+    auto consumer = [&]() -> corium::async::Task<void> {
+        co_await event;
+        signaled = true;
+        co_return;
+    };
+
+    auto task = consumer();
+    task.resume();
+    EXPECT_FALSE(task.done());
+    EXPECT_FALSE(signaled);
+
+    event.emit();
+    EXPECT_TRUE(task.done());
+    EXPECT_TRUE(signaled);
+}
+
+TEST(AsyncAdvancedTest, CancellationTokenMultiThreadedCancel) {
+    corium::async::CancellationToken token;
+    std::atomic<bool> resumed{false};
+
+    auto waiter = [&]() -> corium::async::Task<void> {
+        co_await token.whenCancelled();
+        resumed.store(true, std::memory_order_release);
+        co_return;
+    };
+
+    auto task = waiter();
+    task.resume();
+    EXPECT_FALSE(task.done());
+    EXPECT_FALSE(resumed.load(std::memory_order_acquire));
+
+    std::thread cancelThread([&]() {
+        token.cancel();
+    });
+    cancelThread.join();
+
+    EXPECT_TRUE(resumed.load(std::memory_order_acquire));
+    EXPECT_TRUE(token.isCancelled());
+
+    // Reset and reuse
+    token.reset();
+    EXPECT_FALSE(token.isCancelled());
+}
+
+

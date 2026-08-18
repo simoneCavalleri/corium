@@ -62,6 +62,16 @@ protected:
         return _context.registerHandler(std::forward<Handler>(handler));
     }
 
+    /// @brief Register a filtered event handler executed only when predicate evaluates to true.
+    /// @tparam Filter Callable returning bool when passed the event.
+    /// @tparam Handler Callable taking const EventType&.
+    template <typename Filter, typename Handler>
+        requires (std::is_invocable_r_v<bool, Filter&, const callable_event_type_t<Handler>&>)
+    bool on(Filter&& filter, Handler&& handler)
+    {
+        return _context.registerFilteredHandler(std::forward<Filter>(filter), std::forward<Handler>(handler));
+    }
+
     /// @brief Access event sink handle.
     [[nodiscard]] EventSinkT<EventVariant> eventSink()
     {

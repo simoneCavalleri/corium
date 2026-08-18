@@ -10,20 +10,32 @@
 #include <exception>
 #include <utility>
 
+#include "corium/async/FramePool.hpp"
+
 namespace corium::async {
 
 /// @ingroup async
-/// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining.
+/// @brief Lightweight C++20 coroutine task with zero-heap resumption chaining and configurable frame allocator.
 /// @tparam T Result type returned by the coroutine (defaults to void).
-template <typename T = void>
+/// @tparam Allocator Frame allocation policy (HeapFrameAllocator default or StaticFrameAllocator).
+template <typename T = void, typename Allocator = HeapFrameAllocator>
 class Task {
 public:
     using ValueType = T;
+    using AllocatorType = Allocator;
 
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         T value{};
         std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
 
         Task get_return_object() noexcept {
             return Task(std::coroutine_handle<promise_type>::from_promise(*this));
@@ -45,10 +57,10 @@ public:
             return FinalAwaiter{};
         }
 
-        template <typename ValueType>
-            requires (std::is_convertible_v<ValueType, T>)
-        void return_value(ValueType&& val) noexcept(std::is_nothrow_constructible_v<T, ValueType>) {
-            value = std::forward<ValueType>(val);
+        template <typename Val>
+            requires (std::is_convertible_v<Val, T>)
+        void return_value(Val&& val) noexcept(std::is_nothrow_constructible_v<T, Val>) {
+            value = std::forward<Val>(val);
         }
 
         void unhandled_exception() noexcept {
@@ -127,15 +139,24 @@ private:
     std::coroutine_handle<promise_type> _handle{nullptr};
 };
 
-/// @brief Specialization of Task for void return type.
-template <>
-class Task<void> {
+/// @brief Specialization of Task for void return type with configurable frame allocator.
+template <typename Allocator>
+class Task<void, Allocator> {
 public:
     using ValueType = void;
+    using AllocatorType = Allocator;
 
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         std::exception_ptr exception{nullptr};
+
+        [[nodiscard]] static void* operator new(std::size_t size) {
+            return Allocator::allocate(size);
+        }
+
+        static void operator delete(void* ptr, std::size_t size) noexcept {
+            Allocator::deallocate(ptr, size);
+        }
 
         Task get_return_object() noexcept {
             return Task(std::coroutine_handle<promise_type>::from_promise(*this));
@@ -229,5 +250,9 @@ public:
 private:
     std::coroutine_handle<promise_type> _handle{nullptr};
 };
+
+/// @brief Pre-configured zero-heap statically-pooled coroutine task.
+template <typename T = void, std::size_t MaxFrames = 16, std::size_t FrameSize = 256>
+using PooledTask = Task<T, StaticFrameAllocator<MaxFrames, FrameSize>>;
 
 } // namespace corium::async

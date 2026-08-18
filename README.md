@@ -114,7 +114,7 @@ flowchart TD
 
 ## Showcase & Samples Catalog
 
-Corium includes 5 focused, production-grade showcase applications in `samples/`:
+Corium includes 6 focused, production-grade showcase applications in `samples/`:
 
 | Showcase Sample | Source Path | Key Features Demonstrated |
 | :--- | :--- | :--- |
@@ -123,6 +123,7 @@ Corium includes 5 focused, production-grade showcase applications in `samples/`:
 | **03. HFT Market Data & Execution Engine** | [`samples/03_hft_market_data_engine/`](samples/03_hft_market_data_engine/main.cpp) | `PriorityMpscQueuePolicy` risk cancels ahead of normal market flow, `AuditOverflowPolicy` dropped micro-burst counting, batch chunk pumping. |
 | **04. Automotive Steer-by-Wire ECU** | [`samples/04_automotive_braking_ecu/`](samples/04_automotive_braking_ecu/main.cpp) | ASIL-D safety, `WatchdogSupervisor` multi-task deadline SLAs, lock-free `CircuitBreaker` fault isolation, in-memory `FlightRecorder` Chrome Tracing / Perfetto JSON export. |
 | **05. Drone Ground Control & Avionics IPC** | [`samples/05_drone_ground_control_ipc/`](samples/05_drone_ground_control_ipc/main.cpp) | Binary `WirePacket` CRC-16 protocol framing, zero-copy POSIX Shared Memory (`IpcChannel`), UNIX Domain Datagram Sockets (`UdsChannel`). |
+| **06. Industrial Robotics & IoT Edge Gateway** | [`samples/06_industrial_iot_edge_gateway/`](samples/06_industrial_iot_edge_gateway/main.cpp) | Conditional event filtering (`on(predicate, handler)`), zero-heap statically-pooled coroutines (`PooledTask`, `PooledGenerator`), lock-free `AsyncEvent`, ABI-validated binary wire serialization. |
 
 ---
 

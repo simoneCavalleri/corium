@@ -26,6 +26,9 @@ target_link_libraries(sample_04_automotive_braking_ecu PRIVATE corium)
 add_executable(sample_05_drone_ground_control_ipc samples/05_drone_ground_control_ipc/main.cpp)
 target_link_libraries(sample_05_drone_ground_control_ipc PRIVATE corium)
 
+add_executable(sample_06_industrial_iot_edge_gateway samples/06_industrial_iot_edge_gateway/main.cpp)
+target_link_libraries(sample_06_industrial_iot_edge_gateway PRIVATE corium)
+
 # Unit Test Suite Target
 option(CORIUM_BUILD_TESTS "Build Corium unit test suite" ON)
 
@@ -69,6 +72,8 @@ if(CORIUM_BUILD_TESTS)
         tests/fuzz_wire_deserialize.cpp
         tests/test_async_advanced.cpp
         tests/test_json_log_sink.cpp
+        tests/test_frame_pool.cpp
+        tests/test_event_filtering.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 

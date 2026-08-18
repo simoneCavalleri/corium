@@ -33,6 +33,14 @@ inline constexpr uint16_t CORIUM_WIRE_MAGIC = 0xC041;
     return crc;
 }
 
+/// @brief Calculate an ABI type signature based on size and alignment.
+template <typename T>
+[[nodiscard]] constexpr uint8_t computeTypeSignature() noexcept {
+    auto sig = static_cast<uint8_t>(sizeof(T) & 0x0F);
+    sig |= static_cast<uint8_t>((alignof(T) & 0x0F) << 4);
+    return sig;
+}
+
 /// @brief Current schema version for Corium binary wire packets.
 inline constexpr uint8_t CORIUM_WIRE_VERSION = 1;
 
