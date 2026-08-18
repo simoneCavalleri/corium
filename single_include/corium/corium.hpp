@@ -10147,9 +10147,10 @@ public:
             reinterpret_cast<const sockaddr*>(&destAddr),
             sizeof(destAddr)
         );
+        return sent > 0 && static_cast<size_t>(sent) == data.size();
 #else
         inet_pton(AF_INET, ip, &destAddr.sin_addr);
-        ssize_t sent = ::sendto(
+        auto sent = ::sendto(
             m_fd,
             data.data(),
             data.size(),
@@ -10157,8 +10158,8 @@ public:
             reinterpret_cast<const sockaddr*>(&destAddr),
             sizeof(destAddr)
         );
+        return sent > 0 && static_cast<size_t>(sent) == data.size();
 #endif
-        return sent == static_cast<ssize_t>(data.size());
 #else
         (void)ip;
         (void)port;
@@ -10200,7 +10201,7 @@ public:
             0, nullptr, nullptr
         );
 #else
-        ssize_t recvd = ::recvfrom(
+        auto recvd = ::recvfrom(
             m_fd,
             bufferOut.data(),
             bufferOut.size(),
