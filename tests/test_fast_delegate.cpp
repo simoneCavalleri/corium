@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <array>
 #include <corium/internal/FastDelegate.hpp>
 #include <corium/Events.hpp>
 
