@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "corium/async/CancellationToken.hpp"
