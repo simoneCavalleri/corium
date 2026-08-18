@@ -132,7 +132,7 @@ public:
     /// @brief Pump all pending events in the queue until empty.
     void pump()
     {
-        pump(std::numeric_limits<std::size_t>::max());
+        pump((std::numeric_limits<std::size_t>::max)());
     }
 
     /// @brief Pump up to maxEvents pending events from the queue.
@@ -174,13 +174,13 @@ public:
     /// @param batchSize Number of events to process per batch (default: 16).
     /// @param maxTotal Maximum total number of events to process.
     /// @return Total number of events processed.
-    std::size_t pumpBatch(std::size_t batchSize = 16, std::size_t maxTotal = std::numeric_limits<std::size_t>::max())
+    std::size_t pumpBatch(std::size_t batchSize = 16, std::size_t maxTotal = (std::numeric_limits<std::size_t>::max)())
     {
         _timerScheduler.processDueTimers(_eventBus);
 
         std::size_t total = 0;
         while (_state.load(std::memory_order_relaxed) == State::Running && !_quitRequested && total < maxTotal) {
-            std::size_t toProcess = std::min(batchSize, maxTotal - total);
+            std::size_t toProcess = (std::min)(batchSize, maxTotal - total);
             std::size_t processed = _eventBus.processBatch(toProcess);
             total += processed;
             if (processed < toProcess) {
