@@ -13,14 +13,7 @@
 #include <thread>
 #include <variant>
 
-#include "corium/Application.hpp"
-#include "corium/BackgroundService.hpp"
-#include "corium/Runtime.hpp"
-#include "corium/embedded/CanAdapter.hpp"
-#include "corium/profiler/FlightRecorder.hpp"
-#include "corium/safety/CircuitBreaker.hpp"
-#include "corium/safety/SafetyEvents.hpp"
-#include "corium/safety/WatchdogService.hpp"
+#include "corium/corium.hpp"
 
 // -----------------------------------------------------------------------------
 // 1. Automotive ECU Domain Events
