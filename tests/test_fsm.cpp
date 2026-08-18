@@ -152,3 +152,58 @@ TEST(FsmTest, FsmApplicationIntegration)
 
     runtime.shutdown();
 }
+
+// -----------------------------------------------------------------------------
+// Internal Transition & ActionList Tests
+// -----------------------------------------------------------------------------
+struct SetSpeedInternalAction {
+    void operator()(StateRunning& state, const StartCommand& cmd) const {
+        state.speed = cmd.targetSpeed;
+    }
+};
+
+struct IncrementLogAction {
+    int* counter = nullptr;
+    void operator()(StateRunning&, const StartCommand&) const {
+        if (counter) (*counter)++;
+    }
+};
+
+using AdvancedFsmTable = TransitionTable<
+    Transition<StateIdle, StartCommand, StateRunning, Always, SetSpeedAction>,
+    InternalTransition<StateRunning, StartCommand, Always, ActionList<SetSpeedInternalAction, IncrementLogAction>>
+>;
+
+TEST(FsmTest, InternalTransitionDoesNotTriggerExitOrEnter)
+{
+    std::vector<std::string> log;
+    StateIdle::logPtr = &log;
+    StateRunning::logPtr = &log;
+
+    int actionListCounter = 0;
+    IncrementLogAction inc{&actionListCounter};
+
+    using TableWithCustomAction = TransitionTable<
+        Transition<StateIdle, StartCommand, StateRunning, Always, SetSpeedAction>,
+        InternalTransition<StateRunning, StartCommand, Always, ActionList<SetSpeedInternalAction, IncrementLogAction>>
+    >;
+
+    StateMachine<TableWithCustomAction, StateIdle, StateRunning> fsm;
+    EXPECT_TRUE(fsm.is<StateIdle>());
+    ASSERT_EQ(log.size(), 1u); // Idle:Enter
+
+    // Idle -> Running (External transition: Exit Idle, Enter Running)
+    EXPECT_TRUE(fsm.process_event(StartCommand{50}));
+    EXPECT_TRUE(fsm.is<StateRunning>());
+    EXPECT_EQ(fsm.as<StateRunning>().speed, 50);
+    ASSERT_EQ(log.size(), 3u); // Idle:Exit, Running:Enter
+
+    // Internal transition while in StateRunning: updates speed WITHOUT calling onExit or onEnter
+    EXPECT_TRUE(fsm.process_event(StartCommand{100}));
+    EXPECT_TRUE(fsm.is<StateRunning>());
+    EXPECT_EQ(fsm.as<StateRunning>().speed, 100);
+    EXPECT_EQ(log.size(), 3u); // NO new onExit or onEnter entries!
+
+    StateIdle::logPtr = nullptr;
+    StateRunning::logPtr = nullptr;
+}

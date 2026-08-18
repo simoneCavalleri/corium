@@ -82,3 +82,21 @@ TEST(WireProtocolTest, DeserializeDirectlyIntoRuntime)
 
     runtime.shutdown();
 }
+
+TEST(WireProtocolTest, SchemaVersionValidation)
+{
+    WireSensorData data{200, 20.0f, 40.0f};
+    auto packet = WireSerializer::serialize<WireSensorData, WireTestEvents>(data);
+
+    EXPECT_EQ(packet.header.version, CORIUM_WIRE_VERSION);
+    EXPECT_TRUE(packet.isValid());
+
+    // Mismatched schema version must be rejected
+    packet.header.version = 99;
+    EXPECT_FALSE(packet.isValid());
+
+    struct MockWireSink {
+        void post(const WireTestEvents&, corium::EventPriority = corium::EventPriority::Normal) noexcept {}
+    } sink;
+    EXPECT_FALSE((WireSerializer::deserializeAndPush<WireTestEvents>(packet, sink)));
+}

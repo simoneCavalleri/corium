@@ -1,6 +1,6 @@
 #pragma once
 
-#include <type_traits>
+#include <tuple>
 #include <utility>
 
 namespace corium::fsm {
@@ -36,6 +36,7 @@ struct Transition {
     using ToState = To;
     using GuardType = Guard;
     using ActionType = Action;
+    static constexpr bool is_internal = false;
 
     [[no_unique_address]] GuardType guard{};
     [[no_unique_address]] ActionType action{};
@@ -44,6 +45,51 @@ struct Transition {
     constexpr explicit Transition(GuardType g, ActionType a = ActionType{})
         : guard(std::move(g)), action(std::move(a))
     {}
+};
+
+/// @brief Compile-time internal transition rule (executes action without exiting or re-entering state).
+template <
+    typename State,
+    typename Event,
+    typename Guard = Always,
+    typename Action = NoAction
+>
+struct InternalTransition {
+    using FromState = State;
+    using EventType = Event;
+    using ToState = State;
+    using GuardType = Guard;
+    using ActionType = Action;
+    static constexpr bool is_internal = true;
+
+    [[no_unique_address]] GuardType guard{};
+    [[no_unique_address]] ActionType action{};
+
+    constexpr InternalTransition() = default;
+    constexpr explicit InternalTransition(GuardType g, ActionType a = ActionType{})
+        : guard(std::move(g)), action(std::move(a))
+    {}
+};
+
+namespace detail {
+template <typename Action, typename From, typename Event, typename To>
+constexpr void execute_action(const Action& action, From& from, const Event& e, To& to);
+}
+
+/// @brief Sequential composition of multiple transition actions.
+template <typename... Actions>
+struct ActionList {
+    std::tuple<Actions...> actions{};
+
+    constexpr ActionList() = default;
+    constexpr explicit ActionList(Actions... a) : actions(std::move(a)...) {}
+
+    template <typename From, typename Event, typename To>
+    constexpr void operator()(From& from, const Event& event, To& to) const {
+        std::apply([&](const auto&... act) {
+            (detail::execute_action(act, from, event, to), ...);
+        }, actions);
+    }
 };
 
 /// @brief Compile-time table containing all valid state transitions.

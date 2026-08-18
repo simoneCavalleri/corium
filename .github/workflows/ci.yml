@@ -120,7 +120,44 @@ jobs:
         run: ctest --test-dir build-tsan --output-on-failure
 
   # ---------------------------------------------------------------------------
-  # 4. Single-Header Amalgamation & Bare-Metal Check
+  # 4. Code Coverage (GCC + lcov)
+  # ---------------------------------------------------------------------------
+  code-coverage:
+    name: "GCC Code Coverage (lcov)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      - name: Configure with Coverage
+        run: >
+          cmake -B build-cov
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=g++-14
+          -DCORIUM_ENABLE_COVERAGE=ON
+          -DCORIUM_BUILD_TESTS=ON
+
+      - name: Build and Run Tests
+        run: |
+          cmake --build build-cov -j4
+          ctest --test-dir build-cov --output-on-failure
+
+      - name: Generate Coverage Report
+        run: |
+          lcov --directory build-cov --capture --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/_deps/*' '*/tests/*' '*/samples/*' --output-file coverage_filtered.info
+          lcov --list coverage_filtered.info
+
+      - name: Upload Coverage Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: corium-coverage-report
+          path: coverage_filtered.info
+
+  # ---------------------------------------------------------------------------
+  # 5. Single-Header Amalgamation & Bare-Metal Check
   # ---------------------------------------------------------------------------
   single-header-verification:
     name: "Single-Header Synchronization & Bare-Metal Validation"
@@ -143,7 +180,7 @@ jobs:
           ./sample_02_single
 
   # ---------------------------------------------------------------------------
-  # 5. Static Analysis (Clang-Tidy Strict Quality Gate)
+  # 6. Static Analysis (Clang-Tidy Strict Quality Gate)
   # ---------------------------------------------------------------------------
   clang-tidy:
     name: "Clang-Tidy Static Analysis (cert, bugprone, performance, modernize)"
@@ -169,12 +206,12 @@ jobs:
             tests/*.cpp samples/*/main.cpp
 
   # ---------------------------------------------------------------------------
-  # 6. Automated GitHub Release on Git Tag
+  # 7. Automated GitHub Release on Git Tag
   # ---------------------------------------------------------------------------
   release:
     name: "Publish GitHub Release"
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [matrix-build, address-sanitizers, thread-sanitizer, single-header-verification, clang-tidy]
+    needs: [matrix-build, address-sanitizers, thread-sanitizer, code-coverage, single-header-verification, clang-tidy]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

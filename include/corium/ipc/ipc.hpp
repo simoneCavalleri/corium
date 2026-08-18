@@ -5,3 +5,4 @@
 #include "corium/ipc/SharedMemory.hpp"
 #include "corium/ipc/ShmMpscQueue.hpp"
 #include "corium/ipc/UdsChannel.hpp"
+#include "corium/ipc/PlatformChannel.hpp"

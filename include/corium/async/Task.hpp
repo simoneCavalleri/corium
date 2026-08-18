@@ -12,6 +12,8 @@ namespace corium::async {
 template <typename T = void>
 class Task {
 public:
+    using ValueType = T;
+
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         T value{};
@@ -123,6 +125,8 @@ private:
 template <>
 class Task<void> {
 public:
+    using ValueType = void;
+
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         std::exception_ptr exception{nullptr};

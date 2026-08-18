@@ -2393,16 +2393,11 @@ public:
         );
     }
 
-    template <typename EventVariant>
-    void onEventPosted(const EventVariant&, uint8_t) noexcept
-    {
-        _totalPosted.fetch_add(1, std::memory_order_relaxed);
-    }
-
     /// @brief Record the wall-clock post timestamp for the event being pushed now.
     /// Called by EventBus::post() immediately after the event enters the queue.
     void recordPostTime(uint64_t postNs) noexcept
     {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
         _postTimestamps.recordPostTime(postNs);
     }
 
@@ -2410,6 +2405,13 @@ public:
     [[nodiscard]] uint64_t takePostTime() noexcept
     {
         return _postTimestamps.takePostTime();
+    }
+
+    template <typename EventVariant>
+    void onEventPosted(const EventVariant&, uint8_t) noexcept
+    {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
+        _totalPosted.fetch_add(1, std::memory_order_relaxed);
     }
 
     template <typename EventVariant>
@@ -2421,6 +2423,8 @@ public:
         uint64_t finishTimeNs
     ) noexcept
     {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
+
         const uint64_t queueLatencyNs = (dispatchTimeNs > postTimeNs) ? (dispatchTimeNs - postTimeNs) : 0;
         const uint64_t execDurationNs = (finishTimeNs > dispatchTimeNs) ? (finishTimeNs - dispatchTimeNs) : 0;
 
@@ -2442,6 +2446,24 @@ public:
         uint64_t currentMaxExec = _maxExecDurationNs.load(std::memory_order_relaxed);
         while (execDurationNs > currentMaxExec &&
                !_maxExecDurationNs.compare_exchange_weak(currentMaxExec, execDurationNs, std::memory_order_relaxed)) {}
+    }
+
+    /// @brief Enable or disable runtime latency profiling.
+    void setEnabled(bool enabled) noexcept
+    {
+        _enabled.store(enabled, std::memory_order_release);
+    }
+
+    /// @brief Enable runtime profiling.
+    void enable() noexcept { setEnabled(true); }
+
+    /// @brief Disable runtime profiling.
+    void disable() noexcept { setEnabled(false); }
+
+    /// @brief Check if runtime profiling is enabled.
+    [[nodiscard]] bool isEnabled() const noexcept
+    {
+        return _enabled.load(std::memory_order_acquire);
     }
 
     /// @brief Total count of posted events.
@@ -2506,6 +2528,7 @@ public:
 private:
     PostTimestampQueue<QueueCapacity> _postTimestamps;
 
+    std::atomic<bool> _enabled{true};
     std::atomic<uint64_t> _totalPosted{0};
     std::atomic<uint64_t> _totalDispatched{0};
     std::atomic<uint64_t> _totalQueueLatencyNs{0};
@@ -2534,6 +2557,8 @@ public:
         uint64_t finishTimeNs
     ) noexcept
     {
+        if (!this->isEnabled()) return;
+
         LatencyTracker<QueueCapacity>::onEventDispatched(event, priority, postTimeNs, dispatchTimeNs, finishTimeNs);
 
         const std::size_t typeIndex = event.index();
@@ -4471,6 +4496,59 @@ private:
 
 // <<< End: corium/logging/sinks/FileLogSink.hpp
 
+// >>> Begin: corium/logging/sinks/JsonLogSink.hpp
+
+#include <ostream>
+#include <string_view>
+
+namespace corium::logging::sinks {
+
+/// @ingroup logging
+/// @brief Structured JSON Lines (NDJSON) output log sink.
+/// Formats LogEvent records into JSON objects for structured telemetry and ingest (ELK, Datadog, Grafana Loki).
+class JsonLogSink {
+public:
+    explicit JsonLogSink(std::ostream& outputStream) noexcept
+        : _os(&outputStream)
+    {}
+
+    /// @brief Serialize log event as a single-line JSON string.
+    template <std::size_t N>
+    void write(const LogEventT<N>& event) const
+    {
+        if (!_os) return;
+
+        *_os << "{\"timestamp_ns\":" << event.timestampNs
+             << ",\"level\":\"" << logLevelToString(event.level) << "\""
+             << ",\"category\":\"" << event.category << "\""
+             << ",\"message\":\"";
+
+        // Escape JSON string characters
+        std::string_view msg = event.view();
+        for (char c : msg) {
+            switch (c) {
+                case '"':  *_os << "\\\""; break;
+                case '\\': *_os << "\\\\"; break;
+                case '\b': *_os << "\\b";  break;
+                case '\f': *_os << "\\f";  break;
+                case '\n': *_os << "\\n";  break;
+                case '\r': *_os << "\\r";  break;
+                case '\t': *_os << "\\t";  break;
+                default:   *_os << c;       break;
+            }
+        }
+
+        *_os << "\"}\n" << std::flush;
+    }
+
+private:
+    std::ostream* _os{nullptr};
+};
+
+} // namespace corium::logging::sinks
+
+// <<< End: corium/logging/sinks/JsonLogSink.hpp
+
 // >>> Begin: corium/logging/sinks/NullLogSink.hpp
 
 
@@ -4929,7 +5007,7 @@ template <typename EventSinkType>
 
 // >>> Begin: corium/fsm/Transition.hpp
 
-#include <type_traits>
+#include <tuple>
 #include <utility>
 
 namespace corium::fsm {
@@ -4965,6 +5043,7 @@ struct Transition {
     using ToState = To;
     using GuardType = Guard;
     using ActionType = Action;
+    static constexpr bool is_internal = false;
 
     [[no_unique_address]] GuardType guard{};
     [[no_unique_address]] ActionType action{};
@@ -4973,6 +5052,51 @@ struct Transition {
     constexpr explicit Transition(GuardType g, ActionType a = ActionType{})
         : guard(std::move(g)), action(std::move(a))
     {}
+};
+
+/// @brief Compile-time internal transition rule (executes action without exiting or re-entering state).
+template <
+    typename State,
+    typename Event,
+    typename Guard = Always,
+    typename Action = NoAction
+>
+struct InternalTransition {
+    using FromState = State;
+    using EventType = Event;
+    using ToState = State;
+    using GuardType = Guard;
+    using ActionType = Action;
+    static constexpr bool is_internal = true;
+
+    [[no_unique_address]] GuardType guard{};
+    [[no_unique_address]] ActionType action{};
+
+    constexpr InternalTransition() = default;
+    constexpr explicit InternalTransition(GuardType g, ActionType a = ActionType{})
+        : guard(std::move(g)), action(std::move(a))
+    {}
+};
+
+namespace detail {
+template <typename Action, typename From, typename Event, typename To>
+constexpr void execute_action(const Action& action, From& from, const Event& e, To& to);
+}
+
+/// @brief Sequential composition of multiple transition actions.
+template <typename... Actions>
+struct ActionList {
+    std::tuple<Actions...> actions{};
+
+    constexpr ActionList() = default;
+    constexpr explicit ActionList(Actions... a) : actions(std::move(a)...) {}
+
+    template <typename From, typename Event, typename To>
+    constexpr void operator()(From& from, const Event& event, To& to) const {
+        std::apply([&](const auto&... act) {
+            (detail::execute_action(act, from, event, to), ...);
+        }, actions);
+    }
 };
 
 /// @brief Compile-time table containing all valid state transitions.
@@ -4984,6 +5108,24 @@ struct TransitionTable {
 } // namespace corium::fsm
 
 // <<< End: corium/fsm/Transition.hpp
+
+// >>> Begin: corium/fsm/HistoryState.hpp
+
+namespace corium::fsm {
+
+/// @ingroup fsm
+/// @brief Tag type for designating a shallow history pseudostate in hierarchical state machines.
+/// When entered, the state machine transitions to the most recently visited state in the group,
+/// or to DefaultState if the group has not been visited yet.
+/// @tparam DefaultState Fallback state if no history has been recorded.
+template <typename DefaultState>
+struct ShallowHistory {
+    using DefaultStateType = DefaultState;
+};
+
+} // namespace corium::fsm
+
+// <<< End: corium/fsm/HistoryState.hpp
 
 // >>> Begin: corium/fsm/StateMachine.hpp
 
@@ -5039,6 +5181,20 @@ constexpr void execute_action(const Action& action, From& from, const Event& e, 
         action();
     }
 }
+
+template <typename T>
+struct is_internal_transition {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+    requires requires { { T::is_internal } -> std::convertible_to<bool>; }
+struct is_internal_transition<T> {
+    static constexpr bool value = T::is_internal;
+};
+
+template <typename T>
+inline constexpr bool is_internal_transition_v = is_internal_transition<T>::value;
 
 } // namespace detail
 
@@ -5124,11 +5280,15 @@ private:
         if constexpr (std::is_same_v<CurrentState, typename Trans::FromState> &&
                       std::is_same_v<std::decay_t<Event>, typename Trans::EventType>) {
             if (detail::evaluate_guard(trans.guard, current, event)) {
-                detail::call_on_exit(current, event);
-                typename Trans::ToState nextState{};
-                detail::execute_action(trans.action, current, event, nextState);
-                _state = std::move(nextState);
-                detail::call_on_enter(std::get<typename Trans::ToState>(_state), event);
+                if constexpr (detail::is_internal_transition_v<Trans>) {
+                    detail::execute_action(trans.action, current, event, current);
+                } else {
+                    detail::call_on_exit(current, event);
+                    typename Trans::ToState nextState{};
+                    detail::execute_action(trans.action, current, event, nextState);
+                    _state = std::move(nextState);
+                    detail::call_on_enter(std::get<typename Trans::ToState>(_state), event);
+                }
                 return true;
             }
         }
@@ -5164,6 +5324,8 @@ namespace corium::async {
 template <typename T = void>
 class Task {
 public:
+    using ValueType = T;
+
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         T value{};
@@ -5275,6 +5437,8 @@ private:
 template <>
 class Task<void> {
 public:
+    using ValueType = void;
+
     struct promise_type {
         std::coroutine_handle<> continuation{nullptr};
         std::exception_ptr exception{nullptr};
@@ -5425,6 +5589,387 @@ template <typename Rep, typename Period>
 
 // <<< End: corium/async/Delay.hpp
 
+// >>> Begin: corium/async/CancellationToken.hpp
+
+#include <atomic>
+#include <coroutine>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Lightweight, zero-heap cooperative cancellation token for C++20 coroutines and services.
+class CancellationToken {
+public:
+    constexpr CancellationToken() noexcept = default;
+
+    /// @brief Signal cancellation to all observing tasks.
+    void cancel() noexcept
+    {
+        _cancelled.store(true, std::memory_order_release);
+        auto handle = _waiter.exchange(nullptr, std::memory_order_acq_rel);
+        if (handle && !handle.done()) {
+            handle.resume();
+        }
+    }
+
+    /// @brief Check if cancellation has been requested.
+    [[nodiscard]] bool isCancelled() const noexcept
+    {
+        return _cancelled.load(std::memory_order_acquire);
+    }
+
+    /// @brief Reset token state to uncancelled.
+    void reset() noexcept
+    {
+        _cancelled.store(false, std::memory_order_release);
+        _waiter.store(nullptr, std::memory_order_release);
+    }
+
+    /// @brief Awaitable that suspends until this token is cancelled.
+    struct WhenCancelledAwaiter {
+        CancellationToken& token;
+
+        [[nodiscard]] bool await_ready() const noexcept
+        {
+            return token.isCancelled();
+        }
+
+        bool await_suspend(std::coroutine_handle<> h) noexcept
+        {
+            if (token.isCancelled()) {
+                return false; // do not suspend
+            }
+            token._waiter.store(h, std::memory_order_release);
+            return !token.isCancelled();
+        }
+
+        constexpr void await_resume() const noexcept {}
+    };
+
+    /// @brief Helper to suspend the current coroutine until cancel() is called.
+    [[nodiscard]] WhenCancelledAwaiter whenCancelled() noexcept
+    {
+        return WhenCancelledAwaiter{*this};
+    }
+
+private:
+    std::atomic<bool> _cancelled{false};
+    std::atomic<std::coroutine_handle<>> _waiter{nullptr};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/CancellationToken.hpp
+
+// >>> Begin: corium/async/WhenAll.hpp
+
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+
+namespace corium::async {
+
+namespace detail {
+
+template <typename... Tasks>
+inline constexpr bool all_void_tasks_v = (std::is_void_v<typename std::decay_t<Tasks>::ValueType> && ...);
+
+template <typename... Tasks>
+Task<std::tuple<typename std::decay_t<Tasks>::ValueType...>> whenAllValueImpl(Tasks... tasks)
+{
+    co_return std::tuple<typename std::decay_t<Tasks>::ValueType...>{(co_await tasks)...};
+}
+
+template <typename... Tasks>
+Task<void> whenAllVoidImpl(Tasks... tasks)
+{
+    ((void)(co_await tasks), ...);
+    co_return;
+}
+
+} // namespace detail
+
+/// @ingroup async
+/// @brief Awaits concurrent or sequential completion of multiple Task coroutines.
+/// @return Task containing std::tuple of results, or Task<void> if all input tasks are void.
+template <typename... Tasks>
+auto whenAll(Tasks&&... tasks)
+{
+    if constexpr (detail::all_void_tasks_v<Tasks...>) {
+        return detail::whenAllVoidImpl(std::forward<Tasks>(tasks)...);
+    } else {
+        return detail::whenAllValueImpl(std::forward<Tasks>(tasks)...);
+    }
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/WhenAll.hpp
+
+// >>> Begin: corium/async/WhenAny.hpp
+
+#include <cstddef>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+
+namespace corium::async {
+
+namespace detail {
+
+template <typename T>
+struct WrapVoid {
+    using type = T;
+};
+
+template <>
+struct WrapVoid<void> {
+    using type = std::monostate;
+};
+
+template <typename T>
+using wrap_void_t = typename WrapVoid<T>::type;
+
+} // namespace detail
+
+/// @brief Result container for whenAny combinator.
+template <typename... ResultTypes>
+struct WhenAnyResult {
+    std::size_t index{0};
+    std::variant<detail::wrap_void_t<ResultTypes>...> result{};
+};
+
+namespace detail {
+
+template <size_t Index, typename TaskType, typename ResultVariant>
+bool checkTaskDone(TaskType& task, size_t& winnerIndex, ResultVariant& resultVariant)
+{
+    if (task.done()) {
+        winnerIndex = Index;
+        if constexpr (!std::is_void_v<typename TaskType::ValueType>) {
+            resultVariant.template emplace<Index>(task.await_resume());
+        } else {
+            task.await_resume();
+            resultVariant.template emplace<Index>(std::monostate{});
+        }
+        return true;
+    }
+    return false;
+}
+
+template <size_t Index, typename TaskType>
+void resumeTask(TaskType& task)
+{
+    if (!task.done()) {
+        task.resume();
+    }
+}
+
+template <typename... Tasks, size_t... Is>
+Task<WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>> whenAnyImpl(std::index_sequence<Is...>, Tasks... tasks)
+{
+    using ResultType = WhenAnyResult<typename std::decay_t<Tasks>::ValueType...>;
+    ResultType res{};
+
+    // Initial resume pass
+    (resumeTask<Is>(tasks), ...);
+
+    while (true) {
+        bool winnerFound = (checkTaskDone<Is>(tasks, res.index, res.result) || ...);
+        if (winnerFound) {
+            break;
+        }
+        (resumeTask<Is>(tasks), ...);
+    }
+
+    co_return res;
+}
+
+} // namespace detail
+
+/// @ingroup async
+/// @brief Awaits the first task among multiple tasks to complete.
+/// @return Task containing WhenAnyResult with index and variant result.
+template <typename... Tasks>
+auto whenAny(Tasks&&... tasks)
+{
+    return detail::whenAnyImpl(
+        std::index_sequence_for<Tasks...>{},
+        std::forward<Tasks>(tasks)...
+    );
+}
+
+} // namespace corium::async
+
+// <<< End: corium/async/WhenAny.hpp
+
+// >>> Begin: corium/async/Generator.hpp
+
+#include <coroutine>
+#include <exception>
+#include <iterator>
+#include <utility>
+
+namespace corium::async {
+
+/// @ingroup async
+/// @brief Zero-heap C++20 pull-based lazy generator sequence.
+/// Compatible with range-based for loops and standard C++20 ranges.
+/// @tparam T Value type yielded by the generator.
+template <typename T>
+class Generator {
+public:
+    struct promise_type {
+        const T* currentValue{nullptr};
+        std::exception_ptr exception{nullptr};
+
+        Generator get_return_object() noexcept
+        {
+            return Generator(std::coroutine_handle<promise_type>::from_promise(*this));
+        }
+
+        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_always final_suspend() noexcept { return {}; }
+
+        std::suspend_always yield_value(const T& val) noexcept
+        {
+            currentValue = std::addressof(val);
+            return {};
+        }
+
+        std::suspend_always yield_value(T&& val) noexcept
+        {
+            currentValue = std::addressof(val);
+            return {};
+        }
+
+        void return_void() noexcept {}
+
+        void unhandled_exception() noexcept
+        {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+            exception = std::current_exception();
+#endif
+        }
+    };
+
+    class Sentinel {};
+
+    class Iterator {
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = T;
+        using reference = const T&;
+        using pointer = const T*;
+
+        constexpr Iterator() noexcept = default;
+
+        explicit Iterator(std::coroutine_handle<promise_type> handle) noexcept
+            : _handle(handle)
+        {}
+
+        Iterator& operator++()
+        {
+            _handle.resume();
+            if (_handle.done()) {
+                if (_handle.promise().exception) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+                    std::rethrow_exception(_handle.promise().exception);
+#endif
+                }
+            }
+            return *this;
+        }
+
+        void operator++(int)
+        {
+            (void)operator++();
+        }
+
+        [[nodiscard]] reference operator*() const noexcept
+        {
+            return *_handle.promise().currentValue;
+        }
+
+        [[nodiscard]] pointer operator->() const noexcept
+        {
+            return _handle.promise().currentValue;
+        }
+
+        [[nodiscard]] bool operator==(Sentinel) const noexcept
+        {
+            return !_handle || _handle.done();
+        }
+
+        [[nodiscard]] bool operator!=(Sentinel s) const noexcept
+        {
+            return !(*this == s);
+        }
+
+    private:
+        std::coroutine_handle<promise_type> _handle{nullptr};
+    };
+
+    constexpr Generator() noexcept = default;
+
+    explicit Generator(std::coroutine_handle<promise_type> handle) noexcept
+        : _handle(handle)
+    {}
+
+    ~Generator()
+    {
+        if (_handle) {
+            _handle.destroy();
+        }
+    }
+
+    Generator(const Generator&) = delete;
+    Generator& operator=(const Generator&) = delete;
+
+    Generator(Generator&& other) noexcept
+        : _handle(std::exchange(other._handle, nullptr))
+    {}
+
+    Generator& operator=(Generator&& other) noexcept
+    {
+        if (this != &other) {
+            if (_handle) {
+                _handle.destroy();
+            }
+            _handle = std::exchange(other._handle, nullptr);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] Iterator begin()
+    {
+        if (_handle) {
+            _handle.resume();
+            if (_handle.promise().exception) {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+                std::rethrow_exception(_handle.promise().exception);
+#endif
+            }
+        }
+        return Iterator{_handle};
+    }
+
+    [[nodiscard]] constexpr Sentinel end() noexcept
+    {
+        return Sentinel{};
+    }
+
+private:
+    std::coroutine_handle<promise_type> _handle{nullptr};
+};
+
+} // namespace corium::async
+
+// <<< End: corium/async/Generator.hpp
+
 // <<< End: corium/async/async.hpp
 
 // >>> Begin: corium/wire/wire.hpp
@@ -5462,12 +6007,17 @@ inline constexpr uint16_t CORIUM_WIRE_MAGIC = 0xC041;
     return crc;
 }
 
+/// @brief Current schema version for Corium binary wire packets.
+inline constexpr uint8_t CORIUM_WIRE_VERSION = 1;
+
 /// @brief Header structure framing binary wire packets for serial, CAN, SPI, or network transport.
 #pragma pack(push, 1)
 struct WireHeader {
     uint16_t magic{CORIUM_WIRE_MAGIC};
+    uint8_t version{CORIUM_WIRE_VERSION};
     uint8_t typeIndex{0};
     uint8_t flags{0};
+    uint8_t reserved{0};
     uint16_t payloadLength{0};
     uint16_t checksum{0};
 };
@@ -5484,17 +6034,22 @@ struct WirePacket {
     constexpr WirePacket() = default;
 
     /// @brief Finalize packet header, set payload length and calculate CRC16 checksum.
-    void finalize(uint8_t typeIdx, uint16_t length, uint8_t flags = 0) noexcept {
+    void finalize(uint8_t typeIdx, uint16_t length, uint8_t flags = 0, uint8_t version = CORIUM_WIRE_VERSION) noexcept {
         header.magic = CORIUM_WIRE_MAGIC;
+        header.version = version;
         header.typeIndex = typeIdx;
         header.flags = flags;
+        header.reserved = 0;
         header.payloadLength = length > MaxPayloadSize ? static_cast<uint16_t>(MaxPayloadSize) : length;
         header.checksum = calculateCrc16(std::span<const uint8_t>(payload.data(), header.payloadLength));
     }
 
-    /// @brief Validate packet magic identifier, payload length bounds, and CRC16 checksum.
+    /// @brief Validate packet magic identifier, schema version, payload length bounds, and CRC16 checksum.
     [[nodiscard]] bool isValid() const noexcept {
         if (header.magic != CORIUM_WIRE_MAGIC) {
+            return false;
+        }
+        if (header.version != CORIUM_WIRE_VERSION) {
             return false;
         }
         if (header.payloadLength > MaxPayloadSize) {
@@ -7096,6 +7651,21 @@ private:
 } // namespace corium::ipc
 
 // <<< End: corium/ipc/UdsChannel.hpp
+
+// >>> Begin: corium/ipc/PlatformChannel.hpp
+
+
+namespace corium::ipc {
+
+/// @ingroup ipc
+/// @brief Platform-agnostic inter-process datagram channel.
+/// Resolves to UdsChannel on POSIX/UNIX systems and supported Windows platforms.
+template <typename EventVariant>
+using PlatformChannel = UdsChannel<EventVariant>;
+
+} // namespace corium::ipc
+
+// <<< End: corium/ipc/PlatformChannel.hpp
 
 // <<< End: corium/ipc/ipc.hpp
 

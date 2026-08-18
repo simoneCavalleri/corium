@@ -91,16 +91,11 @@ public:
         );
     }
 
-    template <typename EventVariant>
-    void onEventPosted(const EventVariant&, uint8_t) noexcept
-    {
-        _totalPosted.fetch_add(1, std::memory_order_relaxed);
-    }
-
     /// @brief Record the wall-clock post timestamp for the event being pushed now.
     /// Called by EventBus::post() immediately after the event enters the queue.
     void recordPostTime(uint64_t postNs) noexcept
     {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
         _postTimestamps.recordPostTime(postNs);
     }
 
@@ -108,6 +103,13 @@ public:
     [[nodiscard]] uint64_t takePostTime() noexcept
     {
         return _postTimestamps.takePostTime();
+    }
+
+    template <typename EventVariant>
+    void onEventPosted(const EventVariant&, uint8_t) noexcept
+    {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
+        _totalPosted.fetch_add(1, std::memory_order_relaxed);
     }
 
     template <typename EventVariant>
@@ -119,6 +121,8 @@ public:
         uint64_t finishTimeNs
     ) noexcept
     {
+        if (!_enabled.load(std::memory_order_relaxed)) return;
+
         const uint64_t queueLatencyNs = (dispatchTimeNs > postTimeNs) ? (dispatchTimeNs - postTimeNs) : 0;
         const uint64_t execDurationNs = (finishTimeNs > dispatchTimeNs) ? (finishTimeNs - dispatchTimeNs) : 0;
 
@@ -140,6 +144,24 @@ public:
         uint64_t currentMaxExec = _maxExecDurationNs.load(std::memory_order_relaxed);
         while (execDurationNs > currentMaxExec &&
                !_maxExecDurationNs.compare_exchange_weak(currentMaxExec, execDurationNs, std::memory_order_relaxed)) {}
+    }
+
+    /// @brief Enable or disable runtime latency profiling.
+    void setEnabled(bool enabled) noexcept
+    {
+        _enabled.store(enabled, std::memory_order_release);
+    }
+
+    /// @brief Enable runtime profiling.
+    void enable() noexcept { setEnabled(true); }
+
+    /// @brief Disable runtime profiling.
+    void disable() noexcept { setEnabled(false); }
+
+    /// @brief Check if runtime profiling is enabled.
+    [[nodiscard]] bool isEnabled() const noexcept
+    {
+        return _enabled.load(std::memory_order_acquire);
     }
 
     /// @brief Total count of posted events.
@@ -204,6 +226,7 @@ public:
 private:
     PostTimestampQueue<QueueCapacity> _postTimestamps;
 
+    std::atomic<bool> _enabled{true};
     std::atomic<uint64_t> _totalPosted{0};
     std::atomic<uint64_t> _totalDispatched{0};
     std::atomic<uint64_t> _totalQueueLatencyNs{0};
@@ -232,6 +255,8 @@ public:
         uint64_t finishTimeNs
     ) noexcept
     {
+        if (!this->isEnabled()) return;
+
         LatencyTracker<QueueCapacity>::onEventDispatched(event, priority, postTimeNs, dispatchTimeNs, finishTimeNs);
 
         const std::size_t typeIndex = event.index();

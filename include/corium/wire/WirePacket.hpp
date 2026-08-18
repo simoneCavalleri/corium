@@ -27,12 +27,17 @@ inline constexpr uint16_t CORIUM_WIRE_MAGIC = 0xC041;
     return crc;
 }
 
+/// @brief Current schema version for Corium binary wire packets.
+inline constexpr uint8_t CORIUM_WIRE_VERSION = 1;
+
 /// @brief Header structure framing binary wire packets for serial, CAN, SPI, or network transport.
 #pragma pack(push, 1)
 struct WireHeader {
     uint16_t magic{CORIUM_WIRE_MAGIC};
+    uint8_t version{CORIUM_WIRE_VERSION};
     uint8_t typeIndex{0};
     uint8_t flags{0};
+    uint8_t reserved{0};
     uint16_t payloadLength{0};
     uint16_t checksum{0};
 };
@@ -49,17 +54,22 @@ struct WirePacket {
     constexpr WirePacket() = default;
 
     /// @brief Finalize packet header, set payload length and calculate CRC16 checksum.
-    void finalize(uint8_t typeIdx, uint16_t length, uint8_t flags = 0) noexcept {
+    void finalize(uint8_t typeIdx, uint16_t length, uint8_t flags = 0, uint8_t version = CORIUM_WIRE_VERSION) noexcept {
         header.magic = CORIUM_WIRE_MAGIC;
+        header.version = version;
         header.typeIndex = typeIdx;
         header.flags = flags;
+        header.reserved = 0;
         header.payloadLength = length > MaxPayloadSize ? static_cast<uint16_t>(MaxPayloadSize) : length;
         header.checksum = calculateCrc16(std::span<const uint8_t>(payload.data(), header.payloadLength));
     }
 
-    /// @brief Validate packet magic identifier, payload length bounds, and CRC16 checksum.
+    /// @brief Validate packet magic identifier, schema version, payload length bounds, and CRC16 checksum.
     [[nodiscard]] bool isValid() const noexcept {
         if (header.magic != CORIUM_WIRE_MAGIC) {
+            return false;
+        }
+        if (header.version != CORIUM_WIRE_VERSION) {
             return false;
         }
         if (header.payloadLength > MaxPayloadSize) {

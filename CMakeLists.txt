@@ -65,11 +65,21 @@ if(CORIUM_BUILD_TESTS)
         tests/test_profiler.cpp
         tests/test_safety.cpp
         tests/test_ipc.cpp
+        tests/test_stress_mpsc.cpp
+        tests/fuzz_wire_deserialize.cpp
+        tests/test_async_advanced.cpp
+        tests/test_json_log_sink.cpp
     )
     target_link_libraries(corium_tests PRIVATE corium gtest)
 
     add_executable(corium_zero_heap_test tests/test_zero_heap_guarantee.cpp)
     target_link_libraries(corium_zero_heap_test PRIVATE corium)
+
+    option(CORIUM_ENABLE_COVERAGE "Enable gcov code coverage" OFF)
+    if(CORIUM_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(corium_tests PRIVATE --coverage)
+        target_link_options(corium_tests PRIVATE --coverage)
+    endif()
 
     include(GoogleTest)
     gtest_discover_tests(corium_tests)

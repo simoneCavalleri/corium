@@ -54,6 +54,20 @@ constexpr void execute_action(const Action& action, From& from, const Event& e, 
     }
 }
 
+template <typename T>
+struct is_internal_transition {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+    requires requires { { T::is_internal } -> std::convertible_to<bool>; }
+struct is_internal_transition<T> {
+    static constexpr bool value = T::is_internal;
+};
+
+template <typename T>
+inline constexpr bool is_internal_transition_v = is_internal_transition<T>::value;
+
 } // namespace detail
 
 /// @ingroup fsm
@@ -138,11 +152,15 @@ private:
         if constexpr (std::is_same_v<CurrentState, typename Trans::FromState> &&
                       std::is_same_v<std::decay_t<Event>, typename Trans::EventType>) {
             if (detail::evaluate_guard(trans.guard, current, event)) {
-                detail::call_on_exit(current, event);
-                typename Trans::ToState nextState{};
-                detail::execute_action(trans.action, current, event, nextState);
-                _state = std::move(nextState);
-                detail::call_on_enter(std::get<typename Trans::ToState>(_state), event);
+                if constexpr (detail::is_internal_transition_v<Trans>) {
+                    detail::execute_action(trans.action, current, event, current);
+                } else {
+                    detail::call_on_exit(current, event);
+                    typename Trans::ToState nextState{};
+                    detail::execute_action(trans.action, current, event, nextState);
+                    _state = std::move(nextState);
+                    detail::call_on_enter(std::get<typename Trans::ToState>(_state), event);
+                }
                 return true;
             }
         }
