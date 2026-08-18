@@ -163,9 +163,9 @@ struct SetSpeedInternalAction {
 };
 
 struct IncrementLogAction {
-    int* counter = nullptr;
+    static inline int* counterPtr = nullptr;
     void operator()(StateRunning&, const StartCommand&) const {
-        if (counter) (*counter)++;
+        if (counterPtr) (*counterPtr)++;
     }
 };
 
@@ -181,7 +181,7 @@ TEST(FsmTest, InternalTransitionDoesNotTriggerExitOrEnter)
     StateRunning::logPtr = &log;
 
     int actionListCounter = 0;
-    IncrementLogAction inc{&actionListCounter};
+    IncrementLogAction::counterPtr = &actionListCounter;
 
     using TableWithCustomAction = TransitionTable<
         Transition<StateIdle, StartCommand, StateRunning, Always, SetSpeedAction>,
