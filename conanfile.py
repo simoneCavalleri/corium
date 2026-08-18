@@ -4,7 +4,7 @@ import os
 
 class CoriumConan(ConanFile):
     name = "corium"
-    version = "1.0.0"
+    version = "1.1.0"
     license = "MIT"
     author = "Simone Cavalleri <simone.cavalleri.94@gmail.com>"
     url = "https://github.com/simoneCavalleri/corium"
