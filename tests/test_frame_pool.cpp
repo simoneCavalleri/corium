@@ -3,18 +3,26 @@
 
 using namespace corium::async;
 
+#if defined(_MSC_VER)
+#define CORIUM_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define CORIUM_NOINLINE __attribute__((noinline))
+#else
+#define CORIUM_NOINLINE
+#endif
+
 namespace {
 
-PooledTask<int, 4, 512> computePooledSum(int a, int b) {
+CORIUM_NOINLINE PooledTask<int, 4, 512> computePooledSum(int a, int b) {
     co_return a + b;
 }
 
-PooledTask<void, 4, 512> voidPooledOperation(int& output, int val) {
+CORIUM_NOINLINE PooledTask<void, 4, 512> voidPooledOperation(int& output, int val) {
     output = val * 2;
     co_return;
 }
 
-PooledGenerator<int, 4, 512> generatePooledRange(int start, int count) {
+CORIUM_NOINLINE PooledGenerator<int, 4, 512> generatePooledRange(int start, int count) {
     for (int i = 0; i < count; ++i) {
         co_yield start + i;
     }
