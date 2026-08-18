@@ -9,8 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "corium/internal/FastDelegate.hpp"
 

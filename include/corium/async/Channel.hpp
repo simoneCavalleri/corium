@@ -11,7 +11,6 @@
 #include <coroutine>
 #include <cstddef>
 #include <optional>
-#include <type_traits>
 #include <utility>
 
 namespace corium::async {

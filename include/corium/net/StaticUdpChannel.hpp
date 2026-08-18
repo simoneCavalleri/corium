@@ -11,8 +11,6 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
-#include <type_traits>
-#include <utility>
 
 #if defined(_WIN32) || defined(_WIN64)
 #ifndef WIN32_LEAN_AND_MEAN

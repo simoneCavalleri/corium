@@ -7377,7 +7377,6 @@ private:
 #include <coroutine>
 #include <cstddef>
 #include <optional>
-#include <type_traits>
 #include <utility>
 
 namespace corium::async {
@@ -9997,8 +9996,6 @@ using PlatformChannel = UdsChannel<EventVariant>;
 #include <cstdint>
 #include <cstring>
 #include <span>
-#include <type_traits>
-#include <utility>
 
 #if defined(_WIN32) || defined(_WIN64)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -10287,8 +10284,8 @@ private:
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 #include <utility>
+#include <variant>
 
 
 namespace corium {

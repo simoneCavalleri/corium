@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <cstdint>
 #include <vector>
 
 #include "corium/corium.hpp"

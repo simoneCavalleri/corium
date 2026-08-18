@@ -6,6 +6,6 @@
 
 #pragma once
 
-#include "corium/wire/WirePacket.hpp"
-#include "corium/wire/Serializer.hpp"
-#include "corium/wire/EventJournal.hpp"
+#include "corium/wire/WirePacket.hpp"   // IWYU pragma: export
+#include "corium/wire/Serializer.hpp"   // IWYU pragma: export
+#include "corium/wire/EventJournal.hpp" // IWYU pragma: export
