@@ -1,0 +1,18 @@
+version: "1.1.0"
+description: "Zero-heap, header-only C++20 MPSC event framework for real-time desktop and embedded systems (ESP32/FreeRTOS)"
+url: "https://github.com/simoneCavalleri/corium"
+repository: "https://github.com/simoneCavalleri/corium.git"
+license: "MIT"
+tags:
+  - embedded
+  - cpp20
+  - event-bus
+  - lock-free
+  - freertos
+  - zero-heap
+files:
+  include:
+    - "include/**/*"
+    - "single_include/**/*"
+    - "LICENSE"
+    - "README.md"

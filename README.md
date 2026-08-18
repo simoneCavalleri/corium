@@ -89,6 +89,7 @@ flowchart TD
 | Guide | Description |
 | :--- | :--- |
 | 🏗️ [**Architecture Guide**](docs/ARCHITECTURE.md) | In-depth design philosophy, layer breakdown, lock-free queue mechanics, embedded footprint model, and module topology. |
+| 🔌 [**Embedded Integration Guide**](docs/EMBEDDED_INTEGRATION.md) | Step-by-step setup for STM32CubeIDE, ESP-IDF, PlatformIO, Keil MDK, IAR, Raspberry Pi Pico SDK, and Zephyr RTOS. |
 | 🍳 [**Cookbook & Patterns**](docs/COOKBOOK.md) | 16 battle-tested design patterns (Request-Response, Parallel Coroutines, FSM Guards, JSON Logging, Zero-Copy IPC, Periodic Sampling, Circuit Breakers, Flight Recorder, Event Journal, SPI/I2C ISR, UDP Telemetry, Async Channels, Async Semaphore, Prometheus Metrics, EventRouter). |
 | 🔄 [**Migration Guide**](docs/MIGRATION.md) | Transitioning from `std::function`, thread pools, `boost::asio`, or `boost::sml` to Corium. |
 | ❓ [**Frequently Asked Questions (FAQ)**](docs/FAQ.md) | Answers to common architecture, capacity sizing, and bare-metal embedded questions. |
