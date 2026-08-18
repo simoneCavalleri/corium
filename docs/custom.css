@@ -106,10 +106,28 @@ h2.groupheader {
     padding-bottom: 0.25rem !important;
 }
 
-/* Code & Preformatted Blocks */
-pre, code, tt {
+/* Inline Code & TeleType (tt) Elements */
+code, tt {
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace !important;
+    font-size: 0.85em !important;
+    background-color: var(--corium-surface) !important;
+    color: var(--corium-primary) !important;
+    padding: 0.15em 0.45em !important;
+    border-radius: 0.25rem !important;
+    border: 1px solid var(--corium-border) !important;
+}
+
+/* Preformatted code blocks override */
+pre, div.fragment, pre.fragment {
     font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace !important;
     font-size: 0.875rem !important;
+}
+
+pre code, pre tt, div.fragment tt, div.fragment code, div.line tt {
+    background-color: transparent !important;
+    color: inherit !important;
+    padding: 0 !important;
+    border: none !important;
 }
 
 div.fragment, pre.fragment {
